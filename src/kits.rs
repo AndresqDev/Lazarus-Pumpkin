@@ -97,7 +97,10 @@ pub fn capture(player: &Player, name: &str, delay_seconds: i64) -> Kit {
 }
 
 /// Gives a kit to a player by filling its stored slots.
-pub fn give(_player: &Player, kit: &Kit) {
+pub fn give(player: &Player, kit: &Kit) {
+    let uuid = crate::core::uuid_of(player);
+    let mut potion_slots: Vec<(u8, String)> = Vec::new();
+
     for entry in &kit.items {
         let item = ItemStack::new(&entry.key, entry.count);
 
@@ -122,7 +125,19 @@ pub fn give(_player: &Player, kit: &Kit) {
             }
         }
 
-        _player.set_inventory_item(entry.slot, Some(item));
+        player.set_inventory_item(entry.slot, Some(item));
+
+        // Potions need the native bridge to set the `potion-contents` component.
+        if let Some(potion) = &entry.potion {
+            potion_slots.push((entry.slot, potion.clone()));
+        }
+    }
+
+    if !potion_slots.is_empty() {
+        let folder = crate::state::state().read().unwrap().data_folder.clone();
+        for (slot, potion) in potion_slots {
+            crate::potion_api::request(&folder, &uuid, slot, &potion);
+        }
     }
 }
 

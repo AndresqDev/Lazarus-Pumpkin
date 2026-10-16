@@ -25,6 +25,7 @@ mod hologram;
 mod kits;
 mod lang;
 mod listeners;
+mod potion_api;
 mod scoreboard;
 mod selection;
 mod staffmode;

@@ -1,0 +1,25 @@
+[package]
+name = "native_potions"
+version = "0.1.0"
+edition = "2024"
+description = "Native potion-contents bridge for the Lazarus Pumpkin port"
+authors = ["Lazarus Pumpkin port"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+lto = true
+
+[dependencies]
+# Must match the exact Pumpkin revision the server binary was built from.
+# NOTE: this crate is only a reference; the real build injects it into Pumpkin's
+# workspace with path deps (see .github/workflows/native-potions.yml).
+pumpkin = { git = "https://github.com/Pumpkin-MC/Pumpkin", tag = "0.2.0+26.3-26.51" }
+pumpkin-api-macros = { git = "https://github.com/Pumpkin-MC/Pumpkin", tag = "0.2.0+26.3-26.51" }
+pumpkin-data = { git = "https://github.com/Pumpkin-MC/Pumpkin", tag = "0.2.0+26.3-26.51" }
+uuid = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tracing = "0.1"

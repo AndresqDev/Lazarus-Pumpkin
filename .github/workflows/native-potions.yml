@@ -1,0 +1,76 @@
+name: native-potions
+
+# Builds the native potion-contents bridge INSIDE Pumpkin's workspace so it uses
+# the exact same Cargo.lock (dependency versions) and `pumpkin`/`pumpkin-data`
+# crates as the server (guaranteeing ABI + type compatibility).
+#
+# Produces one artifact: native_potions_x86_64 (libnative_potions.so).
+# Put it in the server's plugins/ folder as native_potions.so.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "native-potions/**"
+      - ".github/workflows/native-potions.yml"
+
+env:
+  PUMPKIN_TAG: "0.2.0+26.3-26.51"
+  RUST_MIN_STACK: "134217728"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout plugin repo
+        uses: actions/checkout@v4
+
+      - name: Checkout Pumpkin at the matching tag
+        uses: actions/checkout@v4
+        with:
+          repository: Pumpkin-MC/Pumpkin
+          ref: ${{ env.PUMPKIN_TAG }}
+          path: Pumpkin
+
+      - name: Install the toolchain pinned by Pumpkin
+        working-directory: Pumpkin
+        run: rustup show
+
+      - name: Inject the plugin into Pumpkin's workspace
+        run: |
+          mkdir -p Pumpkin/native-potions/src
+          cp native-potions/src/lib.rs Pumpkin/native-potions/src/lib.rs
+          cat > Pumpkin/native-potions/Cargo.toml <<'EOF'
+          [package]
+          name = "native_potions"
+          version = "0.1.0"
+          edition = "2024"
+          description = "Native potion-contents bridge for Lazarus"
+
+          [lib]
+          crate-type = ["cdylib"]
+
+          [dependencies]
+          pumpkin = { path = "../crates/pumpkin" }
+          pumpkin-api-macros = { path = "../crates/pumpkin-api-macros" }
+          pumpkin-data = { path = "../crates/pumpkin-data" }
+          uuid = "1"
+          serde = { version = "1", features = ["derive"] }
+          serde_json = "1"
+          tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+          tracing = "0.1"
+          EOF
+          # Register it as a workspace member (anchored to the members line only).
+          sed -i 's#^    "crates/pumpkin-world",$#    "crates/pumpkin-world",\n    "native-potions",#' Pumpkin/Cargo.toml
+          grep -n "native-potions" Pumpkin/Cargo.toml
+
+      - name: Build native plugin
+        working-directory: Pumpkin
+        run: cargo build --release -p native_potions --target x86_64-unknown-linux-gnu
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native_potions_x86_64
+          path: Pumpkin/target/x86_64-unknown-linux-gnu/release/libnative_potions.so
+          if-no-files-found: error
