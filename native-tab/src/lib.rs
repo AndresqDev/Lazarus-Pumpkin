@@ -100,7 +100,7 @@ impl NativeTab {
 pub struct NativeTab;
 
 fn run(server: Arc<Server>, config: TabConfig, log_ctx: Arc<Context>) {
-    let mut added = false;
+    let mut known: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
     let mut last: Vec<String> = vec![String::new(); SLOTS];
     let mut ticks: u64 = 0;
 
@@ -108,14 +108,20 @@ fn run(server: Arc<Server>, config: TabConfig, log_ctx: Arc<Context>) {
         ticks += 1;
 
         let lines = build_lines(&config, &server);
+        let players = server.get_all_players();
+        let current: std::collections::HashSet<Uuid> =
+            players.iter().map(|p| p.gameprofile.id).collect();
 
-        if !added {
+        if current != known {
+            // Someone joined (or left): (re)send the full artificial tab to everyone.
             add_entries(&server, &lines);
-            added = true;
+            known = current;
             log_ctx.log(format!(
-                "NativeTab: added {SLOTS} artificial slots, hiding {} real player(s)",
-                server.get_all_players().len()
+                "NativeTab: sent {SLOTS} artificial slots to {} player(s)",
+                players.len()
             ));
+        } else if players.is_empty() {
+            // Nothing to do while the server is empty, but keep `last` in sync.
         } else {
             update_names(&server, &lines, &last);
         }
@@ -128,8 +134,8 @@ fn run(server: Arc<Server>, config: TabConfig, log_ctx: Arc<Context>) {
         let _ = std::fs::write(
             "plugins/native_tab_debug.txt",
             format!(
-                "tick={ticks} added={added} players={} left={} center={} right={} far_right={}\nfirst_lines={:?}\n",
-                server.get_all_players().len(),
+                "tick={ticks} players={} left={} center={} right={} far_right={}\nfirst_lines={:?}\n",
+                players.len(),
                 config.left.len(),
                 config.center.len(),
                 config.right.len(),
