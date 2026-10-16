@@ -555,6 +555,30 @@ impl PvpClassManager {
         }
     }
 
+    /// Re-applies the class passive effects if the player is missing them (e.g.
+    /// after a clickable effect of the same type expired). Stronger effects are kept.
+    fn ensure_passives(&self, player: &Player, kind: ClassKind) {
+        let Some(class) = self.classes.get(&kind) else {
+            return;
+        };
+        for effect in &class.effects {
+            let need = match player.get_effect(effect.effect) {
+                None => true,
+                Some(current) => current.amplifier < effect.amplifier,
+            };
+            if need {
+                player.add_effect(StatusEffectInstance {
+                    effect_type: effect.effect,
+                    duration: INFINITE,
+                    amplifier: effect.amplifier,
+                    ambient: false,
+                    show_particles: false,
+                    show_icon: true,
+                });
+            }
+        }
+    }
+
     /// Passive effects of the player's currently active class.
     pub fn active_passive_effects(&self, uuid: &str) -> Vec<PassiveEffect> {
         self.active
@@ -616,6 +640,7 @@ impl PvpClassManager {
 
             if Self::is_wearing_full(player, kind) {
                 if self.active.get(&uuid) == Some(&kind) {
+                    self.ensure_passives(player, kind);
                     continue;
                 }
                 if let Some((warming, _)) = self.warmups.get(&uuid) {
@@ -956,19 +981,50 @@ pub fn bard_click(server: &Server, player: &Player) {
         return;
     }
 
-    if energy < clickable.energy_needed {
-        return;
-    }
     {
         let guard = state().read().unwrap();
-        if guard
+        if let Some(expiry) = guard
             .classes
             .bard_cooldowns
             .get(&(uuid.clone(), clickable.material.clone()))
-            .is_some_and(|expiry| *expiry > now)
+            && *expiry > now
         {
+            let prefix = guard.raw.language.string("PREFIX");
+            let template = guard
+                .raw
+                .language
+                .string("BARD_CLASS.CLICKABLE_ITEM.ACTIVE_COOLDOWN");
+            let seconds = (*expiry - now) / 1000;
+            drop(guard);
+            core::send(player, format!("{prefix}{}", util::replace(&template, "<seconds>", &seconds.to_string())));
             return;
         }
+    }
+    if energy < clickable.energy_needed {
+        let (prefix, template) = {
+            let guard = state().read().unwrap();
+            (
+                guard.raw.language.string("PREFIX"),
+                guard
+                    .raw
+                    .language
+                    .string("BARD_CLASS.CLICKABLE_ITEM.NOT_ENOUGH_ENERGY"),
+            )
+        };
+        core::send(
+            player,
+            format!(
+                "{prefix}{}",
+                util::replace_all(
+                    &template,
+                    &[
+                        ("<energy>", &(clickable.energy_needed as i64).to_string()),
+                        ("<currentEnergy>", &(energy as i64).to_string()),
+                    ],
+                )
+            ),
+        );
+        return;
     }
 
     let mut affected = 0usize;
@@ -997,14 +1053,17 @@ pub fn bard_click(server: &Server, player: &Player) {
             continue;
         }
 
-        online.add_effect(StatusEffectInstance {
-            effect_type: clickable.effect.effect,
-            duration: clickable.duration,
-            amplifier: clickable.effect.amplifier,
-            ambient: false,
-            show_particles: true,
-            show_icon: true,
-        });
+        apply_if_stronger(
+            &online,
+            StatusEffectInstance {
+                effect_type: clickable.effect.effect,
+                duration: clickable.duration,
+                amplifier: clickable.effect.amplifier,
+                ambient: false,
+                show_particles: true,
+                show_icon: true,
+            },
+        );
         if !is_self {
             affected += 1;
         }
@@ -1108,14 +1167,17 @@ pub fn rogue_click(_server: &Server, player: &Player) {
         }
     }
 
-    player.add_effect(StatusEffectInstance {
-        effect_type: clickable.effect.effect,
-        duration: clickable.duration,
-        amplifier: clickable.effect.amplifier,
-        ambient: false,
-        show_particles: true,
-        show_icon: true,
-    });
+    apply_if_stronger(
+        player,
+        StatusEffectInstance {
+            effect_type: clickable.effect.effect,
+            duration: clickable.duration,
+            amplifier: clickable.effect.amplifier,
+            ambient: false,
+            show_particles: true,
+            show_icon: true,
+        },
+    );
     state()
         .write()
         .unwrap()
@@ -1188,31 +1250,65 @@ pub fn mage_click(server: &Server, player: &Player) {
         return;
     }
 
-    if energy < clickable.energy_needed {
-        return;
-    }
     {
         let guard = state().read().unwrap();
-        if guard
+        if let Some(expiry) = guard
             .classes
             .mage_cooldowns
             .get(&(uuid.clone(), clickable.material.clone()))
-            .is_some_and(|expiry| *expiry > now)
+            && *expiry > now
         {
+            let prefix = guard.raw.language.string("PREFIX");
+            let template = guard
+                .raw
+                .language
+                .string("MAGE_CLASS.CLICKABLE_ITEM.ACTIVE_COOLDOWN");
+            let seconds = (*expiry - now) / 1000;
+            drop(guard);
+            core::send(player, format!("{prefix}{}", util::replace(&template, "<seconds>", &seconds.to_string())));
             return;
         }
+    }
+    if energy < clickable.energy_needed {
+        let (prefix, template) = {
+            let guard = state().read().unwrap();
+            (
+                guard.raw.language.string("PREFIX"),
+                guard
+                    .raw
+                    .language
+                    .string("MAGE_CLASS.CLICKABLE_ITEM.NOT_ENOUGH_ENERGY"),
+            )
+        };
+        core::send(
+            player,
+            format!(
+                "{prefix}{}",
+                util::replace_all(
+                    &template,
+                    &[
+                        ("<energy>", &(clickable.energy_needed as i64).to_string()),
+                        ("<currentEnergy>", &(energy as i64).to_string()),
+                    ],
+                )
+            ),
+        );
+        return;
     }
 
     let location = crate::core::location(player);
     let apply = |target: &Player| {
-        target.add_effect(StatusEffectInstance {
-            effect_type: clickable.effect.effect,
-            duration: clickable.duration,
-            amplifier: clickable.effect.amplifier,
-            ambient: false,
-            show_particles: true,
-            show_icon: true,
-        });
+        apply_if_stronger(
+            target,
+            StatusEffectInstance {
+                effect_type: clickable.effect.effect,
+                duration: clickable.duration,
+                amplifier: clickable.effect.amplifier,
+                ambient: false,
+                show_particles: true,
+                show_icon: true,
+            },
+        );
     };
 
     if clickable.can_bard_himself {
@@ -1342,6 +1438,21 @@ pub fn bomber_click(server: &Server, player: &Player) {
         guard
             .timers
             .activate(&uuid, crate::timers::TimerType::CombatTag, tag_seconds);
+    }
+}
+
+/// Applies `instance` only when it is stronger (or longer at the same level) than
+/// the effect the player already has — port of `PvpClassManager#addPotionEffect`.
+pub fn apply_if_stronger(player: &Player, instance: StatusEffectInstance) {
+    let apply = match player.get_effect(instance.effect_type) {
+        None => true,
+        Some(current) => {
+            instance.amplifier > current.amplifier
+                || (instance.amplifier == current.amplifier && instance.duration > current.duration)
+        }
+    };
+    if apply {
+        player.add_effect(instance);
     }
 }
 
