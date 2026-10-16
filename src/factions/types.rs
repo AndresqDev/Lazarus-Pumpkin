@@ -313,6 +313,23 @@ impl Faction {
         }
     }
 
+    /// Port of `Faction#shouldCancelPvpTimerEntrance`: entering such a territory
+    /// while PvP protection is active is denied (movement blocked / teleport
+    /// cancelled). Wilderness, warzone, safezone and roads allow entry.
+    pub fn should_cancel_pvp_timer_entrance(
+        &self,
+        player_uuid: &str,
+        can_enter_own_claim: bool,
+    ) -> bool {
+        match self.kind {
+            FactionKind::Player => {
+                !can_enter_own_claim || !self.members.contains_key(player_uuid)
+            }
+            FactionKind::System => !self.safezone,
+            _ => false,
+        }
+    }
+
     /// Computes the relation between `self` and another faction.
     pub fn relation_to(&self, other: &Faction) -> Relation {
         if self.id == other.id {

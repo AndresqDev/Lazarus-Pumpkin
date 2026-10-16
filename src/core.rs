@@ -271,3 +271,66 @@ pub fn territory_display_guard(
         }
     }
 }
+
+/// Teleports players who are not allowed to be inside `claim` to just outside it.
+/// Port of the PvP-protection ejection on claim change (`PvpProtHandler`).
+/// Must be called WITHOUT holding the state lock.
+pub fn eject_intruders(server: &Server, claim: &crate::factions::Claim, owner_id: &str) {
+    let can_enter = state()
+        .read()
+        .unwrap()
+        .raw
+        .config
+        .bool("PVP_PROTECTION.CAN_ENTER_OWN_CLAIM");
+
+    let center_x = (claim.min_x + claim.max_x) / 2;
+
+    for player in server.get_all_players() {
+        let location = location(&player);
+        if location.world != claim.world {
+            continue;
+        }
+        if !claim.contains(&claim.world, location.block_x(), location.block_z()) {
+            continue;
+        }
+
+        let uuid = uuid_of(&player);
+        let eject = {
+            let guard = state().read().unwrap();
+            guard.timers.is_active(&uuid, crate::timers::TimerType::PvpProtection)
+                && guard
+                    .factions
+                    .get(owner_id)
+                    .map(|faction| faction.should_cancel_pvp_timer_entrance(&uuid, can_enter))
+                    .unwrap_or(false)
+        };
+        if !eject {
+            continue;
+        }
+
+        let x = if location.block_x() <= center_x {
+            claim.min_x - 2
+        } else {
+            claim.max_x + 2
+        };
+        let target = (x as f64 + 0.5, location.y, location.z as f64 + 0.5);
+
+        if let Some(world) = server
+            .get_all_worlds()
+            .into_iter()
+            .find(|world| world.get_name() == claim.world)
+        {
+            player.teleport(target, None, None, world);
+        }
+
+        let message = state()
+            .read()
+            .unwrap()
+            .raw
+            .language
+            .string("PVP_PROTECTION.TELEPORT_DUE_TO_CLAIM");
+        if !message.is_empty() {
+            send(&player, &message);
+        }
+    }
+}
