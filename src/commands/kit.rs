@@ -157,7 +157,7 @@ fn set_delay(sender: &CommandSender, args: &ConsumedArgs) {
         reply(sender, format!("&cKit &e{name} &cdoes not exist."));
         return;
     };
-    kit.delay_seconds = seconds.max(0) as u64;
+    kit.delay_seconds = seconds.max(0) as i64;
     reply(sender, format!("&aKit &e{name} &adelay set to &e{seconds}s&a."));
 }
 

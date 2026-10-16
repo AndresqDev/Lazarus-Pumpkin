@@ -34,7 +34,8 @@ pub struct Kit {
     pub name: String,
     #[serde(default)]
     pub kind: String,
-    pub delay_seconds: u64,
+    /// Cooldown in seconds (`-1` = no cooldown, as in the original).
+    pub delay_seconds: i64,
     pub items: Vec<KitItem>,
 }
 
@@ -58,7 +59,7 @@ impl KitsManager {
 }
 
 /// Captures a player's current inventory (slots 0..=40) as a kit.
-pub fn capture(player: &Player, name: &str, delay_seconds: u64) -> Kit {
+pub fn capture(player: &Player, name: &str, delay_seconds: i64) -> Kit {
     let mut items = Vec::new();
 
     for slot in 0..=40u8 {

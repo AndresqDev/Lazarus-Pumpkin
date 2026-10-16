@@ -155,6 +155,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
         let _ = std::fs::write(&kits_path, include_str!("../default-kits.json"));
     }
     let kits: KitsManager = load_json(&data_folder, "kits.json");
+    tracing::info!("lazarus-kits loaded {} kits", kits.kits.len());
     let mut classes = crate::classes::PvpClassManager::new();
     classes.load(&raw.classes);
 
@@ -325,7 +326,13 @@ where
 {
     let path = format!("{folder}/{name}");
     match std::fs::read_to_string(&path) {
-        Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
+        Ok(contents) => match serde_json::from_str(&contents) {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!("failed to parse {name}: {error}");
+                T::default()
+            }
+        },
         Err(_) => T::default(),
     }
 }
