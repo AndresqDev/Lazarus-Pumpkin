@@ -98,6 +98,13 @@ pub fn update(player: &Player, server: &Server) {
                 _ => {}
             }
 
+            if let Some((kind, seconds)) = guard.classes.warmup_info(&uuid) {
+                let placeholder = guard.raw.scoreboard.string("PVPCLASS_WARMUP_PLACEHOLDER");
+                if !placeholder.is_empty() {
+                    lines.push(format!("{placeholder}{} &7({seconds}s)", kind.name()));
+                }
+            }
+
             if let Some(seconds) = guard.classes.active_cooldown_seconds(&uuid) {
                 let placeholder = guard.raw.scoreboard.string("COOLDOWN_PLACEHOLDER");
                 if !placeholder.is_empty() {
@@ -255,9 +262,16 @@ fn build_lines(guard: &AppState, player: &Player, server: &Server, uuid: &str) -
     // ---- Territory (applyMiscellaneousPlaceholders) ----
     {
         let location = crate::core::location(player);
-        let territory = crate::core::territory_at(&location.world, location.block_x(), location.block_z());
-        let viewer = crate::core::faction_id_of(uuid);
-        let display = crate::core::territory_display(&territory, viewer.as_deref());
+        // Guard-based helpers: never re-enter the state lock (the caller already
+        // holds it) or the scheduler task deadlocks.
+        let territory = crate::core::territory_at_guard(
+            guard,
+            &location.world,
+            location.block_x(),
+            location.block_z(),
+        );
+        let viewer = guard.factions.by_member(uuid).map(|f| f.id.clone());
+        let display = crate::core::territory_display_guard(guard, &territory, viewer.as_deref());
         b.add(&s.claim, &display);
         b.add_line("&5");
     }

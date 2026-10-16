@@ -488,6 +488,13 @@ impl PvpClassManager {
         }
     }
 
+    /// Pending warmup for a player: (class, remaining seconds).
+    pub fn warmup_info(&self, uuid: &str) -> Option<(ClassKind, i64)> {
+        let (kind, expiry) = self.warmups.get(uuid)?;
+        let remaining = (*expiry - util::now_millis()).max(0) / 1000;
+        Some((*kind, remaining))
+    }
+
     /// Remaining cooldown (seconds) of the active class's clickable, if any.
     pub fn active_cooldown_seconds(&self, uuid: &str) -> Option<i64> {
         let kind = self.active.get(uuid)?;
