@@ -139,12 +139,20 @@ pub struct NativeTab {
 fn run(server: Arc<Server>, state: Arc<Mutex<Rendered>>, log_ctx: Arc<Context>) {
     let mut known: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
     let mut last_signature: Option<(u64, u64)> = None;
+    // Players that joined recently: re-send their full state for a few seconds so
+    // the packets survive the client's join/readiness window.
+    let mut pending_full: std::collections::HashMap<Uuid, u8> = std::collections::HashMap::new();
 
     loop {
         let players = server.get_all_players();
         let current: std::collections::HashSet<Uuid> =
             players.iter().map(|p| p.gameprofile.id).collect();
-        let joined = current != known;
+
+        for uuid in current.difference(&known) {
+            pending_full.insert(*uuid, 8);
+            log_ctx.log(format!("NativeTab: queued full resend for {uuid}"));
+        }
+        pending_full.retain(|uuid, _| current.contains(uuid));
 
         hide_real_players(&server);
 
@@ -153,19 +161,25 @@ fn run(server: Arc<Server>, state: Arc<Mutex<Rendered>>, log_ctx: Arc<Context>) 
             && last_signature != Some(signature)
         {
             last_signature = Some(signature);
-            apply_file(&server, &state, joined);
+            apply_file(&server, &state);
+        }
 
-            if joined {
-                let count = state.lock().unwrap().global.len();
-                log_ctx.log(format!("NativeTab: applied {count} global slots"));
+        // Retry full per-viewer sends for recent joiners (client may drop the
+        // first packets while still finishing the join sequence).
+        let retry: Vec<Uuid> = pending_full
+            .iter()
+            .filter(|(_, remaining)| **remaining > 0)
+            .map(|(uuid, _)| *uuid)
+            .collect();
+        for uuid in retry {
+            send_full_viewer(&server, &state, uuid);
+            if let Some(remaining) = pending_full.get_mut(&uuid) {
+                *remaining -= 1;
             }
-        } else if joined {
-            // Re-send the current state to the newly joined player set.
-            resend_all(&server, &state);
         }
 
         known = current;
-        std::thread::sleep(Duration::from_secs(1));
+        std::thread::sleep(Duration::from_millis(500));
     }
 }
 
@@ -182,7 +196,7 @@ fn read_state() -> Option<FileState> {
 }
 
 /// Applies the file: diffs against what was rendered and only sends changes.
-fn apply_file(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>, _joined: bool) {
+fn apply_file(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>) {
     let Some(file) = read_state() else {
         return;
     };
@@ -250,16 +264,18 @@ fn apply_file(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>, _joined: bool)
     rendered.viewers = desired_viewers;
 }
 
-/// Re-sends all current slots (used when someone joins).
-fn resend_all(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>) {
-    let rendered = state.lock().unwrap();
-    for (slot, spec) in &rendered.global {
-        send_slot_broadcast(server, *slot, spec);
-    }
-    for uuid in rendered.viewers.keys() {
-        if let Some(player) = server.get_player_by_uuid(*uuid) {
-            let _ = player; // per-viewer content is re-sent below by the diff anyway
+/// Sends every slot of a single viewer's state to that player.
+fn send_full_viewer(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>, viewer: Uuid) {
+    let slots: Vec<(u8, SlotSpec)> = {
+        let rendered = state.lock().unwrap();
+        match rendered.viewers.get(&viewer) {
+            Some(map) => map.iter().map(|(slot, spec)| (*slot, spec.clone())).collect(),
+            None => return,
         }
+    };
+
+    for (slot, spec) in slots {
+        send_slot_to(server, Some(viewer), slot, &spec);
     }
 }
 
