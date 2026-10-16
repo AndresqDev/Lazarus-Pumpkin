@@ -132,7 +132,8 @@ static STATE: OnceLock<RwLock<AppState>> = OnceLock::new();
 /// Initialises global state from disk (creating default files on first run).
 pub fn init(data_folder: String) -> Result<(), String> {
     let raw = RawConfigs::load(&data_folder);
-    let config: Config = load_toml(&data_folder, "config.toml");
+    let mut config: Config = load_toml(&data_folder, "config.toml");
+    sync_faction_yaml(&mut config, &raw);
     let lang: Lang = load_toml(&data_folder, "lang.toml");
     let tab: TabConfig = load_toml(&data_folder, "tab.toml");
     let sidebar: SidebarConfig = load_toml(&data_folder, "scoreboard.toml");
@@ -196,7 +197,8 @@ pub fn save_all() {
 pub fn reload_config() {
     let folder = state().read().unwrap().data_folder.clone();
     let raw = RawConfigs::load(&folder);
-    let config: Config = load_toml(&folder, "config.toml");
+    let mut config: Config = load_toml(&folder, "config.toml");
+    sync_faction_yaml(&mut config, &raw);
     let lang: Lang = load_toml(&folder, "lang.toml");
     let tab: TabConfig = load_toml(&folder, "tab.toml");
     let sidebar: SidebarConfig = load_toml(&folder, "scoreboard.toml");
@@ -212,6 +214,63 @@ pub fn reload_config() {
 // ---------------------------------------------------------------------------
 // File helpers (WASI sandbox: only the plugin data folder is accessible).
 // ---------------------------------------------------------------------------
+
+/// Makes the original `config.yml` authoritative for the faction/DTR values the
+/// gameplay logic uses, so the tab/commands (which read the YAML) and the typed
+/// config never disagree. (Porting note: the typed `config.toml` is legacy.)
+pub fn sync_faction_yaml(config: &mut Config, raw: &RawConfigs) {
+    let y = &raw.config;
+    if y.has("FACTION_DTR") {
+        config.factions.dtr_per_player = y.double("FACTION_DTR.DTR_PER_PLAYER");
+        config.factions.max_dtr = y.double("FACTION_DTR.MAX_DTR");
+        config.factions.min_dtr = y.double("FACTION_DTR.MIN_DTR");
+        config.factions.solo_faction_dtr = y.double("FACTION_DTR.SOLO_FACTION_DTR");
+        config.factions.regen_per_minute = y.double("FACTION_DTR.REGEN_PER_MINUTE");
+    }
+    if y.has("FACTION_CLAIM") {
+        config.factions.must_be_connected = y.bool("FACTION_CLAIM.MUST_BE_CONNECTED");
+        config.factions.max_claims = y.int("FACTION_CLAIM.MAX_CLAIMS") as usize;
+        config.factions.claims_per_player = y.int("FACTION_CLAIM.CLAIMS_PER_PLAYER") as usize;
+        config.factions.min_claim_size = y.int("FACTION_CLAIM.MIN_CLAIM_SIZE") as i32;
+        config.factions.max_claim_size = y.int("FACTION_CLAIM.MAX_CLAIM_SIZE") as i32;
+        config.factions.claim_buffer = y.int("FACTION_CLAIM.CLAIM_BUFFER") as i32;
+        config.factions.claim_buffer_ignore_roads = y.bool("FACTION_CLAIM.CLAIM_BUFFER_IGNORE_ROADS");
+        config.factions.claim_price_per_block = y.double("FACTION_CLAIM.CLAIM_PRICE_PER_BLOCK");
+        config.factions.unclaim_price_multiplier = y.double("FACTION_CLAIM.UNCLAIM_PRICE_MULTIPLIER");
+    }
+    if y.has("FACTION_PLAYER") {
+        config.factions.faction_limit = y.int("FACTION_PLAYER.FACTION_LIMIT") as usize;
+        config.factions.join_while_frozen = y.bool("FACTION_PLAYER.JOIN_WHILE_FROZEN");
+        config.factions.leave_while_frozen = y.bool("FACTION_PLAYER.LEAVE_WHILE_FROZEN");
+        config.factions.disband_while_frozen = y.bool("FACTION_PLAYER.DISBAND_WHILE_FROZEN");
+        config.factions.unclaim_while_frozen = y.bool("FACTION_PLAYER.UNCLAIM_WHILE_FROZEN");
+        config.factions.leave_while_in_own_claim = y.bool("FACTION_PLAYER.LEAVE_WHILE_IN_OWN_CLAIM");
+        config.factions.players_take_own_damage = y.bool("FACTION_PLAYER.PLAYERS_TAKE_OWN_DAMAGE");
+        config.factions.ally_friendly_fire = y.bool("FACTION_PLAYER.ALLY_FRIENDLY_FIRE");
+        config.factions.warzone_break_after.overworld =
+            y.int("FACTION_PLAYER.WARZONE_BREAK_AFTER.OVERWORLD") as i32;
+        config.factions.warzone_break_after.nether =
+            y.int("FACTION_PLAYER.WARZONE_BREAK_AFTER.NETHER") as i32;
+    }
+    if y.has("WARZONE_RADIUS") {
+        config.warzone_radius.overworld = y.int("WARZONE_RADIUS.OVERWORLD") as i32;
+        config.warzone_radius.nether = y.int("WARZONE_RADIUS.NETHER") as i32;
+        config.warzone_radius.end = y.int("WARZONE_RADIUS.END") as i32;
+    }
+    if y.has("BORDER_SIZE") {
+        config.border_size.overworld = y.int("BORDER_SIZE.OVERWORLD") as i32;
+        config.border_size.nether = y.int("BORDER_SIZE.NETHER") as i32;
+        config.border_size.end = y.int("BORDER_SIZE.END") as i32;
+    }
+    if y.has("FACTION_MAX_ALLIES") {
+        config.factions.max_allies = y.int("FACTION_MAX_ALLIES") as usize;
+    }
+    if y.has("RELATION_COLORS") {
+        config.relation_colors.teammate = y.string("RELATION_COLORS.TEAMMATE_COLOR");
+        config.relation_colors.ally = y.string("RELATION_COLORS.ALLY_COLOR");
+        config.relation_colors.enemy = y.string("RELATION_COLORS.ENEMY_COLOR");
+    }
+}
 
 fn load_toml<T>(folder: &str, name: &str) -> T
 where

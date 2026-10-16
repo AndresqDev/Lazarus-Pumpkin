@@ -6,7 +6,7 @@
 //! so ignore lists and faction chat are respected.
 
 use pumpkin_plugin_api::events::{EventData, EventHandler, PlayerChatEvent};
-use pumpkin_plugin_api::Server;
+use pumpkin_plugin_api::{Player, Server};
 
 use crate::core;
 use crate::factions::ChatType;
@@ -32,8 +32,35 @@ impl EventHandler<PlayerChatEvent> for ChatListener {
             }
         };
 
-        // Leave the vanilla broadcast in place for public chat.
+        // Public chat: apply the configured format with a relation-coloured faction
+        // tag (port of `handlers.chat.ChatHandler#onAsyncPlayerChat`).
         if chat_type == ChatType::Public {
+            let (enabled, format, format_no_faction) = {
+                let guard = state().read().unwrap();
+                (
+                    guard.raw.config.bool("CHAT_FORMAT.ENABLED"),
+                    guard.raw.config.string("CHAT_FORMAT.FORMAT_WITH_FACTION"),
+                    guard.raw.config.string("CHAT_FORMAT.FORMAT"),
+                )
+            };
+            if !enabled {
+                return event;
+            }
+
+            event.cancelled = true;
+            let message = event.message.clone();
+            let recipients = std::mem::take(&mut event.recipients);
+            for recipient in recipients {
+                let line = chat_line(
+                    &recipient,
+                    &uuid,
+                    &name,
+                    &format,
+                    &format_no_faction,
+                    &message,
+                );
+                core::send(&recipient, &line);
+            }
             return event;
         }
 
@@ -90,4 +117,40 @@ impl EventHandler<PlayerChatEvent> for ChatListener {
 
         event
     }
+}
+
+/// Builds a public chat line for `recipient`, colouring the sender's faction name
+/// by the recipient's relation (port of `ChatHandler#getChatMessage`).
+fn chat_line(
+    recipient: &Player,
+    sender_uuid: &str,
+    sender_name: &str,
+    with_faction: &str,
+    no_faction: &str,
+    message: &str,
+) -> String {
+    let guard = state().read().unwrap();
+
+    let Some(faction) = guard.factions.by_member(sender_uuid) else {
+        let prefix = util::replace(no_faction, "<displayName>", sender_name);
+        return format!("{prefix}{message}");
+    };
+
+    let recipient_uuid = core::uuid_of(recipient);
+    let color = match guard.factions.by_member(&recipient_uuid) {
+        Some(recipient_faction) if recipient_faction.id == faction.id => {
+            guard.config.relation_colors.teammate.clone()
+        }
+        Some(recipient_faction) if recipient_faction.is_ally(&faction.id) => {
+            guard.config.relation_colors.ally.clone()
+        }
+        _ => guard.config.relation_colors.enemy.clone(),
+    };
+
+    let display = format!("{color}{}", faction.name);
+    let prefix = util::replace_all(
+        with_faction,
+        &[("<faction>", &display), ("<displayName>", sender_name)],
+    );
+    format!("{prefix}{message}")
 }
