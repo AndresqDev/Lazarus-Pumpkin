@@ -238,7 +238,8 @@ impl EventHandler<pumpkin_plugin_api::events::BlockFromToEvent> for BlockFromToL
             .config
             .bool("FACTION_CLAIM.LIQUID_FLOW_FROM_WILDERNESS_TO_CLAIMS")
         {
-            return event;
+            // Config allows wilderness/warzone -> claim, but flowing *out of* a
+            // claim (or from one claim into another) is still blocked below.
         }
 
         let from_pos = event.from_pos;
@@ -255,24 +256,53 @@ impl EventHandler<pumpkin_plugin_api::events::BlockFromToEvent> for BlockFromToL
         let world_name = world.get_name();
         let blocked = {
             let guard = state().read().unwrap();
+            let allow_wild_to_claim = guard
+                .raw
+                .config
+                .bool("FACTION_CLAIM.LIQUID_FLOW_FROM_WILDERNESS_TO_CLAIMS");
+
             let from = core::territory_at_guard(&guard, &world_name, from_pos.x, from_pos.z);
             let to = core::territory_at_guard(&guard, &world_name, to_pos.x, to_pos.z);
 
-            let source_is_wild = matches!(
-                from,
-                core::Territory::Wilderness | core::Territory::Warzone
-            );
-            let target_is_claim = matches!(
-                to,
-                core::Territory::Faction(_) | core::Territory::Safezone
-            );
-            source_is_wild && target_is_claim
+            let is_claim = |t: &core::Territory| {
+                matches!(t, core::Territory::Faction(_) | core::Territory::Safezone)
+            };
+            let is_wild = |t: &core::Territory| {
+                matches!(t, core::Territory::Wilderness | core::Territory::Warzone)
+            };
+
+            if from == to {
+                // Same territory (same claim, or wilderness->wilderness, …).
+                false
+            } else if is_claim(&from) || is_claim(&to) {
+                // Crossing a claim boundary in either direction is blocked, except
+                // wilderness/warzone -> claim when the config explicitly allows it.
+                !(allow_wild_to_claim && is_wild(&from) && is_claim(&to))
+            } else {
+                // wilderness <-> warzone: allowed (no claim involved).
+                false
+            }
         };
 
         if blocked {
             event.cancelled = true;
         }
 
+        event
+    }
+}
+
+/// Ignition (fire spread, lightning, …). The event has no cause field, so — as
+/// requested — every ignition is cancelled.
+pub struct BlockIgniteListener;
+
+impl EventHandler<pumpkin_plugin_api::events::BlockIgniteEvent> for BlockIgniteListener {
+    fn handle(
+        &self,
+        _server: Server,
+        mut event: EventData<pumpkin_plugin_api::events::BlockIgniteEvent>,
+    ) -> EventData<pumpkin_plugin_api::events::BlockIgniteEvent> {
+        event.cancelled = true;
         event
     }
 }
