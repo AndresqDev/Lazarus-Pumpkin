@@ -1369,9 +1369,7 @@ pub fn mage_click(server: &Server, player: &Player) {
     let combat_tag = state()
         .read()
         .unwrap()
-        .raw
-        .config
-        .bool("MAGE_CLASS.COMBAT_TAG_ON_CLICKABLE_ITEM");
+        .raw.classes.bool("MAGE_CLASS.COMBAT_TAG_ON_CLICKABLE_ITEM");
     let tag_seconds = state().read().unwrap().config.timers.combat_tag_seconds;
 
     for online in server.get_all_players() {
@@ -1501,9 +1499,7 @@ pub fn bomber_click(server: &Server, player: &Player) {
     let combat_tag = state()
         .read()
         .unwrap()
-        .raw
-        .config
-        .bool("BOMBER_CLASS.COMBAT_TAG_ON_TNT_USE");
+        .raw.classes.bool("BOMBER_CLASS.COMBAT_TAG_ON_TNT_USE");
     let tag_seconds = state().read().unwrap().config.timers.combat_tag_seconds;
 
     let mut guard = state().write().unwrap();

@@ -50,13 +50,9 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
                             .get(&shooter_uuid)
                             == Some(&crate::classes::ClassKind::Archer),
                         guard
-                            .raw
-                            .config
-                            .double("ARCHER_CLASS.ARCHER_TAG.DAMAGE_MULTIPLIER") as f32,
+                            .raw.classes.double("ARCHER_CLASS.ARCHER_TAG.DAMAGE_MULTIPLIER") as f32,
                         guard
-                            .raw
-                            .config
-                            .int("ARCHER_CLASS.ARCHER_TAG.DURATION")
+                            .raw.classes.int("ARCHER_CLASS.ARCHER_TAG.DURATION")
                             .max(0) as u64,
                     )
                 };
@@ -202,9 +198,9 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
                 (
                     guard.classes.active.get(&damager_uuid) == Some(&crate::classes::ClassKind::Archer),
                     guard.classes.active.get(&victim_uuid) == Some(&crate::classes::ClassKind::Archer),
-                    guard.raw.config.bool("ARCHER_CLASS.ARCHER_TAG.CAN_TAG_OTHER_ARCHERS"),
-                    guard.raw.config.bool("ARCHER_CLASS.ARCHER_TAG.REQUIRE_FULL_FORCE"),
-                    guard.raw.config.int("ARCHER_CLASS.ARCHER_TAG.DURATION").max(0) as u64,
+                    guard.raw.classes.bool("ARCHER_CLASS.ARCHER_TAG.CAN_TAG_OTHER_ARCHERS"),
+                    guard.raw.classes.bool("ARCHER_CLASS.ARCHER_TAG.REQUIRE_FULL_FORCE"),
+                    guard.raw.classes.int("ARCHER_CLASS.ARCHER_TAG.DURATION").max(0) as u64,
                 )
             };
             let force_ok = !require_force || bow_force(&damager_uuid) >= 0.5;
@@ -263,10 +259,10 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
                     let (damage, cooldown_ms, effects_enabled, effects) = {
                         let guard = state().read().unwrap();
                         (
-                            guard.raw.config.double("ROGUE_CLASS.BACKSTAB.DAMAGE") as f32,
-                            guard.raw.config.int("ROGUE_CLASS.BACKSTAB.COOLDOWN") * 1000,
-                            guard.raw.config.bool("ROGUE_CLASS.BACKSTAB.EFFECTS_ENABLED"),
-                            guard.raw.config.keys("ROGUE_CLASS.BACKSTAB.EFFECTS"),
+                            guard.raw.classes.double("ROGUE_CLASS.BACKSTAB.DAMAGE") as f32,
+                            guard.raw.classes.int("ROGUE_CLASS.BACKSTAB.COOLDOWN") * 1000,
+                            guard.raw.classes.bool("ROGUE_CLASS.BACKSTAB.EFFECTS_ENABLED"),
+                            guard.raw.classes.keys("ROGUE_CLASS.BACKSTAB.EFFECTS"),
                         )
                     };
                     let now = util::now_millis();
@@ -399,7 +395,7 @@ impl EventHandler<EntityDamageEvent> for EntityDamageListener {
         let archer_multiplier = {
             let guard = state().read().unwrap();
             if guard.classes.is_archer_tagged(&uuid) {
-                guard.raw.config.double("ARCHER_CLASS.ARCHER_TAG.DAMAGE_MULTIPLIER") as f32
+                guard.raw.classes.double("ARCHER_CLASS.ARCHER_TAG.DAMAGE_MULTIPLIER") as f32
             } else {
                 1.0
             }
