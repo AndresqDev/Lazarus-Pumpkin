@@ -99,6 +99,16 @@ impl EventHandler<CreatureSpawnEvent> for CreatureSpawnListener {
         _server: Server,
         mut event: EventData<CreatureSpawnEvent>,
     ) -> EventData<CreatureSpawnEvent> {
+        // Mobs have their AI disabled (no lag machines / unpredictable behaviour).
+        for entity in event.target_world.get_entities() {
+            if entity.get_id() as i32 == event.entity_id {
+                if let Some(mob) = entity.as_mob() {
+                    mob.set_ai_disabled(true);
+                }
+                break;
+            }
+        }
+
         if !MONSTERS.contains(&event.entity_type.as_str()) {
             return event;
         }

@@ -30,6 +30,16 @@ pub fn start(context: &Context) {
     context.schedule_repeating_task(2, 2, |server| {
         state().write().unwrap().glass.refresh_all(&server);
     });
+    // Disable mob AI globally (sweep so already-spawned mobs are covered too).
+    context.schedule_repeating_task(100, 100, |server| {
+        for world in server.get_all_worlds() {
+            for entity in world.get_entities() {
+                if let Some(mob) = entity.as_mob() {
+                    mob.set_ai_disabled(true);
+                }
+            }
+        }
+    });
 
     // Periodic autosave (config: factions.auto_save_minutes).
     let minutes = state().read().unwrap().config.factions.auto_save_minutes.max(1);
