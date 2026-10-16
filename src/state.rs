@@ -265,6 +265,14 @@ pub fn sync_faction_yaml(config: &mut Config, raw: &RawConfigs) {
     if y.has("FACTION_MAX_ALLIES") {
         config.factions.max_allies = y.int("FACTION_MAX_ALLIES") as usize;
     }
+    // Lives / deathban (the original gives `DEFAULT_LIVES` on first join).
+    if y.has("DEFAULT_LIVES") {
+        config.timers.default_lives = y.int("DEFAULT_LIVES") as i32;
+    }
+    if y.has("DEATHBAN") {
+        config.deathban.enabled = y.bool("DEATHBAN.ENABLED");
+        config.deathban.default_ban_time = y.int("DEATHBAN.DEFAULT_BAN_TIME") as u64;
+    }
     if y.has("RELATION_COLORS") {
         config.relation_colors.teammate = y.string("RELATION_COLORS.TEAMMATE_COLOR");
         config.relation_colors.ally = y.string("RELATION_COLORS.ALLY_COLOR");

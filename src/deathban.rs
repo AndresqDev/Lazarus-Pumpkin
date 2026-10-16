@@ -49,6 +49,23 @@ pub fn apply_on_death(player: &Player) -> Option<String> {
     }
 
     let lang = guard.lang.clone();
+
+    // Faction auto-revive: consume a faction life instead of deathbanning.
+    let auto_revive = guard
+        .factions
+        .by_member(&uuid)
+        .map(|f| f.id.clone())
+        .filter(|id| {
+            guard.factions.get(id).map(|f| f.auto_revive).unwrap_or(false)
+                && guard.factions.get(id).map(|f| f.lives).unwrap_or(0) > 0
+        });
+    if let Some(id) = auto_revive {
+        if let Some(faction) = guard.factions.get_mut(&id) {
+            faction.lives -= 1;
+        }
+        return None;
+    }
+
     let Some(user) = guard.userdata.get_mut(&uuid) else {
         return None;
     };
