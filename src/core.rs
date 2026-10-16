@@ -187,7 +187,12 @@ pub fn setup_spawn_claim(server: &Server) {
 /// Resolves the territory at `(world, x, z)`.
 pub fn territory_at(world: &str, x: i32, z: i32) -> Territory {
     let guard = state().read().unwrap();
+    territory_at_guard(&guard, world, x, z)
+}
 
+/// Lock-free variant for callers that already hold the state lock (avoids
+/// re-entering `RwLock`, which deadlocks).
+pub fn territory_at_guard(guard: &crate::state::AppState, world: &str, x: i32, z: i32) -> Territory {
     if let Some(owner_id) = guard.claims.faction_at(world, x, z)
         && let Some(faction) = guard.factions.get(owner_id)
     {
@@ -206,8 +211,6 @@ pub fn territory_at(world: &str, x: i32, z: i32) -> Territory {
         Dimension::End => guard.config.warzone_radius.end,
     };
 
-    // Safezone is *only* the spawn faction's claims (handled above via the claim
-    // index); the radius below is purely the warzone.
     let distance = x.abs().max(z.abs());
     if war_radius > 0 && distance <= war_radius {
         Territory::Warzone
@@ -237,6 +240,15 @@ pub fn relation_in(territory: &Territory, viewer_faction: Option<&str>) -> Relat
 /// Builds the coloured territory string shown when entering a chunk.
 pub fn territory_display(territory: &Territory, viewer_faction: Option<&str>) -> String {
     let guard = state().read().unwrap();
+    territory_display_guard(&guard, territory, viewer_faction)
+}
+
+/// Lock-free variant of [`territory_display`].
+pub fn territory_display_guard(
+    guard: &crate::state::AppState,
+    territory: &Territory,
+    viewer_faction: Option<&str>,
+) -> String {
     let colors = &guard.config.relation_colors;
 
     match territory {

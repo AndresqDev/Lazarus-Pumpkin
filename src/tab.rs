@@ -166,10 +166,14 @@ fn resolve(line: &str, guard: &AppState, player: &Player, server: &Server) -> St
 
     let territory = {
         let location = crate::core::location(player);
-        let territory =
-            crate::core::territory_at(&location.world, location.block_x(), location.block_z());
-        let viewer = crate::core::faction_id_of(&uuid);
-        crate::core::territory_display(&territory, viewer.as_deref())
+        let territory = crate::core::territory_at_guard(
+            guard,
+            &location.world,
+            location.block_x(),
+            location.block_z(),
+        );
+        let viewer = guard.factions.by_member(&uuid).map(|f| f.id.clone());
+        crate::core::territory_display_guard(guard, &territory, viewer.as_deref())
     };
 
     let online = if guard.raw.config.bool("LUNAR_CLIENT_API_ENABLED") {

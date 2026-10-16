@@ -106,7 +106,7 @@ impl EventHandler<PlayerMoveEvent> for MoveListener {
 
             let (was_safezone, prev_display, prev_deathban) = match &previous {
                 Some(p) => {
-                    let territory = core::territory_at(&p.world, p.cx * 16, p.cz * 16);
+                    let territory = core::territory_at_guard(&guard, &p.world, p.cx * 16, p.cz * 16);
                     let deathban = match &territory {
                         core::Territory::Faction(id) => guard
                             .factions
@@ -117,7 +117,7 @@ impl EventHandler<PlayerMoveEvent> for MoveListener {
                     };
                     (
                         matches!(territory, core::Territory::Safezone),
-                        core::territory_display(&territory, viewer_faction.as_deref()),
+                        core::territory_display_guard(&guard, &territory, viewer_faction.as_deref()),
                         deathban.to_string(),
                     )
                 }

@@ -100,6 +100,12 @@ fn set_position(player: &Player, uuid: &str, pos: BlockPos, left: bool) {
 
     let mut messages: Vec<String> = Vec::new();
 
+    // Resolve the world/territory BEFORE taking the state lock: `core::territory_at`
+    // locks `state()` internally and a write guard + read guard on the same RwLock
+    // deadlocks (which trapped the WASM store).
+    let is_overworld = core::dimension_of(&world) == Dimension::Overworld;
+    let is_wilderness = matches!(core::territory_at(&world, x, z), Territory::Wilderness);
+
     {
         let mut guard = state().write().unwrap();
         let AppState { selection, glass, factions, config, lang, .. } = &mut *guard;
@@ -114,9 +120,9 @@ fn set_position(player: &Player, uuid: &str, pos: BlockPos, left: bool) {
             .unwrap_or(0);
 
         // Can only claim in the overworld.
-        if core::dimension_of(&world) != Dimension::Overworld {
+        if !is_overworld {
             messages.push(lang.faction_claim_only_overworld.clone());
-        } else if !matches!(core::territory_at(&world, x, z), Territory::Wilderness) {
+        } else if !is_wilderness {
             // The clicked location must be wilderness.
             messages.push(lang.faction_claim_location_claimed.clone());
         } else {
