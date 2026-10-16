@@ -49,11 +49,10 @@ fi
 
 echo ">> Building (this is heavy: ~700 crates, first time 20-40 min)"
 cd "$WORK"
-# NOTE: no --locked here: adding native-tab as a workspace member requires Cargo to
-# append it to Cargo.lock. It keeps the already-pinned versions of existing deps
-# (so the rsa/pkcs1 versions stay compatible).
-RUST_MIN_STACK=134217728 cargo build --release -p native_tab
+# Build for the host explicitly (avoids any target inherited from a parent .cargo config).
+HOST_TRIPLE="$(rustc -vV | awk '/^host:/{print $2}')"
+RUST_MIN_STACK=134217728 cargo build --release -p native_tab --target "$HOST_TRIPLE"
 
 echo
-echo ">> Done: $WORK/target/release/libnative_tab.so"
-echo ">> Copy it to the server:  cp $WORK/target/release/libnative_tab.so /ruta/plugins/native_tab.so"
+echo ">> Done: $WORK/target/$HOST_TRIPLE/release/libnative_tab.so"
+echo ">> Copy it to the server:  cp $WORK/target/$HOST_TRIPLE/release/libnative_tab.so /ruta/plugins/native_tab.so"
