@@ -60,6 +60,8 @@ enum Action {
     AdminRemove,
     AdminClearClaims,
     AdminSetKills,
+    AdminForcePromote,
+    AdminForceDemote,
     AdminSetPoints,
     AdminSetBalance,
     AdminSetLives,
@@ -200,7 +202,9 @@ pub fn register(context: &Context) -> Result<(), String> {
             CommandNode::literal("setkills").then(
                 str_node("faction").then(int_node("amount").execute(FactionExecutor(Action::AdminSetKills))),
             ),
-        );
+        )
+        .then(CommandNode::literal("forcepromote").then(str_node("player").execute(FactionExecutor(Action::AdminForcePromote))))
+        .then(CommandNode::literal("forcedemote").then(str_node("player").execute(FactionExecutor(Action::AdminForceDemote))));
 
     context.register_command(root, "lazarus:command.faction");
     Ok(())
@@ -257,6 +261,8 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::AdminRemove => admin_remove(sender, server, args),
         Action::AdminClearClaims => admin_clear_claims(sender, server, args),
         Action::AdminSetKills => admin_set_kills(sender, server, args),
+        Action::AdminForcePromote => admin_force_role(sender, server, args, true),
+        Action::AdminForceDemote => admin_force_role(sender, server, args, false),
         Action::AdminSetPoints => admin_set_int(sender, server, args, AdminField::Points),
         Action::AdminSetBalance => admin_set_int(sender, server, args, AdminField::Balance),
         Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
@@ -1507,6 +1513,130 @@ fn admin_change_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs
     }
 
     reply(sender, sender_message);
+}
+
+fn admin_force_role(sender: &CommandSender, server: &Server, args: &ConsumedArgs, promote: bool) {
+    if !require_admin(sender, server) {
+        return;
+    }
+    let Some(target_name) = string_arg(args, "player") else {
+        return;
+    };
+
+    let (prefix, usage, not_in_tpl, max_tpl, min_tpl, leader_tpl, sender_tpl, faction_tpl) = {
+        let guard = state().read().unwrap();
+        let lang = &guard.raw.language;
+        let (usage, max_tpl, min_tpl, leader_tpl, sender_tpl, faction_tpl) = if promote {
+            (
+                lang.string("FACTIONS.FORCE_PROMOTE_COMMAND.USAGE"),
+                lang.string("FACTIONS.FORCE_PROMOTE_COMMAND.MAX_PROMOTE"),
+                String::new(),
+                String::new(),
+                lang.string("FACTIONS.FORCE_PROMOTE_COMMAND.PROMOTED_SENDER"),
+                lang.string("FACTIONS.FORCE_PROMOTE_COMMAND.PROMOTED_FACTION"),
+            )
+        } else {
+            (
+                lang.string("FACTIONS.FORCE_DEMOTE_COMMAND.USAGE"),
+                String::new(),
+                lang.string("FACTIONS.FORCE_DEMOTE_COMMAND.MIN_DEMOTE"),
+                lang.string("FACTIONS.FORCE_DEMOTE_COMMAND.CANNOT_DEMOTE_LEADER"),
+                lang.string("FACTIONS.FORCE_DEMOTE_COMMAND.DEMOTED_SENDER"),
+                lang.string("FACTIONS.FORCE_DEMOTE_COMMAND.DEMOTED_FACTION"),
+            )
+        };
+        (
+            lang.string("FACTION_PREFIX"),
+            usage,
+            lang.string("FACTIONS.NOT_IN_FACTION"),
+            max_tpl,
+            min_tpl,
+            leader_tpl,
+            sender_tpl,
+            faction_tpl,
+        )
+    };
+    let _ = usage;
+
+    // Locate the member by name across all player factions.
+    let found = {
+        let guard = state().read().unwrap();
+        guard.factions.player_factions().find_map(|faction| {
+            faction
+                .members
+                .values()
+                .find(|m| m.name.eq_ignore_ascii_case(&target_name))
+                .map(|m| (faction.id.clone(), m.uuid.clone(), m.role, faction.name.clone()))
+        })
+    };
+
+    let Some((faction_id, member_uuid, role, faction_name)) = found else {
+        let message = util::replace(&not_in_tpl, "<player>", &target_name);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    };
+
+    let new_role = if promote {
+        match role.promote() {
+            Some(role) => role,
+            None => {
+                reply(sender, format!("{prefix}{max_tpl}"));
+                return;
+            }
+        }
+    } else {
+        if role == Role::Leader {
+            reply(sender, format!("{prefix}{leader_tpl}"));
+            return;
+        }
+        match role.demote() {
+            Some(role) => role,
+            None => {
+                reply(sender, format!("{prefix}{min_tpl}"));
+                return;
+            }
+        }
+    };
+
+    let members = {
+        let mut guard = state().write().unwrap();
+        if let Some(faction) = guard.factions.get_mut(&faction_id) {
+            if let Some(member) = faction.member_mut(&member_uuid) {
+                member.role = new_role;
+            }
+            faction.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        }
+    };
+
+    let role_name = new_role.name();
+    reply(
+        sender,
+        format!(
+            "{prefix}{}",
+            util::replace_all(
+                &sender_tpl,
+                &[("<player>", &target_name), ("<role>", role_name)]
+            )
+        ),
+    );
+
+    let message = format!(
+        "{prefix}{}",
+        util::replace_all(
+            &faction_tpl,
+            &[("<player>", &target_name), ("<role>", role_name)]
+        )
+    );
+    let _ = faction_name;
+    for uuid in members {
+        if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
+            && let Some(player) = server.get_player_by_uuid(id)
+        {
+            core::send(&player, &message);
+        }
+    }
 }
 
 fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
