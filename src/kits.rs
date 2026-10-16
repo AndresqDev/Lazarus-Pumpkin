@@ -131,10 +131,24 @@ pub fn enchantment_key(enchantment: Enchantment) -> String {
     format!("{enchantment:?}")
 }
 
-/// Parses a key produced by [`enchantment_key`].
+/// Parses a key produced by [`enchantment_key`] OR a modern registry key
+/// (`sharpness`, `bane_of_arthropods`, …).
 pub fn enchantment_from_key(key: &str) -> Option<Enchantment> {
     use Enchantment::*;
-    Some(match key {
+
+    // `sharpness` -> `Sharpness`, `bane_of_arthropods` -> `BaneOfArthropods`.
+    let normalized: String = key
+        .split('_')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect();
+
+    Some(match normalized.as_str() {
         "AquaAffinity" => AquaAffinity,
         "BaneOfArthropods" => BaneOfArthropods,
         "BindingCurse" => BindingCurse,

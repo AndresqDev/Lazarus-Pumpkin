@@ -73,7 +73,7 @@ ENCHANT_SPECIAL = {
     "WATER_WORKER": "aqua_affinity",
     "OXYGEN": "respiration",
     "SILK_TOUCH": "silk_touch",
-    "SWEEPING_EDGE": "sweeping",
+    "SWEEPING_EDGE": "sweeping_edge",
 }
 
 # 1.8 potion damage -> modern potion type (best-effort).
