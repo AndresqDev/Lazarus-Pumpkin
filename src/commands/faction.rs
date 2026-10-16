@@ -80,6 +80,10 @@ enum Action {
     Uninvite,
     AutoRevive,
     ClaimChunk,
+    Rally,
+    RemoveRally,
+    Focus,
+    Unfocus,
     AdminSetPoints,
     AdminSetBalance,
     AdminSetLives,
@@ -274,7 +278,12 @@ pub fn register(context: &Context) -> Result<(), String> {
         .then(CommandNode::literal("uninvite").then(str_node("player").execute(FactionExecutor(Action::Uninvite))))
         .then(CommandNode::literal("uninv").then(str_node("player").execute(FactionExecutor(Action::Uninvite))))
         .then(CommandNode::literal("autorevive").execute(FactionExecutor(Action::AutoRevive)))
-        .then(CommandNode::literal("claimchunk").execute(FactionExecutor(Action::ClaimChunk)));
+        .then(CommandNode::literal("claimchunk").execute(FactionExecutor(Action::ClaimChunk)))
+        .then(CommandNode::literal("rally").execute(FactionExecutor(Action::Rally)))
+        .then(CommandNode::literal("setrally").execute(FactionExecutor(Action::Rally)))
+        .then(CommandNode::literal("removerally").execute(FactionExecutor(Action::RemoveRally)))
+        .then(CommandNode::literal("focus").then(str_node("faction").execute(FactionExecutor(Action::Focus))))
+        .then(CommandNode::literal("unfocus").execute(FactionExecutor(Action::Unfocus)));
 
     context.register_command(root, "lazarus:command.faction");
     Ok(())
@@ -351,6 +360,10 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::Uninvite => uninvite(sender, server, args),
         Action::AutoRevive => auto_revive(sender, server),
         Action::ClaimChunk => claim_chunk(sender, server, &player, &uuid),
+        Action::Rally => rally(sender, server, &player, &uuid),
+        Action::RemoveRally => remove_rally(sender, server, &player, &uuid),
+        Action::Focus => focus(sender, server, &uuid, args),
+        Action::Unfocus => unfocus(sender, server, &uuid),
         Action::AdminSetPoints => admin_set_int(sender, server, args, AdminField::Points),
         Action::AdminSetBalance => admin_set_int(sender, server, args, AdminField::Balance),
         Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
@@ -2876,6 +2889,221 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
             }
         }
         return;
+    }
+}
+
+fn broadcast_to_faction(server: &Server, guard: &crate::state::AppState, id: &str, message: &str) {
+    let members = guard
+        .factions
+        .get(id)
+        .map(|f| f.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    for member_uuid in members {
+        if let Some(uuid) = pumpkin_plugin_api::uuid::parse(&member_uuid)
+            && let Some(online) = server.get_player_by_uuid(uuid)
+        {
+            core::send(&online, message);
+        }
+    }
+}
+
+fn rally(sender: &CommandSender, server: &Server, player: &Player, uuid: &str) {
+    let mut guard = state().write().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+    let not_in = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
+    let template = guard.raw.language.string("FACTIONS.RALLY_COMMAND.RALLY_SET");
+    let include_y = guard.raw.config.bool("FACTION_RALLY.INCLUDE_Y_COORDINATE");
+
+    let Some(id) = guard.factions.by_member(uuid).map(|f| f.id.clone()) else {
+        drop(guard);
+        return reply(sender, format!("{prefix}{not_in}"));
+    };
+
+    let location = core::location(player);
+    if let Some(faction) = guard.factions.get_mut(&id) {
+        faction.rally_location = Some(location.clone());
+    }
+
+    let loc_str = if include_y {
+        format!("{}, {}, {}", location.block_x(), location.y as i32, location.block_z())
+    } else {
+        format!("{}, {}", location.block_x(), location.block_z())
+    };
+    let message = format!(
+        "{prefix}{}",
+        util::replace_all(
+            &template,
+            &[("<player>", &core::name_of(player)), ("<location>", &loc_str)],
+        )
+    );
+    broadcast_to_faction(server, &guard, &id, &message);
+    drop(guard);
+}
+
+fn remove_rally(sender: &CommandSender, server: &Server, player: &Player, uuid: &str) {
+    let mut guard = state().write().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+    let not_in = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
+    let not_set = guard
+        .raw
+        .language
+        .string("FACTIONS.REMOVE_RALLY_COMMAND.RALLY_NOT_SET");
+    let removed_tpl = guard
+        .raw
+        .language
+        .string("FACTIONS.REMOVE_RALLY_COMMAND.RALLY_REMOVED");
+
+    let Some(id) = guard.factions.by_member(uuid).map(|f| f.id.clone()) else {
+        drop(guard);
+        return reply(sender, format!("{prefix}{not_in}"));
+    };
+
+    let has = guard
+        .factions
+        .get(&id)
+        .and_then(|f| f.rally_location.as_ref())
+        .is_some();
+    if !has {
+        drop(guard);
+        return reply(sender, format!("{prefix}{not_set}"));
+    }
+
+    if let Some(faction) = guard.factions.get_mut(&id) {
+        faction.rally_location = None;
+    }
+    let message = format!(
+        "{prefix}{}",
+        util::replace(&removed_tpl, "<player>", &core::name_of(player))
+    );
+    broadcast_to_faction(server, &guard, &id, &message);
+    drop(guard);
+}
+
+fn focus(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs) {
+    let mut guard = state().write().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+    let usage = guard.raw.language.string("FACTIONS.FOCUS_COMMAND.USAGE");
+    let not_in = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
+    let no_perm_tpl = guard.raw.language.string("FACTIONS.NO_PERMISSION");
+    let cannot = guard.raw.language.string("FACTIONS.FOCUS_COMMAND.CANNOT_FOCUS");
+    let already_tpl = guard
+        .raw
+        .language
+        .string("FACTIONS.FOCUS_COMMAND.ALREADY_FOCUSING");
+    let missing_tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
+    let focused_lines = guard
+        .raw
+        .language
+        .string_list("FACTIONS.FOCUS_COMMAND.FOCUSED");
+
+    let Some(target_name) = string_arg(args, "faction") else {
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
+    };
+    let Some(id) = guard.factions.by_member(uuid).map(|f| f.id.clone()) else {
+        drop(guard);
+        return reply(sender, format!("{prefix}{not_in}"));
+    };
+    let role = guard.factions.get(&id).and_then(|f| f.member(uuid)).map(|m| m.role);
+    if role.map(|r| r.is_at_least(Role::Captain)) != Some(true) {
+        let msg = util::replace(&no_perm_tpl, "<role>", Role::Captain.name());
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    }
+
+    let Some((target_id, target_name_real, is_ally)) = guard
+        .factions
+        .by_name(&target_name)
+        .filter(|f| f.is_player())
+        .map(|f| {
+            let is_ally = guard
+                .factions
+                .get(&id)
+                .map(|own| own.is_ally(&f.id))
+                .unwrap_or(false);
+            (f.id.clone(), f.name.clone(), is_ally)
+        })
+    else {
+        let msg = util::replace(&missing_tpl, "<argument>", &target_name);
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    };
+
+    if target_id == id || is_ally {
+        drop(guard);
+        return reply(sender, format!("{prefix}{cannot}"));
+    }
+    if guard
+        .factions
+        .get(&id)
+        .and_then(|f| f.focused_faction.as_ref())
+        == Some(&target_id)
+    {
+        let msg = util::replace(&already_tpl, "<faction>", &target_name_real);
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    }
+
+    if let Some(faction) = guard.factions.get_mut(&id) {
+        faction.focused_faction = Some(target_id.clone());
+    }
+    for line in focused_lines {
+        let msg = format!("{prefix}{}", util::replace(&line, "<faction>", &target_name_real));
+        broadcast_to_faction(server, &guard, &id, &msg);
+    }
+    drop(guard);
+}
+
+fn unfocus(sender: &CommandSender, server: &Server, uuid: &str) {
+    let mut guard = state().write().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+    let not_in = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
+    let no_perm_tpl = guard.raw.language.string("FACTIONS.NO_PERMISSION");
+    let not_focusing = guard
+        .raw
+        .language
+        .string("FACTIONS.UNFOCUS_COMMAND.NOT_FOCUSING");
+    let unfocused_tpl = guard
+        .raw
+        .language
+        .string("FACTIONS.UNFOCUS_COMMAND.UNFOCUSED");
+    let missing = guard
+        .raw
+        .language
+        .string("FACTIONS.UNFOCUS_COMMAND.FACTION_DOESNT_EXIST");
+
+    let Some(id) = guard.factions.by_member(uuid).map(|f| f.id.clone()) else {
+        drop(guard);
+        return reply(sender, format!("{prefix}{not_in}"));
+    };
+    let role = guard.factions.get(&id).and_then(|f| f.member(uuid)).map(|m| m.role);
+    if role.map(|r| r.is_at_least(Role::Captain)) != Some(true) {
+        let msg = util::replace(&no_perm_tpl, "<role>", Role::Captain.name());
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    }
+
+    let focused = guard.factions.get(&id).and_then(|f| f.focused_faction.clone());
+    let Some(focused) = focused else {
+        drop(guard);
+        return reply(sender, format!("{prefix}{not_focusing}"));
+    };
+
+    let target_name = guard.factions.get(&focused).map(|f| f.name.clone());
+    if let Some(faction) = guard.factions.get_mut(&id) {
+        faction.focused_faction = None;
+    }
+
+    match target_name {
+        Some(name) => {
+            let msg = format!("{prefix}{}", util::replace(&unfocused_tpl, "<faction>", &name));
+            drop(guard);
+            reply(sender, msg);
+        }
+        None => {
+            drop(guard);
+            reply(sender, format!("{prefix}{missing}"));
+        }
     }
 }
 

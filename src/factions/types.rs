@@ -164,6 +164,11 @@ pub struct Faction {
     /// `/f autorevive` toggle (faction-wide auto revive on deathban).
     #[serde(default)]
     pub auto_revive: bool,
+    /// `/f rally` location and `/f focus` target faction.
+    #[serde(default)]
+    pub rally_location: Option<Location>,
+    #[serde(default)]
+    pub focused_faction: Option<String>,
 
     // ---- PlayerFaction fields ----
     pub dtr: f64,
@@ -199,6 +204,8 @@ impl Faction {
             enderpearls: true,
             abilities: true,
             auto_revive: false,
+            rally_location: None,
+            focused_faction: None,
             dtr: config.factions.solo_faction_dtr,
             balance: config.economy.default_faction_balance,
             lives: 0,
@@ -228,6 +235,8 @@ impl Faction {
             enderpearls: true,
             abilities: true,
             auto_revive: false,
+            rally_location: None,
+            focused_faction: None,
             dtr: 0.0,
             balance: 0,
             lives: 0,
