@@ -36,13 +36,6 @@ impl EventHandler<PlayerInteractEvent> for InteractListener {
                 guard.selection.holds_wand(&event.player),
             )
         };
-        tracing::info!(
-            "lazarus-interact action={:?} clicked={:?} selection={} wand={}",
-            action,
-            clicked,
-            has_selection,
-            holds_wand
-        );
         if !(has_selection && holds_wand) {
             return event;
         }

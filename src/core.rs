@@ -182,7 +182,6 @@ pub fn setup_spawn_claim(server: &Server) {
 
     let claim = crate::factions::Claim::new(world.clone(), -radius, radius, -radius, radius);
     guard.claims.add_claim(&safezone_id, claim);
-    tracing::info!("lazarus-spawn created safezone claim world={world} radius={radius}");
 }
 
 /// Resolves the territory at `(world, x, z)`.

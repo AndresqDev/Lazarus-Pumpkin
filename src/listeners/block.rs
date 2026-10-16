@@ -1,16 +1,17 @@
 //! Block protection listeners — port of `factions.listeners.BlockEventListener`.
 //!
-//! Rules:
-//! * safezones are protected from everyone;
-//! * a faction's own claim is protected for members;
-//! * enemies may only build in a faction's claim when it is raidable (DTR <= 0);
-//! * wilderness and warzone are free to build in.
+//! Rules (`checkPlayerBuild`):
+//! * wilderness and your own faction's claim are free to build in;
+//! * a player faction's claim is free to build in when it is raidable (DTR <= 0);
+//! * the warzone is buildable past `WARZONE_BREAK_AFTER` (never in the End);
+//! * safezones deny everyone.
 
 use pumpkin_plugin_api::events::{BlockBreakEvent, BlockPlaceEvent, EventData, EventHandler};
-use pumpkin_plugin_api::Server;
+use pumpkin_plugin_api::{Player, Server};
 
 use crate::core::{self, Territory};
 use crate::state::state;
+use crate::util;
 
 fn can_build(player_uuid: &str, world: &str, x: i32, z: i32) -> bool {
     let territory = core::territory_at(world, x, z);
@@ -45,6 +46,22 @@ fn can_build(player_uuid: &str, world: &str, x: i32, z: i32) -> bool {
     }
 }
 
+/// Port of the `message.replace("<faction>", factionAt.getDisplayName(player))`
+/// line, using the original `language.yml` text.
+fn deny_message(player: &Player, world: &str, x: i32, z: i32, interact: bool) -> String {
+    let territory = core::territory_at(world, x, z);
+    let viewer = core::faction_id_of(&core::uuid_of(player));
+    let name = core::territory_display(&territory, viewer.as_deref());
+
+    let key = if interact {
+        "FACTIONS.PROTECTION_MESSAGES.DENY_INTERACT"
+    } else {
+        "FACTIONS.PROTECTION_MESSAGES.DENY_BUILD"
+    };
+    let template = state().read().unwrap().raw.language.string(key);
+    util::replace(&template, "<faction>", &name)
+}
+
 pub struct BlockBreakListener;
 
 impl EventHandler<BlockBreakEvent> for BlockBreakListener {
@@ -55,20 +72,11 @@ impl EventHandler<BlockBreakEvent> for BlockBreakListener {
 
         let uuid = core::uuid_of(player);
         let world = core::world_name(player);
-        let territory = core::territory_at(&world, event.block_pos.x, event.block_pos.z);
-        let allowed = can_build(&uuid, &world, event.block_pos.x, event.block_pos.z);
-        tracing::info!(
-            "lazarus-break world={} x={} z={} dist={} territory={:?} can_build={}",
-            world,
-            event.block_pos.x,
-            event.block_pos.z,
-            event.block_pos.x.abs().max(event.block_pos.z.abs()),
-            territory,
-            allowed
-        );
-        if !allowed {
+
+        if !can_build(&uuid, &world, event.block_pos.x, event.block_pos.z) {
             event.cancelled = true;
-            core::send(player, "&cYou cannot break blocks here.");
+            let message = deny_message(player, &world, event.block_pos.x, event.block_pos.z, false);
+            core::send(player, &message);
         } else {
             // Keep any active client-side view (claim pillars/walls) alive at this
             // position: real block changed, so re-send the fake block.
@@ -92,7 +100,8 @@ impl EventHandler<BlockPlaceEvent> for BlockPlaceListener {
         let world = core::world_name(player);
         if !can_build(&uuid, &world, event.block_pos.x, event.block_pos.z) {
             event.cancelled = true;
-            core::send(player, "&cYou cannot place blocks here.");
+            let message = deny_message(player, &world, event.block_pos.x, event.block_pos.z, false);
+            core::send(player, &message);
         } else {
             // Re-assert any client-side view at this position.
             state()
