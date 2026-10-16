@@ -44,9 +44,6 @@ struct TabConfig {
     far_right: Vec<String>,
 }
 
-#[plugin_impl]
-pub struct NativeTab;
-
 impl NativeTab {
     pub fn new() -> Self {
         Self
@@ -96,6 +93,9 @@ impl NativeTab {
         Ok(())
     }
 }
+
+#[plugin_impl]
+pub struct NativeTab;
 
 async fn run(server: Arc<Server>, config: TabConfig, log_ctx: Arc<Context>) {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
