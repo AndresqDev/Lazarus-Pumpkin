@@ -6,11 +6,50 @@
 //! * monsters must not spawn in the warzone / system factions unless
 //!   `SPAWN_MOBS_IN_WARZONE` is enabled (`onCreatureSpawn`).
 
-use pumpkin_plugin_api::events::{CreatureSpawnEvent, EntityTargetEvent, EventData, EventHandler};
+use pumpkin_plugin_api::events::{
+    CreatureSpawnEvent, EntityTargetEvent, EventData, EventHandler, PotionSplashEvent,
+};
 use pumpkin_plugin_api::Server;
 
 use crate::core;
 use crate::state::state;
+
+pub struct PotionSplashListener;
+
+/// Port of the first half of `PlayerEventListener#onPotionSplash`: a potion that
+/// lands inside the safezone is cancelled. The event carries no world, so it is
+/// resolved from an affected player (potions only affect nearby entities).
+///
+/// The second half (zeroing the intensity for safezone players) cannot be ported:
+/// the host WIT has no `set-intensity`.
+impl EventHandler<PotionSplashEvent> for PotionSplashListener {
+    fn handle(
+        &self,
+        server: Server,
+        mut event: EventData<PotionSplashEvent>,
+    ) -> EventData<PotionSplashEvent> {
+        let world = event
+            .affected_entities
+            .iter()
+            .find_map(|id| core::player_by_entity(&server, *id))
+            .map(|player| core::world_name(&player));
+
+        let Some(world) = world else {
+            return event;
+        };
+
+        let x = event.location.x;
+        let z = event.location.z;
+        if matches!(
+            core::territory_at(&world, x, z),
+            core::Territory::Safezone
+        ) {
+            event.cancelled = true;
+        }
+
+        event
+    }
+}
 
 pub struct EntityTargetListener;
 

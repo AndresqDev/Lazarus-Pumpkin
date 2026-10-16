@@ -27,6 +27,7 @@ pub fn register(context: &Context) -> Result<(), String> {
 
     context.register_event_handler(entity::EntityTargetListener, EventPriority::High, true)?;
     context.register_event_handler(entity::CreatureSpawnListener, EventPriority::High, true)?;
+    context.register_event_handler(entity::PotionSplashListener, EventPriority::High, true)?;
 
     context.register_event_handler(block::BlockBreakListener, EventPriority::High, true)?;
     context.register_event_handler(block::BlockPlaceListener, EventPriority::High, true)?;
