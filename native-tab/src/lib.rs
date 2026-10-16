@@ -188,7 +188,7 @@ fn add_entries(server: &Server, lines: &[String]) {
     let names: Vec<String> = (0..SLOTS).map(entry_name).collect();
     let texts: Vec<TextComponent> = lines
         .iter()
-        .map(|line| TextComponent::text(line.clone()))
+        .map(|line| TextComponent::from_legacy_string_with_code(line, '&'))
         .collect();
     let properties: Vec<Property> = Vec::new();
 
@@ -228,7 +228,7 @@ fn update_names(server: &Server, lines: &[String], last: &[String]) {
 
     let texts: Vec<TextComponent> = changed
         .iter()
-        .map(|&i| TextComponent::text(lines[i].clone()))
+        .map(|&i| TextComponent::from_legacy_string_with_code(&lines[i], '&'))
         .collect();
     let actions: Vec<Vec<PlayerAction>> = (0..changed.len())
         .map(|k| vec![PlayerAction::UpdateDisplayName(Some(&texts[k]))])
