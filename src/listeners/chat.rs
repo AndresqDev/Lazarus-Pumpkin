@@ -49,7 +49,12 @@ impl EventHandler<PlayerChatEvent> for ChatListener {
 
             event.cancelled = true;
             let message = event.message.clone();
-            let recipients = std::mem::take(&mut event.recipients);
+            // Empty recipients means "broadcast to everyone" (host semantics), so
+            // we must resolve the actual list ourselves.
+            let mut recipients = std::mem::take(&mut event.recipients);
+            if recipients.is_empty() {
+                recipients = server.get_all_players();
+            }
             for recipient in recipients {
                 let line = chat_line(
                     &recipient,
