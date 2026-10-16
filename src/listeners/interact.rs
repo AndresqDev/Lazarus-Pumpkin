@@ -55,6 +55,7 @@ impl EventHandler<PlayerInteractEvent> for InteractListener {
         ) && !is_duplicate(&format!("bard:{uuid}:{clicked:?}"))
         {
             crate::classes::bard_click(&server, &event.player);
+            crate::classes::rogue_click(&server, &event.player);
         }
 
         let (has_selection, holds_wand) = {

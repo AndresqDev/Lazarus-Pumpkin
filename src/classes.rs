@@ -221,6 +221,10 @@ pub struct PvpClassManager {
     pub bard_cooldowns: BTreeMap<(String, String), i64>,
     /// Rogue backstab cooldown: uuid -> expiry millis.
     pub rogue_backstabs: BTreeMap<String, i64>,
+    /// Rogue clickable items.
+    pub rogue_clickables: Vec<BardClickable>,
+    /// (uuid, material) -> cooldown expiry millis.
+    pub rogue_click_cooldowns: BTreeMap<(String, String), i64>,
 }
 
 impl PvpClassManager {
@@ -295,6 +299,31 @@ impl PvpClassManager {
                         material,
                         distance_sq: distance * distance,
                         can_bard_himself: raw.bool(&format!("{base}.CAN_BARD_HIMSELF")),
+                        effect: PassiveEffect {
+                            effect,
+                            amplifier: (raw.int(&format!("{base}.LEVEL")).max(1) - 1) as u8,
+                        },
+                        duration: (raw.int(&format!("{base}.DURATION")).max(1) as u32) * 20,
+                    });
+                }
+            }
+
+            if kind == ClassKind::Rogue {
+                self.rogue_clickables.clear();
+                for potion in raw.keys("ROGUE_CLASS.CLICKABLE_POTION_EFFECTS") {
+                    let base = format!("ROGUE_CLASS.CLICKABLE_POTION_EFFECTS.{potion}");
+                    let Some(effect) = effect_from_name(&potion) else { continue };
+                    let material = legacy_material(&raw.string(&format!("{base}.MATERIAL_ID")))
+                        .unwrap_or_default()
+                        .to_string();
+                    self.rogue_clickables.push(BardClickable {
+                        material,
+                        energy_needed: 0.0,
+                        distance_sq: 0.0,
+                        cooldown_ms: raw.int(&format!("{base}.COOLDOWN")).max(0) * 1000,
+                        can_bard_himself: true,
+                        apply_to_enemy: false,
+                        chat_color: String::new(),
                         effect: PassiveEffect {
                             effect,
                             amplifier: (raw.int(&format!("{base}.LEVEL")).max(1) - 1) as u8,
@@ -843,4 +872,64 @@ pub fn bard_click(server: &Server, player: &Player) {
 
 fn language_prefix() -> String {
     state().read().unwrap().raw.language.string("PREFIX")
+}
+
+/// Handles a Rogue clickable (right-click, self-only effect with cooldown).
+pub fn rogue_click(_server: &Server, player: &Player) {
+    let uuid = crate::core::uuid_of(player);
+    {
+        let guard = state().read().unwrap();
+        if guard.classes.active.get(&uuid) != Some(&ClassKind::Rogue) {
+            return;
+        }
+    }
+
+    let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
+        return;
+    };
+    let key = item
+        .get_registry_key()
+        .trim_start_matches("minecraft:")
+        .to_string();
+
+    let (clickable, now) = {
+        let guard = state().read().unwrap();
+        let Some(clickable) = guard
+            .classes
+            .rogue_clickables
+            .iter()
+            .find(|c| c.material.trim_start_matches("minecraft:") == key)
+            .cloned()
+        else {
+            return;
+        };
+        (clickable, util::now_millis())
+    };
+
+    {
+        let guard = state().read().unwrap();
+        if guard
+            .classes
+            .rogue_click_cooldowns
+            .get(&(uuid.clone(), clickable.material.clone()))
+            .is_some_and(|expiry| *expiry > now)
+        {
+            return;
+        }
+    }
+
+    player.add_effect(StatusEffectInstance {
+        effect_type: clickable.effect.effect,
+        duration: clickable.duration,
+        amplifier: clickable.effect.amplifier,
+        ambient: false,
+        show_particles: true,
+        show_icon: true,
+    });
+    state()
+        .write()
+        .unwrap()
+        .classes
+        .rogue_click_cooldowns
+        .insert((uuid, clickable.material.clone()), now + clickable.cooldown_ms);
 }
