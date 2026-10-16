@@ -70,6 +70,8 @@ enum Action {
     AdminSafezone,
     AdminEnderpearls,
     AdminAbilities,
+    AdminColor,
+    AdminDeathban,
     AdminSetPoints,
     AdminSetBalance,
     AdminSetLives,
@@ -125,6 +127,8 @@ pub fn register(context: &Context) -> Result<(), String> {
         "lazarus:factions.safezone",
         "lazarus:factions.enderpearls",
         "lazarus:factions.abilities",
+        "lazarus:factions.color",
+        "lazarus:factions.deathban",
     ] {
         register_op_permission(context, node, "Lazarus faction admin command")?;
     }
@@ -246,7 +250,9 @@ pub fn register(context: &Context) -> Result<(), String> {
         .then(CommandNode::literal("systemrename").then(str_node("faction").then(str_node("name").execute(FactionExecutor(Action::AdminSystemRename)))))
         .then(CommandNode::literal("safezone").then(str_node("faction").execute(FactionExecutor(Action::AdminSafezone))))
         .then(CommandNode::literal("enderpearls").then(str_node("faction").execute(FactionExecutor(Action::AdminEnderpearls))))
-        .then(CommandNode::literal("abilities").then(str_node("faction").execute(FactionExecutor(Action::AdminAbilities))));
+        .then(CommandNode::literal("abilities").then(str_node("faction").execute(FactionExecutor(Action::AdminAbilities))))
+        .then(CommandNode::literal("color").then(str_node("faction").then(str_node("color").execute(FactionExecutor(Action::AdminColor)))))
+        .then(CommandNode::literal("deathban").then(str_node("faction").execute(FactionExecutor(Action::AdminDeathban))));
 
     context.register_command(root, "lazarus:command.faction");
     Ok(())
@@ -313,6 +319,8 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::AdminSafezone => admin_toggle_system_flag(sender, server, args, SystemFlag::Safezone),
         Action::AdminEnderpearls => admin_toggle_system_flag(sender, server, args, SystemFlag::Enderpearls),
         Action::AdminAbilities => admin_toggle_system_flag(sender, server, args, SystemFlag::Abilities),
+        Action::AdminColor => admin_color(sender, server, args),
+        Action::AdminDeathban => admin_deathban(sender, server, args),
         Action::AdminSetPoints => admin_set_int(sender, server, args, AdminField::Points),
         Action::AdminSetBalance => admin_set_int(sender, server, args, AdminField::Balance),
         Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
@@ -2098,6 +2106,124 @@ fn admin_toggle_system_flag(
     drop(guard);
 
     reply(sender, format!("{prefix}{message}"));
+}
+
+fn admin_color(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    if !require_permission(sender, server, "lazarus:factions.color") {
+        return;
+    }
+    let Some(name) = string_arg(args, "faction") else {
+        return;
+    };
+    let Some(color) = string_arg(args, "color") else {
+        return;
+    };
+
+    let mut guard = state().write().unwrap();
+    let lang = &guard.raw.language;
+    let prefix = lang.string("FACTION_PREFIX");
+    let missing_tpl = lang.string("FACTIONS.FACTION_DOESNT_EXIST");
+    let not_system = lang.string("FACTIONS.COLOR_COMMAND.NOT_SYSTEM_FACTION");
+    let invalid_tpl = lang.string("FACTIONS.COLOR_COMMAND.COLOR_DOESNT_EXIST");
+    let changed_tpl = lang.string("FACTIONS.COLOR_COMMAND.CHANGED");
+
+    let Some(id) = guard.factions.by_name(&name).map(|f| f.id.clone()) else {
+        let message = util::replace(&missing_tpl, "<argument>", &name);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    };
+
+    let Some(faction) = guard.factions.get(&id) else {
+        return;
+    };
+    if !faction.is_system() {
+        reply(sender, format!("{prefix}{not_system}"));
+        return;
+    }
+
+    let lowered = color.to_lowercase();
+    if !is_valid_color(&lowered) {
+        reply(sender, format!("{prefix}{}", util::replace(&invalid_tpl, "<color>", &color)));
+        return;
+    }
+
+    let old_display = format!("{}{}", faction.color, faction.name);
+    if let Some(faction) = guard.factions.get_mut(&id) {
+        faction.color = lowered.clone();
+    }
+    let new_display = format!("{}{}", lowered, guard.factions.get(&id).map(|f| f.name.clone()).unwrap_or_default());
+
+    reply(
+        sender,
+        format!(
+            "{prefix}{}",
+            util::replace_all(&changed_tpl, &[("<faction>", &old_display), ("<color>", &new_display)])
+        ),
+    );
+}
+
+/// Port of `ColorCommand#isColorStringValid`.
+fn is_valid_color(value: &str) -> bool {
+    if value.is_empty() || value.len() % 2 != 0 {
+        return false;
+    }
+    let bytes = value.as_bytes();
+    for pair in bytes.chunks(2) {
+        if pair[0] != b'&' {
+            return false;
+        }
+        let c = pair[1] as char;
+        if !"0123456789abcdefklmnor".contains(c) {
+            return false;
+        }
+    }
+    true
+}
+
+fn admin_deathban(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    let _ = server;
+    if !require_permission(sender, server, "lazarus:factions.deathban") {
+        return;
+    }
+    let Some(name) = string_arg(args, "faction") else {
+        return;
+    };
+
+    let mut guard = state().write().unwrap();
+    let lang = &guard.raw.language;
+    let prefix = lang.string("FACTION_PREFIX");
+    let missing_tpl = lang.string("FACTIONS.FACTION_DOESNT_EXIST");
+    let not_system = lang.string("FACTIONS.DEATHBAN_COMMAND.NOT_SYSTEM_FACTION");
+    let changed_tpl = lang.string("FACTIONS.DEATHBAN_COMMAND.CHANGED");
+
+    let Some(id) = guard.factions.by_name(&name).map(|f| f.id.clone()) else {
+        let message = util::replace(&missing_tpl, "<argument>", &name);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    };
+
+    let Some(faction) = guard.factions.get(&id) else {
+        return;
+    };
+    if !faction.is_system() {
+        reply(sender, format!("{prefix}{not_system}"));
+        return;
+    }
+    let display = format!("{}{}", faction.color, faction.name);
+
+    let Some(faction) = guard.factions.get_mut(&id) else {
+        return;
+    };
+    faction.deathban = !faction.deathban;
+    let deathban = if faction.deathban { "&cDeathban" } else { "&aNon-Deathban" };
+
+    reply(
+        sender,
+        format!(
+            "{prefix}{}",
+            util::replace_all(&changed_tpl, &[("<faction>", &display), ("<deathban>", deathban)])
+        ),
+    );
 }
 
 fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
