@@ -55,10 +55,77 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
             return event;
         }
 
-        // Same faction (always) or ally (unless ally friendly fire is enabled) -> cancel.
-        let ally_ff = state().read().unwrap().config.factions.ally_friendly_fire;
-        if relation == Relation::Member || (relation == Relation::Ally && !ally_ff) {
+        // Safezone checks (port of `PlayerEventListener#onEntityDamageByEntity`).
+        let (damager_safe, victim_safe) = {
+            let dl = core::location(&damager);
+            let vl = core::location(&victim);
+            (
+                matches!(
+                    core::territory_at(&dl.world, dl.block_x(), dl.block_z()),
+                    core::Territory::Safezone
+                ),
+                matches!(
+                    core::territory_at(&vl.world, vl.block_x(), vl.block_z()),
+                    core::Territory::Safezone
+                ),
+            )
+        };
+
+        if damager_safe {
             event.cancelled = true;
+            let message = state()
+                .read()
+                .unwrap()
+                .raw
+                .language
+                .string("FACTIONS.SAFEZONE.DENY_DAMAGE_ATTACKER");
+            core::send(&damager, &message);
+            return event;
+        }
+
+        if victim_safe {
+            event.cancelled = true;
+            let message = state()
+                .read()
+                .unwrap()
+                .raw
+                .language
+                .string("FACTIONS.SAFEZONE.DENY_DAMAGE_OTHERS");
+            core::send(&damager, &message);
+            return event;
+        }
+
+        // Same faction (always) or ally (unless ally friendly fire is enabled) -> cancel.
+        let (ally_ff, max_allies, ally_color) = {
+            let guard = state().read().unwrap();
+            (
+                guard.config.factions.ally_friendly_fire,
+                guard.config.factions.max_allies,
+                guard.config.relation_colors.ally.clone(),
+            )
+        };
+
+        if relation == Relation::Member {
+            event.cancelled = true;
+            return event;
+        }
+
+        if relation == Relation::Ally && !ally_ff {
+            event.cancelled = true;
+            if max_allies > 0 {
+                let template = state()
+                    .read()
+                    .unwrap()
+                    .raw
+                    .language
+                    .string("FACTIONS.DENY_DAMAGE_ALLIES");
+                let message = util::replace(
+                    &template,
+                    "<player>",
+                    &format!("{}{}", ally_color, core::name_of(&victim)),
+                );
+                core::send(&damager, &message);
+            }
             return event;
         }
 
