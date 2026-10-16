@@ -27,7 +27,7 @@ use pumpkin::server::Server;
 use pumpkin_api_macros::{plugin_impl, plugin_method};
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::PotionContentsImpl;
-use pumpkin_data::generated::potion::Potion;
+use pumpkin_data::potion::Potion;
 use serde::Deserialize;
 use tracing::info;
 use uuid::Uuid;
