@@ -149,6 +149,11 @@ pub fn init(data_folder: String) -> Result<(), String> {
     let timers: TimerManager = load_json(&data_folder, "timers.json");
     let holograms: std::collections::BTreeMap<String, Hologram> =
         load_json(&data_folder, "holograms.json");
+    // Ship the 9 default kits (converted from the original `kits.yml`) on first run.
+    let kits_path = format!("{data_folder}/kits.json");
+    if std::fs::metadata(&kits_path).is_err() {
+        let _ = std::fs::write(&kits_path, include_str!("../default-kits.json"));
+    }
     let kits: KitsManager = load_json(&data_folder, "kits.json");
     let mut classes = crate::classes::PvpClassManager::new();
     classes.load(&raw.classes);

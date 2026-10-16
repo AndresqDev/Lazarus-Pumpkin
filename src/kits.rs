@@ -21,11 +21,19 @@ pub struct KitItem {
     pub lore: Vec<String>,
     #[serde(default)]
     pub enchants: Vec<(String, u32)>,
+    /// Modern potion id (e.g. `strong_healing`), from the legacy damage value.
+    #[serde(default)]
+    pub potion: Option<String>,
+    /// Original 1.8 potion damage value (kept for reference).
+    #[serde(default)]
+    pub legacy_damage: Option<i16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Kit {
     pub name: String,
+    #[serde(default)]
+    pub kind: String,
     pub delay_seconds: u64,
     pub items: Vec<KitItem>,
 }
@@ -74,11 +82,14 @@ pub fn capture(player: &Player, name: &str, delay_seconds: u64) -> Kit {
             name: item.get_custom_name().map(|component| component.to_json()),
             lore: item.get_lore().into_iter().map(|line| line.to_json()).collect(),
             enchants,
+            potion: None,
+            legacy_damage: None,
         });
     }
 
     Kit {
         name: name.to_string(),
+        kind: "NORMAL".to_string(),
         delay_seconds,
         items,
     }

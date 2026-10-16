@@ -1,0 +1,3732 @@
+{
+  "kits": {
+    "archer": {
+      "name": "Archer",
+      "kind": "KITMAP",
+      "delay_seconds": 5,
+      "items": [
+        {
+          "key": "minecraft:diamond_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "sharpness",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 0
+        },
+        {
+          "key": "minecraft:ender_pearl",
+          "count": 16,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 1
+        },
+        {
+          "key": "minecraft:bow",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "power",
+              4
+            ],
+            [
+              "unbreaking",
+              3
+            ],
+            [
+              "flame",
+              1
+            ],
+            [
+              "infinity",
+              1
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 2
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 3
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 4
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 5
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 6
+        },
+        {
+          "key": "minecraft:sugar",
+          "count": 32,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 7
+        },
+        {
+          "key": "minecraft:cooked_beef",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 8
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 9
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 10
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 11
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 12
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 13
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 14
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 15
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 16
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 17
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 18
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 19
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 20
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 21
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 22
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 23
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 24
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 25
+        },
+        {
+          "key": "minecraft:feather",
+          "count": 32,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 26
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 27
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 28
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 29
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 30
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 31
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 32
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 33
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 34
+        },
+        {
+          "key": "minecraft:arrow",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 35
+        },
+        {
+          "key": "minecraft:leather_boots",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ],
+            [
+              "feather_falling",
+              4
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 36
+        },
+        {
+          "key": "minecraft:leather_leggings",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 37
+        },
+        {
+          "key": "minecraft:leather_chestplate",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 38
+        },
+        {
+          "key": "minecraft:leather_helmet",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 39
+        }
+      ]
+    },
+    "bard": {
+      "name": "Bard",
+      "kind": "KITMAP",
+      "delay_seconds": 5,
+      "items": [
+        {
+          "key": "minecraft:diamond_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "sharpness",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 0
+        },
+        {
+          "key": "minecraft:ender_pearl",
+          "count": 16,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 1
+        },
+        {
+          "key": "minecraft:blaze_powder",
+          "count": 32,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 2
+        },
+        {
+          "key": "minecraft:sugar",
+          "count": 32,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 3
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 4
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 5
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 6
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 7
+        },
+        {
+          "key": "minecraft:cooked_beef",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 8
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 9
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 10
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 11
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 12
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 13
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 14
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 15
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 16
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 17
+        },
+        {
+          "key": "minecraft:feather",
+          "count": 32,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 18
+        },
+        {
+          "key": "minecraft:spider_eye",
+          "count": 32,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 19
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 20
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 21
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 22
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 23
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 24
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 25
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 26
+        },
+        {
+          "key": "minecraft:iron_ingot",
+          "count": 32,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 27
+        },
+        {
+          "key": "minecraft:magma_cream",
+          "count": 32,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 28
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 29
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 30
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 31
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 32
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 33
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 34
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 35
+        },
+        {
+          "key": "minecraft:golden_boots",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "feather_falling",
+              4
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 36
+        },
+        {
+          "key": "minecraft:golden_leggings",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 37
+        },
+        {
+          "key": "minecraft:golden_chestplate",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 38
+        },
+        {
+          "key": "minecraft:golden_helmet",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 39
+        }
+      ]
+    },
+    "diamond": {
+      "name": "Diamond",
+      "kind": "KITMAP",
+      "delay_seconds": 5,
+      "items": [
+        {
+          "key": "minecraft:diamond_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "sharpness",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 0
+        },
+        {
+          "key": "minecraft:ender_pearl",
+          "count": 16,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 1
+        },
+        {
+          "key": "minecraft:potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_swiftness",
+          "legacy_damage": 8226,
+          "slot": 2
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 3
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 4
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 5
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 6
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 7
+        },
+        {
+          "key": "minecraft:cooked_beef",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 8
+        },
+        {
+          "key": "minecraft:potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_swiftness",
+          "legacy_damage": 8226,
+          "slot": 9
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 10
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 11
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 12
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 13
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 14
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 15
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 16
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 17
+        },
+        {
+          "key": "minecraft:potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_swiftness",
+          "legacy_damage": 8226,
+          "slot": 18
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 19
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 20
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 21
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 22
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 23
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 24
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 25
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 26
+        },
+        {
+          "key": "minecraft:potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_swiftness",
+          "legacy_damage": 8226,
+          "slot": 27
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 28
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 29
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 30
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 31
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 32
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 33
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 34
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 35
+        },
+        {
+          "key": "minecraft:diamond_boots",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ],
+            [
+              "feather_falling",
+              4
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 36
+        },
+        {
+          "key": "minecraft:diamond_leggings",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 37
+        },
+        {
+          "key": "minecraft:diamond_chestplate",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 38
+        },
+        {
+          "key": "minecraft:diamond_helmet",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 39
+        }
+      ]
+    },
+    "builder": {
+      "name": "Builder",
+      "kind": "KITMAP",
+      "delay_seconds": 5,
+      "items": [
+        {
+          "key": "minecraft:diamond_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "sharpness",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 0
+        },
+        {
+          "key": "minecraft:ender_pearl",
+          "count": 16,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 1
+        },
+        {
+          "key": "minecraft:diamond_pickaxe",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "efficiency",
+              5
+            ],
+            [
+              "silk_touch",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 2
+        },
+        {
+          "key": "minecraft:diamond_spade",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "efficiency",
+              5
+            ],
+            [
+              "silk_touch",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 3
+        },
+        {
+          "key": "minecraft:diamond_axe",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "efficiency",
+              5
+            ],
+            [
+              "silk_touch",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 4
+        },
+        {
+          "key": "minecraft:water_bucket",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 5
+        },
+        {
+          "key": "minecraft:diode",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 6
+        },
+        {
+          "key": "minecraft:redstone_block",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 7
+        },
+        {
+          "key": "minecraft:cooked_beef",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 8
+        },
+        {
+          "key": "minecraft:smooth_brick",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 9
+        },
+        {
+          "key": "minecraft:stone",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 10
+        },
+        {
+          "key": "minecraft:stone",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 11
+        },
+        {
+          "key": "minecraft:quartz_block",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 12
+        },
+        {
+          "key": "minecraft:step",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 13
+        },
+        {
+          "key": "minecraft:stone_button",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 14
+        },
+        {
+          "key": "minecraft:string",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 15
+        },
+        {
+          "key": "minecraft:piston_sticky_base",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 16
+        },
+        {
+          "key": "minecraft:oak_log",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 17
+        },
+        {
+          "key": "minecraft:smooth_brick",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 18
+        },
+        {
+          "key": "minecraft:stone",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 19
+        },
+        {
+          "key": "minecraft:stone",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 20
+        },
+        {
+          "key": "minecraft:quartz_block",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 21
+        },
+        {
+          "key": "minecraft:lever",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 22
+        },
+        {
+          "key": "minecraft:string",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 23
+        },
+        {
+          "key": "minecraft:cobble_wall",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 24
+        },
+        {
+          "key": "minecraft:piston_base",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 25
+        },
+        {
+          "key": "minecraft:oak_log",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 26
+        },
+        {
+          "key": "minecraft:step",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 27
+        },
+        {
+          "key": "minecraft:stone",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 28
+        },
+        {
+          "key": "minecraft:stone",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 29
+        },
+        {
+          "key": "minecraft:quartz_stairs",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 30
+        },
+        {
+          "key": "minecraft:tripwire_hook",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 31
+        },
+        {
+          "key": "minecraft:water_bucket",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 32
+        },
+        {
+          "key": "minecraft:glass",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 33
+        },
+        {
+          "key": "minecraft:wooden_step",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 34
+        },
+        {
+          "key": "minecraft:wooden_step",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 35
+        },
+        {
+          "key": "minecraft:iron_boots",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 36
+        },
+        {
+          "key": "minecraft:iron_leggings",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 37
+        },
+        {
+          "key": "minecraft:iron_chestplate",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 38
+        },
+        {
+          "key": "minecraft:iron_helmet",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 39
+        }
+      ]
+    },
+    "rogue": {
+      "name": "Rogue",
+      "kind": "KITMAP",
+      "delay_seconds": 5,
+      "items": [
+        {
+          "key": "minecraft:diamond_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "sharpness",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 0
+        },
+        {
+          "key": "minecraft:ender_pearl",
+          "count": 16,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 1
+        },
+        {
+          "key": "minecraft:golden_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 2
+        },
+        {
+          "key": "minecraft:golden_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 3
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 4
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 5
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 6
+        },
+        {
+          "key": "minecraft:sugar",
+          "count": 32,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 7
+        },
+        {
+          "key": "minecraft:cooked_beef",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 8
+        },
+        {
+          "key": "minecraft:golden_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 9
+        },
+        {
+          "key": "minecraft:golden_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 10
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 11
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 12
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 13
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 14
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 15
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 16
+        },
+        {
+          "key": "minecraft:feather",
+          "count": 32,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 17
+        },
+        {
+          "key": "minecraft:golden_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 18
+        },
+        {
+          "key": "minecraft:golden_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 19
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 20
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 21
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 22
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 23
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 24
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 25
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 26
+        },
+        {
+          "key": "minecraft:golden_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 27
+        },
+        {
+          "key": "minecraft:golden_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 28
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 29
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 30
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 31
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 32
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 33
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 34
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 35
+        },
+        {
+          "key": "minecraft:chainmail_boots",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "feather_falling",
+              4
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 36
+        },
+        {
+          "key": "minecraft:chainmail_leggings",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 37
+        },
+        {
+          "key": "minecraft:chainmail_chestplate",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 38
+        },
+        {
+          "key": "minecraft:chainmail_helmet",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 39
+        }
+      ]
+    },
+    "mage": {
+      "name": "Mage",
+      "kind": "KITMAP",
+      "delay_seconds": 5,
+      "items": [
+        {
+          "key": "minecraft:diamond_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "sharpness",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 0
+        },
+        {
+          "key": "minecraft:ender_pearl",
+          "count": 16,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 1
+        },
+        {
+          "key": "minecraft:ink_sac",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 2
+        },
+        {
+          "key": "minecraft:spider_eye",
+          "count": 62,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 3
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 4
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 5
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 6
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 7
+        },
+        {
+          "key": "minecraft:golden_carrot",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 8
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 9
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 10
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 11
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 12
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 13
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 14
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 15
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 16
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 17
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 18
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 19
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 20
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 21
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 22
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 23
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 24
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 25
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 26
+        },
+        {
+          "key": "minecraft:rotten_flesh",
+          "count": 63,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 27
+        },
+        {
+          "key": "minecraft:wheat_seeds",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 28
+        },
+        {
+          "key": "minecraft:coal",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 29
+        },
+        {
+          "key": "minecraft:golden_nugget",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 30
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 31
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 32
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 33
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 34
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 35
+        },
+        {
+          "key": "minecraft:golden_boots",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ],
+            [
+              "feather_falling",
+              4
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 36
+        },
+        {
+          "key": "minecraft:chainmail_leggings",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 37
+        },
+        {
+          "key": "minecraft:chainmail_chestplate",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 38
+        },
+        {
+          "key": "minecraft:golden_helmet",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 39
+        }
+      ]
+    },
+    "bomber": {
+      "name": "Bomber",
+      "kind": "KITMAP",
+      "delay_seconds": 5,
+      "items": [
+        {
+          "key": "minecraft:diamond_sword",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "sharpness",
+              1
+            ],
+            [
+              "unbreaking",
+              3
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 0
+        },
+        {
+          "key": "minecraft:ender_pearl",
+          "count": 16,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 1
+        },
+        {
+          "key": "minecraft:stick",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 2
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 3
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 4
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 5
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 6
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 7
+        },
+        {
+          "key": "minecraft:cooked_beef",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 8
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 9
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 10
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 11
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 12
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 13
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 14
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 15
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 16
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 17
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 18
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 19
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 20
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 21
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 22
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 23
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 24
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 25
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 26
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 27
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 28
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 29
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 30
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 31
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 32
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 33
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 34
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 35
+        },
+        {
+          "key": "minecraft:golden_boots",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              2
+            ],
+            [
+              "unbreaking",
+              4
+            ],
+            [
+              "feather_falling",
+              2
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 36
+        },
+        {
+          "key": "minecraft:diamond_leggings",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              1
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 37
+        },
+        {
+          "key": "minecraft:diamond_chestplate",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              1
+            ],
+            [
+              "unbreaking",
+              1
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 38
+        },
+        {
+          "key": "minecraft:golden_helmet",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              2
+            ],
+            [
+              "unbreaking",
+              4
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 39
+        }
+      ]
+    },
+    "king": {
+      "name": "King",
+      "kind": "SPECIAL",
+      "delay_seconds": -1,
+      "items": [
+        {
+          "key": "minecraft:diamond_sword",
+          "count": 1,
+          "name": "\u00a78[\u00a7d\u00a7lKing Sword\u00a78]",
+          "lore": [],
+          "enchants": [
+            [
+              "sharpness",
+              10
+            ],
+            [
+              "unbreaking",
+              10
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 0
+        },
+        {
+          "key": "minecraft:ender_pearl",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 1
+        },
+        {
+          "key": "minecraft:stick",
+          "count": 1,
+          "name": "\u00a78[\u00a7d\u00a7lKing Stick\u00a78]",
+          "lore": [],
+          "enchants": [
+            [
+              "knockback",
+              10
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 2
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 3
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 4
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 5
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 6
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 7
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 8
+        },
+        {
+          "key": "minecraft:ender_pearl",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 9
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 10
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 11
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 12
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 13
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 14
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 15
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 16
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 17
+        },
+        {
+          "key": "minecraft:ender_pearl",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 18
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 19
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 20
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 21
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 22
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 23
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 24
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 25
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 26
+        },
+        {
+          "key": "minecraft:ender_pearl",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 27
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 28
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 29
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 30
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 31
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 32
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 33
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 34
+        },
+        {
+          "key": "minecraft:splash_potion",
+          "count": 64,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": "strong_healing",
+          "legacy_damage": 16421,
+          "slot": 35
+        },
+        {
+          "key": "minecraft:diamond_boots",
+          "count": 1,
+          "name": "\u00a78[\u00a7d\u00a7lKing Boots\u00a78]",
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              10
+            ],
+            [
+              "unbreaking",
+              10
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 36
+        },
+        {
+          "key": "minecraft:diamond_leggings",
+          "count": 1,
+          "name": "\u00a78[\u00a7d\u00a7lKing Leggings\u00a78]",
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              10
+            ],
+            [
+              "unbreaking",
+              10
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 37
+        },
+        {
+          "key": "minecraft:diamond_chestplate",
+          "count": 1,
+          "name": "\u00a78[\u00a7d\u00a7lKing Chestplate\u00a78]",
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              10
+            ],
+            [
+              "unbreaking",
+              10
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 38
+        },
+        {
+          "key": "minecraft:diamond_helmet",
+          "count": 1,
+          "name": "\u00a78[\u00a7d\u00a7lKing Helmet\u00a78]",
+          "lore": [],
+          "enchants": [
+            [
+              "protection",
+              10
+            ],
+            [
+              "unbreaking",
+              10
+            ]
+          ],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 39
+        }
+      ]
+    },
+    "starter": {
+      "name": "Starter",
+      "kind": "NORMAL",
+      "delay_seconds": -1,
+      "items": [
+        {
+          "key": "minecraft:fishing_rod",
+          "count": 1,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 0
+        },
+        {
+          "key": "minecraft:cooked_beef",
+          "count": 32,
+          "name": null,
+          "lore": [],
+          "enchants": [],
+          "potion": null,
+          "legacy_damage": null,
+          "slot": 1
+        }
+      ]
+    }
+  }
+}
