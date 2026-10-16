@@ -269,7 +269,14 @@ impl Faction {
     }
 
     pub fn max_dtr(&self, config: &Config) -> f64 {
-        (config.factions.dtr_per_player * self.members.len() as f64).min(config.factions.max_dtr)
+        // Port of `PlayerFaction#getMaxDtr`: solo/empty factions use the fixed
+        // solo DTR, otherwise `min(MAX_DTR, members * DTR_PER_PLAYER)`.
+        if self.members.len() <= 1 {
+            config.factions.solo_faction_dtr
+        } else {
+            (config.factions.dtr_per_player * self.members.len() as f64)
+                .min(config.factions.max_dtr)
+        }
     }
 
     pub fn home_string(&self) -> String {
