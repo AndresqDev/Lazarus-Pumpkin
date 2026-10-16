@@ -141,6 +141,28 @@ impl ClaimManager {
         self.claim_at(world, x, z).is_some()
     }
 
+    /// Port of `ClaimManager#getSafeLocation`: steps out of every claim at
+    /// `(world, x, z)` and returns the first position outside all claims.
+    pub fn get_safe_location(&self, world: &str, x: i32, z: i32) -> (String, i32, i32) {
+        let mut cx = x;
+        let mut cz = z;
+
+        for _ in 0..128 {
+            let Some((_, claim)) = self.claim_at(world, cx, cz) else {
+                break;
+            };
+            cx = if claim.max_x < 0 { claim.min_x - 2 } else { claim.max_x + 2 };
+            cz = if claim.max_z < 0 { claim.min_z - 2 } else { claim.max_z + 2 };
+        }
+
+        if cx == x && cz == z {
+            cx += if cx > 0 { 1 } else { -1 };
+            cz += if cz > 0 { 1 } else { -1 };
+        }
+
+        (world.to_string(), cx, cz)
+    }
+
     pub fn claims_of(&self, faction_id: &str) -> &[Claim] {
         self.claims.get(faction_id).map(Vec::as_slice).unwrap_or(&[])
     }

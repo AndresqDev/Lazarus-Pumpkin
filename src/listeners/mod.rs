@@ -24,6 +24,8 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(combat::EntityDamageByEntityListener, EventPriority::High, true)?;
     context.register_event_handler(combat::EntityDamageListener, EventPriority::High, true)?;
     context.register_event_handler(combat::FoodLevelChangeListener, EventPriority::High, true)?;
+    context.register_event_handler(combat::ProjectileLaunchListener, EventPriority::Normal, true)?;
+    context.register_event_handler(combat::ProjectileHitListener, EventPriority::Normal, true)?;
 
     context.register_event_handler(entity::EntityTargetListener, EventPriority::High, true)?;
     context.register_event_handler(entity::CreatureSpawnListener, EventPriority::High, true)?;

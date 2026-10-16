@@ -5,6 +5,7 @@
 
 use pumpkin_plugin_api::events::{
     EntityDamageByEntityEvent, EntityDamageEvent, EventData, EventHandler, FoodLevelChangeEvent,
+    ProjectileHitEvent, ProjectileLaunchEvent,
 };
 use pumpkin_plugin_api::{Player, Server};
 
@@ -23,7 +24,14 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
         mut event: EventData<EntityDamageByEntityEvent>,
     ) -> EventData<EntityDamageByEntityEvent> {
         let victim = core::player_by_entity(&server, event.entity_id);
-        let damager = core::player_by_entity(&server, event.damager_id);
+        // Projectiles (arrows, snowballs, …) have their own entity id, so resolve
+        // the shooter we tracked on launch.
+        let damager = core::player_by_entity(&server, event.damager_id).or_else(|| {
+            take_projectile_shooter(event.damager_id).and_then(|uuid| {
+                pumpkin_plugin_api::uuid::parse(&uuid)
+                    .and_then(|id| server.get_player_by_uuid(id))
+            })
+        });
 
         let (Some(victim), Some(damager)) = (victim, damager) else {
             return event;
@@ -258,4 +266,55 @@ fn protected(player: &Player) -> bool {
         .unwrap()
         .timers
         .is_active(&uuid, TimerType::PvpProtection)
+}
+
+// ---------------------------------------------------------------------------
+// Projectile ownership (so arrows respect safezone / friendly fire).
+// ---------------------------------------------------------------------------
+
+static PROJECTILE_SHOOTERS: std::sync::Mutex<Option<std::collections::HashMap<i32, String>>> =
+    std::sync::Mutex::new(None);
+
+fn set_projectile_shooter(entity_id: i32, shooter: String) {
+    let mut guard = PROJECTILE_SHOOTERS.lock().unwrap();
+    guard
+        .get_or_insert_with(std::collections::HashMap::new)
+        .insert(entity_id, shooter);
+}
+
+fn take_projectile_shooter(entity_id: i32) -> Option<String> {
+    let mut guard = PROJECTILE_SHOOTERS.lock().unwrap();
+    guard.as_mut().and_then(|map| map.remove(&entity_id))
+}
+
+/// Records which player shot each projectile (arrows have their own entity id,
+/// which is all the damage event gives us).
+pub struct ProjectileLaunchListener;
+
+impl EventHandler<ProjectileLaunchEvent> for ProjectileLaunchListener {
+    fn handle(
+        &self,
+        server: Server,
+        event: EventData<ProjectileLaunchEvent>,
+    ) -> EventData<ProjectileLaunchEvent> {
+        if let Some(shooter_id) = event.shooter_id
+            && let Some(shooter) = core::player_by_entity(&server, shooter_id)
+        {
+            set_projectile_shooter(event.entity_id, core::uuid_of(&shooter));
+        }
+        event
+    }
+}
+
+pub struct ProjectileHitListener;
+
+impl EventHandler<ProjectileHitEvent> for ProjectileHitListener {
+    fn handle(
+        &self,
+        _server: Server,
+        event: EventData<ProjectileHitEvent>,
+    ) -> EventData<ProjectileHitEvent> {
+        take_projectile_shooter(event.entity_id);
+        event
+    }
 }

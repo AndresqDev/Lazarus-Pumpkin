@@ -154,10 +154,8 @@ fn process_pending(server: &Server) {
                 }
             }
             TimerType::Stuck => {
-                let world_name = core::world_name(&player);
-                if let Some(world) = server.get_world_by_name(&world_name) {
-                    let y = world.get_top_block_y(0, 0) as f64 + 1.0;
-                    player.teleport((0.5, y, 0.5), None, None, world);
+                if let Some(target) = action.target {
+                    teleport(server, &player, &target);
                     core::send(&player, "&aYou have been teleported to a safe location.");
                 }
             }

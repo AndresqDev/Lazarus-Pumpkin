@@ -310,7 +310,7 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::HelpPage => {}
         Action::SetHome => set_home(sender, &player, &uuid),
         Action::Home => home(sender, &player, &uuid),
-        Action::Stuck => stuck(sender, &player, &uuid),
+        Action::Stuck => stuck(sender, server, &player, &uuid),
         Action::Open => toggle_open(sender, server, &uuid),
         Action::ShowSelf => show(sender, server, &uuid, None),
         Action::ShowNamed => show(sender, server, &uuid, string_arg(args, "faction")),
@@ -1140,14 +1140,78 @@ fn home(sender: &CommandSender, player: &Player, uuid: &str) {
     reply(sender, messages);
 }
 
-fn stuck(sender: &CommandSender, player: &Player, uuid: &str) {
+fn stuck(sender: &CommandSender, server: &Server, player: &Player, uuid: &str) {
     let messages;
     {
         let mut guard = state().write().unwrap();
-        let lang = guard.lang.clone();
-        let warmup = guard.config.timers.stuck_warmup_seconds;
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
         let origin = core::location(player);
 
+        if core::dimension_of(&origin.world) != core::Dimension::Overworld {
+            let msg = guard
+                .raw
+                .language
+                .string("FACTIONS.STUCK_COMMAND.CANNOT_TELEPORT.ONLY_IN_OVERWORLD");
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        }
+
+        let territory =
+            core::territory_at_guard(&guard, &origin.world, origin.block_x(), origin.block_z());
+        let own = guard.factions.by_member(uuid).map(|f| f.id.clone());
+
+        let allowed = match &territory {
+            core::Territory::Warzone => true,
+            core::Territory::Faction(id) => own.as_deref() != Some(id.as_str()),
+            _ => false,
+        };
+
+        if !allowed {
+            let key = match &territory {
+                core::Territory::Faction(id) if own.as_deref() == Some(id.as_str()) => {
+                    "FACTIONS.STUCK_COMMAND.CANNOT_TELEPORT.IN_OWN_CLAIM"
+                }
+                _ => "FACTIONS.STUCK_COMMAND.CANNOT_TELEPORT.ONLY_FROM_ENEMY_CLAIMS",
+            };
+            let msg = guard.raw.language.string(key);
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        }
+
+        if guard.timers.pending(uuid).map(|p| p.timer_type) == Some(TimerType::Stuck) {
+            let msg = guard
+                .raw
+                .language
+                .string("FACTIONS.STUCK_COMMAND.CANNOT_TELEPORT.ALREADY_TELEPORTING");
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        }
+
+        let warmup = guard.config.timers.stuck_warmup_seconds;
+        let (world_name, sx, sz) =
+            guard
+                .claims
+                .get_safe_location(&origin.world, origin.block_x(), origin.block_z());
+        let top = server
+            .get_all_worlds()
+            .into_iter()
+            .find(|w| w.get_name() == world_name)
+            .map(|w| w.get_top_block_y(sx, sz))
+            .unwrap_or(origin.y as i32);
+
+        let target = crate::factions::Location {
+            world: world_name,
+            x: sx as f64,
+            y: top as f64,
+            z: sz as f64,
+            pitch: origin.pitch,
+            yaw: origin.yaw,
+        };
+
+        let template = guard
+            .raw
+            .language
+            .string("FACTIONS.STUCK_COMMAND.TASK_STARTED");
         guard.timers.set_pending(
             uuid,
             PendingAction {
@@ -1157,12 +1221,12 @@ fn stuck(sender: &CommandSender, player: &Player, uuid: &str) {
                 origin_x: origin.x,
                 origin_y: origin.y,
                 origin_z: origin.z,
-                target: None,
+                target: Some(target),
             },
         );
 
         messages = util::replace(
-            &lang.stuck_warmup,
+            &template,
             "<time>",
             &util::format_duration(warmup as i64 * 1000),
         );
