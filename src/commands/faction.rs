@@ -67,6 +67,9 @@ enum Action {
     AdminSystemCreate,
     AdminSystemList,
     AdminSystemRename,
+    AdminSafezone,
+    AdminEnderpearls,
+    AdminAbilities,
     AdminSetPoints,
     AdminSetBalance,
     AdminSetLives,
@@ -119,6 +122,9 @@ pub fn register(context: &Context) -> Result<(), String> {
         "lazarus:factions.systemcreate",
         "lazarus:factions.systemlist",
         "lazarus:factions.systemrename",
+        "lazarus:factions.safezone",
+        "lazarus:factions.enderpearls",
+        "lazarus:factions.abilities",
     ] {
         register_op_permission(context, node, "Lazarus faction admin command")?;
     }
@@ -237,7 +243,10 @@ pub fn register(context: &Context) -> Result<(), String> {
         .then(CommandNode::literal("forcerename").then(str_node("faction").then(str_node("name").execute(FactionExecutor(Action::AdminForceRename)))))
         .then(CommandNode::literal("systemcreate").then(str_node("name").execute(FactionExecutor(Action::AdminSystemCreate))))
         .then(CommandNode::literal("systemlist").execute(FactionExecutor(Action::AdminSystemList)))
-        .then(CommandNode::literal("systemrename").then(str_node("faction").then(str_node("name").execute(FactionExecutor(Action::AdminSystemRename)))));
+        .then(CommandNode::literal("systemrename").then(str_node("faction").then(str_node("name").execute(FactionExecutor(Action::AdminSystemRename)))))
+        .then(CommandNode::literal("safezone").then(str_node("faction").execute(FactionExecutor(Action::AdminSafezone))))
+        .then(CommandNode::literal("enderpearls").then(str_node("faction").execute(FactionExecutor(Action::AdminEnderpearls))))
+        .then(CommandNode::literal("abilities").then(str_node("faction").execute(FactionExecutor(Action::AdminAbilities))));
 
     context.register_command(root, "lazarus:command.faction");
     Ok(())
@@ -301,6 +310,9 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::AdminSystemCreate => admin_system_create(sender, server, args),
         Action::AdminSystemList => admin_system_list(sender),
         Action::AdminSystemRename => admin_system_rename(sender, server, args),
+        Action::AdminSafezone => admin_toggle_system_flag(sender, server, args, SystemFlag::Safezone),
+        Action::AdminEnderpearls => admin_toggle_system_flag(sender, server, args, SystemFlag::Enderpearls),
+        Action::AdminAbilities => admin_toggle_system_flag(sender, server, args, SystemFlag::Abilities),
         Action::AdminSetPoints => admin_set_int(sender, server, args, AdminField::Points),
         Action::AdminSetBalance => admin_set_int(sender, server, args, AdminField::Balance),
         Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
@@ -1443,6 +1455,13 @@ enum AdminField {
     Lives,
 }
 
+#[derive(Clone, Copy)]
+enum SystemFlag {
+    Safezone,
+    Enderpearls,
+    Abilities,
+}
+
 /// Per-subcommand permission check (the original registers one
 /// `lazarus.factions.*` node per admin subcommand).
 fn require_permission(sender: &CommandSender, server: &Server, node: &str) -> bool {
@@ -1986,6 +2005,99 @@ fn admin_system_rename(sender: &CommandSender, server: &Server, args: &ConsumedA
             )
         ),
     );
+}
+
+fn admin_toggle_system_flag(
+    sender: &CommandSender,
+    server: &Server,
+    args: &ConsumedArgs,
+    flag: SystemFlag,
+) {
+    let _ = server;
+    let node = match flag {
+        SystemFlag::Safezone => "lazarus:factions.safezone",
+        SystemFlag::Enderpearls => "lazarus:factions.enderpearls",
+        SystemFlag::Abilities => "lazarus:factions.abilities",
+    };
+    if !require_permission(sender, server, node) {
+        return;
+    }
+    let Some(name) = string_arg(args, "faction") else {
+        return;
+    };
+
+    let mut guard = state().write().unwrap();
+    let lang = &guard.raw.language;
+    let prefix = lang.string("FACTION_PREFIX");
+    let usage = lang.string(match flag {
+        SystemFlag::Safezone => "FACTIONS.SAFEZONE_COMMAND.USAGE",
+        SystemFlag::Enderpearls => "FACTIONS.ENDERPEARLS_COMMAND.USAGE",
+        SystemFlag::Abilities => "FACTIONS.ABILITIES_COMMAND.USAGE",
+    });
+    let missing_tpl = lang.string("FACTIONS.FACTION_DOESNT_EXIST");
+    let not_system = lang.string(match flag {
+        SystemFlag::Safezone => "FACTIONS.SAFEZONE_COMMAND.NOT_SYSTEM_FACTION",
+        SystemFlag::Enderpearls => "FACTIONS.ENDERPEARLS_COMMAND.NOT_SYSTEM_FACTION",
+        SystemFlag::Abilities => "FACTIONS.ABILITIES_COMMAND.NOT_SYSTEM_FACTION",
+    });
+
+    let Some(id) = guard.factions.by_name(&name).map(|f| f.id.clone()) else {
+        let message = util::replace(&missing_tpl, "<argument>", &name);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    };
+
+    let Some(faction) = guard.factions.get(&id) else {
+        return;
+    };
+    if !faction.is_system() {
+        reply(sender, format!("{prefix}{not_system}"));
+        return;
+    }
+    let display = format!("{}{}", faction.color, faction.name);
+
+    // Toggle and render the option-specific message.
+    let message = match flag {
+        SystemFlag::Safezone => {
+            let faction = guard.factions.get_mut(&id).unwrap();
+            faction.safezone = !faction.safezone;
+            let now = faction.safezone;
+            let tpl = guard.raw.language.string("FACTIONS.SAFEZONE_COMMAND.CHANGED");
+            util::replace_all(
+                &tpl,
+                &[
+                    ("<faction>", &display),
+                    ("<safezone>", if now { "&atrue" } else { "&cfalse" }),
+                ],
+            )
+        }
+        SystemFlag::Enderpearls => {
+            let faction = guard.factions.get_mut(&id).unwrap();
+            faction.enderpearls = !faction.enderpearls;
+            let now = faction.enderpearls;
+            let tpl = guard.raw.language.string(if now {
+                "FACTIONS.ENDERPEARLS_COMMAND.ENABLED"
+            } else {
+                "FACTIONS.ENDERPEARLS_COMMAND.DISABLED"
+            });
+            util::replace(&tpl, "<faction>", &display)
+        }
+        SystemFlag::Abilities => {
+            let faction = guard.factions.get_mut(&id).unwrap();
+            faction.abilities = !faction.abilities;
+            let now = faction.abilities;
+            let tpl = guard.raw.language.string(if now {
+                "FACTIONS.ABILITIES_COMMAND.ENABLED"
+            } else {
+                "FACTIONS.ABILITIES_COMMAND.DISABLED"
+            });
+            util::replace(&tpl, "<faction>", &display)
+        }
+    };
+    let _ = usage;
+    drop(guard);
+
+    reply(sender, format!("{prefix}{message}"));
 }
 
 fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {

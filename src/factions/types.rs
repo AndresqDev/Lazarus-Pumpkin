@@ -153,6 +153,15 @@ pub struct Faction {
     /// Legacy system-faction color (e.g. `&4`), only used by system factions.
     pub color: String,
 
+    // ---- SystemFaction toggles (`/f safezone`, `/f enderpearls`, `/f abilities`) ----
+    /// Marks this faction's territory as a safezone.
+    #[serde(default)]
+    pub safezone: bool,
+    #[serde(default = "default_true")]
+    pub enderpearls: bool,
+    #[serde(default = "default_true")]
+    pub abilities: bool,
+
     // ---- PlayerFaction fields ----
     pub dtr: f64,
     pub balance: i64,
@@ -183,6 +192,9 @@ impl Faction {
             kind: FactionKind::Player,
             deathban: true,
             color: String::new(),
+            safezone: false,
+            enderpearls: true,
+            abilities: true,
             dtr: config.factions.solo_faction_dtr,
             balance: config.economy.default_faction_balance,
             lives: 0,
@@ -208,6 +220,9 @@ impl Faction {
             kind,
             deathban: false,
             color,
+            safezone: kind == FactionKind::Safezone,
+            enderpearls: true,
+            abilities: true,
             dtr: 0.0,
             balance: 0,
             lives: 0,
@@ -235,7 +250,17 @@ impl Faction {
     }
 
     pub fn is_safezone(&self) -> bool {
-        self.kind == FactionKind::Safezone
+        self.safezone || self.kind == FactionKind::Safezone
+    }
+
+    /// Port of `Faction#areEnderpearlEnabled`.
+    pub fn are_enderpearls_enabled(&self) -> bool {
+        self.enderpearls
+    }
+
+    /// Port of `SystemFaction#isAbilities`.
+    pub fn abilities_enabled(&self) -> bool {
+        self.abilities
     }
 
     pub fn is_warzone(&self) -> bool {
@@ -302,4 +327,8 @@ impl Faction {
             Relation::Enemy
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }
