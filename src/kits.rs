@@ -140,17 +140,13 @@ pub fn give(player: &Player, kit: &Kit) {
     }
 }
 
-/// base64 of the binary code `yosoyelplugin` that marks Lazarus potion items.
-/// Keep in sync with `native-potions/src/lib.rs` (`MARKER_CODE_B64`) and
-/// `potion_components.rs` (`MARKER_CODE`).
-pub const POTION_MARKER_B64: &str = "eW9zb3llbHB1Z2lu";
-
 /// Builds the lore line consumed by `potion_components::apply_marker`: its plain
 /// text is the JSON `{"lzp":"<base64 code>","potion":"<id>"}`, wrapped as a text
-/// component (`{"text":"..."}`).
+/// component (`{"text":"..."}`). The base64 is derived from the single marker
+/// constant in [`crate::potion_components`], so writer and reader cannot drift.
 fn potion_marker_line(potion: &str) -> Option<TextComponent> {
     let marker = serde_json::json!({
-        "lzp": POTION_MARKER_B64,
+        "lzp": crate::potion_components::marker_code_b64(),
         "potion": potion,
     })
     .to_string();

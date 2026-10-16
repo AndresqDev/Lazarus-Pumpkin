@@ -71,6 +71,10 @@ jobs:
         working-directory: Pumpkin
         run: cargo build --release -p native_potions --target x86_64-unknown-linux-gnu
 
+      - name: Run the plugin unit tests
+        working-directory: Pumpkin
+        run: cargo test --release -p native_potions --target x86_64-unknown-linux-gnu
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

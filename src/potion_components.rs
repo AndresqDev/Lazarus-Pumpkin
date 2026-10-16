@@ -4,7 +4,7 @@
 //! Flow (all *before* the player ever receives the item):
 //!
 //! 1. A give site (e.g. [`crate::kits`]) stamps the item's lore with the marker
-//!    line `{"text":"{\"lzp\":\"eW9zb3llbHB1Z2lu\",\"potion\":\"<id>\"}"}`.
+//!    line `{"text":"{\"lzp\":\"eW9zb3llbHBsdWdpbg==\",\"potion\":\"<id>\"}"}`.
 //! 2. [`apply_marker`] detects the marker in the item's own lore, looks the
 //!    potion up in the native table and calls `item.set-component`, which the
 //!    host deserializes with **server** types — so the item is a real potion
@@ -27,11 +27,12 @@ use pumpkin_plugin_api::data_components::DataComponent;
 use pumpkin_plugin_api::text::TextComponent;
 use pumpkin_plugin_api::ItemStack;
 
-use crate::kits::POTION_MARKER_B64;
-
-/// Binary marker code carried (base64) inside the `lzp` field.
-/// Keep in sync with `native-potions/src/lib.rs` (`MARKER_CODE_B64`).
-const MARKER_CODE: &[u8] = b"yosoyelplugin";
+/// Binary marker code embedded (base64) in the marker's `lzp` field. This is the
+/// single source of truth: the writer ([`crate::kits`]) embeds
+/// [`marker_code_b64`] and the reader validates that `lzp` decodes to exactly
+/// these bytes. Keep in sync with `native-potions/src/lib.rs`
+/// (`MARKER_CODE_B64`, informational field of the table).
+pub const MARKER_CODE: &[u8] = b"yosoyelplugin";
 
 /// Table format version understood by this module.
 const FORMAT_VERSION: u32 = 1;
@@ -188,8 +189,42 @@ fn load_table() -> Result<Table, String> {
     Ok(Table { components })
 }
 
-/// Minimal standard-alphabet base64 decoder (16 characters, no padding needed
-/// for the codes we accept — kept dependency-free).
+/// base64 of [`MARKER_CODE`], as embedded in the marker line by the writer.
+pub fn marker_code_b64() -> String {
+    encode_base64(MARKER_CODE)
+}
+
+/// Minimal standard-alphabet base64 encoder with `=` padding.
+fn encode_base64(input: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::new();
+
+    for chunk in input.chunks(3) {
+        let first = u32::from(chunk[0]);
+        let second = chunk.get(1).copied().map_or(0, u32::from);
+        let third = chunk.get(2).copied().map_or(0, u32::from);
+        let triple = (first << 16) | (second << 8) | third;
+
+        output.push(ALPHABET[((triple >> 18) & 0x3F) as usize] as char);
+        output.push(ALPHABET[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            output.push(ALPHABET[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            output.push('=');
+        }
+        if chunk.len() > 2 {
+            output.push(ALPHABET[(triple & 0x3F) as usize] as char);
+        } else {
+            output.push('=');
+        }
+    }
+
+    output
+}
+
+/// Minimal standard-alphabet base64 decoder (accepts and ignores `=` padding —
+/// kept dependency-free).
 fn decode_base64(input: &str) -> Option<Vec<u8>> {
     let mut buffer: u32 = 0;
     let mut bits: u32 = 0;
@@ -223,16 +258,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decodes_the_marker_code() {
-        assert_eq!(
-            decode_base64(POTION_MARKER_B64).as_deref(),
-            Some(MARKER_CODE)
-        );
+    fn marker_base64_round_trips_to_the_binary_code() {
+        let encoded = marker_code_b64();
+        // Pinned value: base64 of b"yosoyelplugin".
+        assert_eq!(encoded, "eW9zb3llbHBsdWdpbg==");
+        assert_eq!(decode_base64(&encoded).as_deref(), Some(MARKER_CODE));
     }
 
     #[test]
     fn rejects_foreign_codes() {
-        assert_ne!(decode_base64("AAAAAAAAAAAAAAAA").as_deref(), Some(MARKER_CODE));
+        assert_ne!(
+            decode_base64("AAAAAAAAAAAAAAAA").as_deref(),
+            Some(MARKER_CODE)
+        );
         assert_eq!(decode_base64("not base64!!"), None);
+        // The historical typo (`yosoyelpugin`) must not match.
+        assert_ne!(
+            decode_base64("eW9zb3llbHB1Z2lu").as_deref(),
+            Some(MARKER_CODE)
+        );
     }
 }

@@ -53,11 +53,11 @@ is stripped during conversion):
 
 ```jsonc
 // lore line (as JSON text component):
-{"text":"{\"lzp\":\"eW9zb3llbHB1Z2lu\",\"potion\":\"strong_healing\"}"}
+{"text":"{\"lzp\":\"eW9zb3llbHBsdWdpbg==\",\"potion\":\"strong_healing\"}"}
 
 // the marker JSON itself:
 {
-  "lzp": "eW9zb3llbHB1Z2lu", // base64 of the plugin's binary code: "yosoyelplugin"
+  "lzp": "eW9zb3llbHBsdWdpbg==", // base64 of the plugin's binary code: "yosoyelplugin"
   "potion": "strong_healing" // modern potion id (as accepted by Potion::from_name)
 }
 ```
@@ -73,8 +73,8 @@ Constants to keep in sync:
 
 | Constant | Value | Files |
 |---|---|---|
-| binary code | `yosoyelplugin` | `native-potions/src/lib.rs` (`.so`), WASM `src/potion_components.rs` |
-| base64 | `eW9zb3llbHB1Z2lu` | WASM `src/kits.rs` (`POTION_MARKER_B64`), `native-potions/src/lib.rs`, docs |
+| binary code | `yosoyelplugin` | WASM `src/potion_components.rs` (`MARKER_CODE`, single source), `native-potions/src/lib.rs` |
+| base64 | `eW9zb3llbHBsdWdpbg==` | derived at runtime by `potion_components::marker_code_b64()`; pinned in tests; mirrored in `native-potions/src/lib.rs` (informational) |
 | table version | `1` | `native-potions/src/lib.rs`, WASM `src/potion_components.rs` |
 
 ## Native table
@@ -85,7 +85,7 @@ At server start the `.so` writes, next to the WASM plugin's data:
 ```jsonc
 {
   "version": 1,
-  "lzp": "eW9zb3llbHB1Z2lu",
+  "lzp": "eW9zb3llbHBsdWdpbg==",
   "potion_components": {
     "strong_healing": "<base64 of the component's network bytes>",
     // …every potion in the registry (46 in 26.3)

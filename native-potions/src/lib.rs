@@ -18,7 +18,7 @@
 //! ```jsonc
 //! {
 //!   "version": 1,
-//!   "lzp": "eW9zb3llbHB1Z2lu",          // base64 of the binary code `yosoyelplugin`
+//!   "lzp": "eW9zb3llbHBsdWdpbg==",      // base64 of the binary code `yosoyelplugin`
 //!   "potion_components": {
 //!     "strong_healing": "<base64 of the component's network bytes>",
 //!     ...
@@ -37,8 +37,9 @@
 //! server binary that loads it (the byte layout is stable inside a tag).
 //!
 //! Keep the constants below in sync with:
-//! - `src/kits.rs` (`POTION_MARKER_B64`, marker writer),
-//! - `src/potion_components.rs` (marker reader + table consumer).
+//! - `src/kits.rs` (marker writer, base64 derived from the binary code),
+//! - `src/potion_components.rs` (marker reader + table consumer, single source
+//!   of truth for the binary code).
 
 use std::collections::BTreeMap;
 use std::io::Cursor;
@@ -55,8 +56,10 @@ use pumpkin_data::potion::Potion;
 use pumpkin_protocol::codec::data_component::{deserialize, serialize};
 use serde::Serialize;
 
-/// base64 of the binary code `yosoyelplugin` that identifies Lazarus items.
-const MARKER_CODE_B64: &str = "eW9zb3llbHB1Z2lu";
+/// base64 of the binary code `yosoyelplugin` that marks Lazarus items.
+/// Informational: the WASM side derives its own base64 from the binary code and
+/// validates the marker against the bytes, not against this string.
+const MARKER_CODE_B64: &str = "eW9zb3llbHBsdWdpbg==";
 
 /// Table format version understood by `src/potion_components.rs`.
 const FORMAT_VERSION: u32 = 1;
@@ -174,6 +177,16 @@ fn encode_contents(contents: &PotionContentsImpl) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn marker_code_base64_is_canonical() {
+        // Pinned: base64(b"yosoyelplugin"). The WASM reader decodes `lzp` and
+        // compares against the binary code, so this must stay canonical.
+        assert_eq!(
+            BASE64_STANDARD.decode(MARKER_CODE_B64).unwrap(),
+            b"yosoyelplugin".to_vec()
+        );
+    }
 
     #[test]
     fn table_covers_the_registry_and_round_trips() {
