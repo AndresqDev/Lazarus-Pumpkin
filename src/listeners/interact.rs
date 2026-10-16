@@ -254,6 +254,7 @@ fn clear_selection(player: &Player, uuid: &str) {
 /// Port of the shift-left-click purchase branch of `ClaimManager#onPlayerInteract`.
 fn purchase(server: &Server, player: &Player, uuid: &str) {
     let mut messages: Vec<String> = Vec::new();
+    let mut created: Option<(crate::factions::Claim, String)> = None;
 
     let (system_missing, system_claimed) = {
         let guard = state().read().unwrap();
@@ -377,6 +378,7 @@ fn purchase(server: &Server, player: &Player, uuid: &str) {
         if let Some(faction) = factions.get_mut(&faction_id) {
             faction.balance -= price;
         }
+        created = Some((claim.clone(), faction_id.clone()));
 
         selection.cancel_local(player);
         glass::update_selection(glass, player, None, None);
@@ -395,6 +397,11 @@ fn purchase(server: &Server, player: &Player, uuid: &str) {
 
     for message in messages {
         core::send(player, message);
+    }
+
+    // Eject PvP-protected players that ended up inside the new claim.
+    if let Some((claim, owner_id)) = created {
+        crate::core::eject_intruders(server, &claim, &owner_id);
     }
 }
 
