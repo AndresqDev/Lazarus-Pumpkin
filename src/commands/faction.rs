@@ -72,6 +72,10 @@ enum Action {
     AdminAbilities,
     AdminColor,
     AdminDeathban,
+    AdminClaimFor,
+    AdminRemoveClaim,
+    AdminChatSpy,
+    AdminTpHere,
     AdminSetPoints,
     AdminSetBalance,
     AdminSetLives,
@@ -129,6 +133,10 @@ pub fn register(context: &Context) -> Result<(), String> {
         "lazarus:factions.abilities",
         "lazarus:factions.color",
         "lazarus:factions.deathban",
+        "lazarus:factions.claimfor",
+        "lazarus:factions.removeclaim",
+        "lazarus:factions.chatspy",
+        "lazarus:factions.tphere",
     ] {
         register_op_permission(context, node, "Lazarus faction admin command")?;
     }
@@ -252,7 +260,11 @@ pub fn register(context: &Context) -> Result<(), String> {
         .then(CommandNode::literal("enderpearls").then(str_node("faction").execute(FactionExecutor(Action::AdminEnderpearls))))
         .then(CommandNode::literal("abilities").then(str_node("faction").execute(FactionExecutor(Action::AdminAbilities))))
         .then(CommandNode::literal("color").then(str_node("faction").then(str_node("color").execute(FactionExecutor(Action::AdminColor)))))
-        .then(CommandNode::literal("deathban").then(str_node("faction").execute(FactionExecutor(Action::AdminDeathban))));
+        .then(CommandNode::literal("deathban").then(str_node("faction").execute(FactionExecutor(Action::AdminDeathban))))
+        .then(CommandNode::literal("claimfor").then(str_node("faction").execute(FactionExecutor(Action::AdminClaimFor))))
+        .then(CommandNode::literal("removeclaim").execute(FactionExecutor(Action::AdminRemoveClaim)))
+        .then(CommandNode::literal("chatspy").execute(FactionExecutor(Action::AdminChatSpy)))
+        .then(CommandNode::literal("tphere").then(str_node("faction").execute(FactionExecutor(Action::AdminTpHere))));
 
     context.register_command(root, "lazarus:command.faction");
     Ok(())
@@ -321,6 +333,10 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::AdminAbilities => admin_toggle_system_flag(sender, server, args, SystemFlag::Abilities),
         Action::AdminColor => admin_color(sender, server, args),
         Action::AdminDeathban => admin_deathban(sender, server, args),
+        Action::AdminClaimFor => admin_claim_for(sender, server, args),
+        Action::AdminRemoveClaim => admin_remove_claim(sender, server),
+        Action::AdminChatSpy => admin_chat_spy(sender, server),
+        Action::AdminTpHere => admin_tp_here(sender, server, args),
         Action::AdminSetPoints => admin_set_int(sender, server, args, AdminField::Points),
         Action::AdminSetBalance => admin_set_int(sender, server, args, AdminField::Balance),
         Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
@@ -2224,6 +2240,242 @@ fn admin_deathban(sender: &CommandSender, server: &Server, args: &ConsumedArgs) 
             util::replace_all(&changed_tpl, &[("<faction>", &display), ("<deathban>", deathban)])
         ),
     );
+}
+
+fn admin_chat_spy(sender: &CommandSender, server: &Server) {
+    let _ = server;
+    if !require_permission(sender, server, "lazarus:factions.chatspy") {
+        return;
+    }
+    let Some(player) = sender.as_player() else {
+        return;
+    };
+    let uuid = core::uuid_of(&player);
+
+    let (enabled, message) = {
+        let mut guard = state().write().unwrap();
+        let enabled = guard.factions.toggle_chat_spy(&uuid);
+        let key = if enabled {
+            "FACTIONS.CHATSPY_ENABLED"
+        } else {
+            "FACTIONS.CHATSPY_DISABLED"
+        };
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let message = guard.raw.language.string(key);
+        (enabled, format!("{prefix}{message}"))
+    };
+    let _ = enabled;
+    reply(sender, message);
+}
+
+fn admin_tp_here(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    if !require_permission(sender, server, "lazarus:factions.tphere") {
+        return;
+    }
+    let Some(name) = string_arg(args, "faction") else {
+        return;
+    };
+    let Some(player) = sender.as_player() else {
+        return;
+    };
+
+    let (prefix, missing_tpl, faction_tpl, sender_tpl, members, faction_name) = {
+        let guard = state().read().unwrap();
+        let lang = &guard.raw.language;
+        let found = guard.factions.by_name(&name).filter(|f| f.is_player()).map(|f| {
+            (
+                f.name.clone(),
+                f.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
+            )
+        });
+        let (faction_name, members) = found.unwrap_or_default();
+        (
+            lang.string("FACTION_PREFIX"),
+            lang.string("FACTIONS.FACTION_DOESNT_EXIST"),
+            lang.string("FACTIONS.TP_HERE_COMMAND.TELEPORTED_FACTION"),
+            lang.string("FACTIONS.TP_HERE_COMMAND.TELEPORTED_SENDER"),
+            members,
+            faction_name,
+        )
+    };
+
+    if faction_name.is_empty() {
+        let message = util::replace(&missing_tpl, "<argument>", &name);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    }
+
+    let location = core::location(&player);
+    let position = (location.x, location.y, location.z);
+
+    for member_uuid in &members {
+        if let Some(id) = pumpkin_plugin_api::uuid::parse(member_uuid)
+            && let Some(online) = server.get_player_by_uuid(id)
+        {
+            if let Some(world) = server
+                .get_all_worlds()
+                .into_iter()
+                .find(|w| w.get_name() == location.world)
+            {
+                online.teleport(position, None, None, world);
+            }
+            core::send(
+                &online,
+                format!("{prefix}{}", util::replace(&faction_tpl, "<player>", &core::name_of(&player))),
+            );
+        }
+    }
+
+    reply(
+        sender,
+        format!("{prefix}{}", util::replace(&sender_tpl, "<faction>", &faction_name)),
+    );
+}
+
+fn admin_remove_claim(sender: &CommandSender, server: &Server) {
+    let _ = server;
+    if !require_permission(sender, server, "lazarus:factions.removeclaim") {
+        return;
+    }
+    let Some(player) = sender.as_player() else {
+        return;
+    };
+    let location = core::location(&player);
+
+    let mut guard = state().write().unwrap();
+    let lang_prefix = guard.raw.language.string("FACTION_PREFIX");
+
+    let Some((owner_id, claim)) = guard
+        .claims
+        .claim_at(&location.world, location.block_x(), location.block_z())
+        .map(|(owner, claim)| (owner.clone(), claim.clone()))
+    else {
+        let message = guard.raw.language.string("FACTIONS.REMOVE_CLAIM_COMMAND.NO_CLAIM");
+        drop(guard);
+        reply(sender, format!("{lang_prefix}{message}"));
+        return;
+    };
+
+    let center = format!("{}, {}", (claim.min_x + claim.max_x) / 2, (claim.min_z + claim.max_z) / 2);
+    let owner_display = guard
+        .factions
+        .get(&owner_id)
+        .map(|f| format!("{}{}", f.color, f.name))
+        .unwrap_or_default();
+    let is_player = guard.factions.get(&owner_id).map(|f| f.is_player()).unwrap_or(false);
+
+    guard
+        .claims
+        .remove_claim_at(&owner_id, &location.world, location.block_x(), location.block_z());
+
+    // Clear the home if it was inside the removed claim.
+    if is_player
+        && claim.contains(&location.world, claim.min_x, claim.min_z)
+        && let Some(faction) = guard.factions.get(&owner_id)
+        && let Some(home) = &faction.home
+        && claim.contains(&location.world, home.block_x(), home.block_z())
+        && let Some(faction) = guard.factions.get_mut(&owner_id)
+    {
+        faction.home = None;
+    }
+
+    let sender_tpl = guard.raw.language.string("FACTIONS.REMOVE_CLAIM_COMMAND.REMOVED_SENDER");
+    let faction_tpl = guard.raw.language.string("FACTIONS.REMOVE_CLAIM_COMMAND.REMOVED_FACTION");
+    let members: Vec<String> = if is_player {
+        guard
+            .factions
+            .get(&owner_id)
+            .map(|f| f.members.values().map(|m| m.uuid.clone()).collect())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    drop(guard);
+
+    reply(
+        sender,
+        format!(
+            "{lang_prefix}{}",
+            util::replace_all(&sender_tpl, &[("<faction>", &owner_display), ("<location>", &center)])
+        ),
+    );
+
+    if is_player {
+        let player_name = core::name_of(&player);
+        let message = format!(
+            "{lang_prefix}{}",
+            util::replace_all(&faction_tpl, &[("<player>", &player_name), ("<location>", &center)])
+        );
+        for member_uuid in members {
+            if let Some(id) = pumpkin_plugin_api::uuid::parse(&member_uuid)
+                && let Some(online) = server.get_player_by_uuid(id)
+            {
+                core::send(&online, &message);
+            }
+        }
+    }
+}
+
+fn admin_claim_for(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    let _ = server;
+    if !require_permission(sender, server, "lazarus:factions.claimfor") {
+        return;
+    }
+    let Some(name) = string_arg(args, "faction") else {
+        return;
+    };
+    let Some(player) = sender.as_player() else {
+        return;
+    };
+    let uuid = core::uuid_of(&player);
+
+    let mut guard = state().write().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+
+    let Some(owner_id) = guard
+        .factions
+        .by_name(&name)
+        .filter(|f| f.is_system())
+        .map(|f| f.id.clone())
+    else {
+        let message = util::replace(
+            &guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST"),
+            "<argument>",
+            &name,
+        );
+        drop(guard);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    };
+
+    let Some(claim) = guard.selection.get(&uuid).and_then(|s| s.to_claim()) else {
+        let message = guard.raw.language.string("FACTIONS.CLAIM_FOR_COMMAND.MAKE_A_SELECTION");
+        drop(guard);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    };
+
+    if guard.claims.overlaps(&claim) {
+        let message = guard.raw.language.string("FACTIONS.CLAIM_FOR_COMMAND.CLAIM_OVERLAPPING");
+        drop(guard);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    }
+
+    guard.claims.add_claim(&owner_id, claim);
+    let display = guard
+        .factions
+        .get(&owner_id)
+        .map(|f| format!("{}{}", f.color, f.name))
+        .unwrap_or_default();
+    let message = util::replace_all(
+        &guard.raw.language.string("FACTIONS.CLAIM_FOR_COMMAND.CLAIM_CLAIMED"),
+        &[("<player>", &core::name_of(&player)), ("<faction>", &display)],
+    );
+    guard.selection.cancel_local(&player);
+    drop(guard);
+
+    reply(sender, format!("{prefix}{message}"));
 }
 
 fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {

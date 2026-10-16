@@ -14,6 +14,9 @@ pub struct FactionsManager {
     pub safezone_id: String,
     /// Set to true once the built-in wilderness/warzone/safezone factions exist.
     pub initialized: bool,
+    /// Staff members spying on faction/ally chat (`/f chatspy`).
+    #[serde(default)]
+    pub chat_spy: std::collections::BTreeSet<String>,
 }
 
 impl Default for FactionsManager {
@@ -24,6 +27,7 @@ impl Default for FactionsManager {
             warzone_id: String::new(),
             safezone_id: String::new(),
             initialized: false,
+            chat_spy: std::collections::BTreeSet::new(),
         }
     }
 }
@@ -92,6 +96,17 @@ impl FactionsManager {
         self.factions
             .values()
             .find(|f| f.is_player() && f.members.contains_key(uuid))
+    }
+
+    /// Toggles chat spy for a staff member; returns the new state.
+    pub fn toggle_chat_spy(&mut self, uuid: &str) -> bool {
+        if self.chat_spy.contains(uuid) {
+            self.chat_spy.remove(uuid);
+            false
+        } else {
+            self.chat_spy.insert(uuid.to_string());
+            true
+        }
     }
 
     pub fn player_factions(&self) -> impl Iterator<Item = &Faction> {

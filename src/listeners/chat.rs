@@ -120,6 +120,23 @@ impl EventHandler<PlayerChatEvent> for ChatListener {
             ChatType::Public => {}
         }
 
+        // Chat spy: staff with `/f chatspy` also receive faction/ally chat.
+        let spies: Vec<String> = state()
+            .read()
+            .unwrap()
+            .factions
+            .chat_spy
+            .iter()
+            .cloned()
+            .collect();
+        for spy in spies {
+            if let Some(id) = pumpkin_plugin_api::uuid::parse(&spy)
+                && let Some(online) = server.get_player_by_uuid(id)
+            {
+                core::send(&online, &formatted);
+            }
+        }
+
         event
     }
 }
