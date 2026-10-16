@@ -94,6 +94,24 @@ impl CommandHandler for FactionExecutor {
 pub fn register(context: &Context) -> Result<(), String> {
     register_public_permission(context, "lazarus:command.faction", "Use the faction commands")?;
     register_op_permission(context, "lazarus:command.faction.admin", "Use the faction admin commands")?;
+    for node in [
+        "lazarus.factions.dtr",
+        "lazarus.factions.setpoints",
+        "lazarus.factions.setbalance",
+        "lazarus.factions.setlives",
+        "lazarus.factions.forcekick",
+        "lazarus.factions.forceleader",
+        "lazarus.factions.setfreeze",
+        "lazarus.factions.thaw",
+        "lazarus.factions.save",
+        "lazarus.factions.remove",
+        "lazarus.factions.clearclaims",
+        "lazarus.factions.setkills",
+        "lazarus.factions.forcepromote",
+        "lazarus.factions.forcedemote",
+    ] {
+        register_op_permission(context, node, "Lazarus faction admin command")?;
+    }
 
     let str_node = |name: &str| CommandNode::argument(name, &ArgumentType::String(StringType::SingleWord));
     let int_node = |name: &str| CommandNode::argument(name, &ArgumentType::Integer((None, None)));
@@ -270,7 +288,7 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::AdminForceLeader => admin_force_leader(sender, server, args),
         Action::AdminFreeze => admin_freeze(sender, server, args, true),
         Action::AdminThaw => admin_freeze(sender, server, args, false),
-        Action::AdminSave => admin_save(sender),
+        Action::AdminSave => admin_save(sender, server),
     }
 }
 
@@ -1405,8 +1423,10 @@ enum AdminField {
     Lives,
 }
 
-fn require_admin(sender: &CommandSender, server: &Server) -> bool {
-    if sender.is_console() || sender.has_permission(server, "lazarus:command.faction.admin") {
+/// Per-subcommand permission check (the original registers one
+/// `lazarus.factions.*` node per admin subcommand).
+fn require_permission(sender: &CommandSender, server: &Server, node: &str) -> bool {
+    if sender.is_console() || sender.has_permission(server, node) {
         return true;
     }
     reply(sender, "&cYou do not have permission.");
@@ -1414,7 +1434,7 @@ fn require_admin(sender: &CommandSender, server: &Server) -> bool {
 }
 
 fn admin_change_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs, add: bool) {
-    if !require_admin(sender, server) {
+    if !require_permission(sender, server, "lazarus.factions.dtr") {
         return;
     }
     let Some(name) = string_arg(args, "faction") else {
@@ -1516,7 +1536,7 @@ fn admin_change_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs
 }
 
 fn admin_force_role(sender: &CommandSender, server: &Server, args: &ConsumedArgs, promote: bool) {
-    if !require_admin(sender, server) {
+    if !require_permission(sender, server, if promote { "lazarus.factions.forcepromote" } else { "lazarus.factions.forcedemote" }) {
         return;
     }
     let Some(target_name) = string_arg(args, "player") else {
@@ -1640,7 +1660,7 @@ fn admin_force_role(sender: &CommandSender, server: &Server, args: &ConsumedArgs
 }
 
 fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
-    if !require_admin(sender, server) {
+    if !require_permission(sender, server, "lazarus.factions.remove") {
         return;
     }
 
@@ -1705,7 +1725,7 @@ fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
 }
 
 fn admin_clear_claims(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
-    if !require_admin(sender, server) {
+    if !require_permission(sender, server, "lazarus.factions.clearclaims") {
         return;
     }
 
@@ -1775,7 +1795,7 @@ fn admin_clear_claims(sender: &CommandSender, server: &Server, args: &ConsumedAr
 }
 
 fn admin_set_kills(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
-    if !require_admin(sender, server) {
+    if !require_permission(sender, server, "lazarus.factions.setkills") {
         return;
     }
 
@@ -1849,7 +1869,7 @@ fn admin_set_kills(sender: &CommandSender, server: &Server, args: &ConsumedArgs)
 }
 
 fn admin_set_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
-    if !require_admin(sender, server) {
+    if !require_permission(sender, server, "lazarus.factions.dtr") {
         return;
     }
     let Some(name) = string_arg(args, "faction") else {
@@ -1873,7 +1893,7 @@ fn admin_set_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
 }
 
 fn admin_set_int(sender: &CommandSender, server: &Server, args: &ConsumedArgs, field: AdminField) {
-    if !require_admin(sender, server) {
+    if !require_permission(sender, server, match field { AdminField::Points => "lazarus.factions.setpoints", AdminField::Balance => "lazarus.factions.setbalance", AdminField::Lives => "lazarus.factions.setlives" }) {
         return;
     }
     let Some(name) = string_arg(args, "faction") else {
@@ -1900,7 +1920,7 @@ fn admin_set_int(sender: &CommandSender, server: &Server, args: &ConsumedArgs, f
 }
 
 fn admin_force_kick(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
-    if !require_admin(sender, server) {
+    if !require_permission(sender, server, "lazarus.factions.forcekick") {
         return;
     }
     let Some(name) = string_arg(args, "player") else {
@@ -1930,7 +1950,7 @@ fn admin_force_kick(sender: &CommandSender, server: &Server, args: &ConsumedArgs
 }
 
 fn admin_force_leader(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
-    if !require_admin(sender, server) {
+    if !require_permission(sender, server, "lazarus.factions.forceleader") {
         return;
     }
     let Some(name) = string_arg(args, "player") else {
@@ -1961,7 +1981,7 @@ fn admin_force_leader(sender: &CommandSender, server: &Server, args: &ConsumedAr
 }
 
 fn admin_freeze(sender: &CommandSender, server: &Server, args: &ConsumedArgs, freeze: bool) {
-    if !require_admin(sender, server) {
+    if !require_permission(sender, server, if freeze { "lazarus.factions.setfreeze" } else { "lazarus.factions.thaw" }) {
         return;
     }
     let Some(name) = string_arg(args, "faction") else {
@@ -1987,7 +2007,10 @@ fn admin_freeze(sender: &CommandSender, server: &Server, args: &ConsumedArgs, fr
     }
 }
 
-fn admin_save(sender: &CommandSender) {
+fn admin_save(sender: &CommandSender, server: &Server) {
+    if !require_permission(sender, server, "lazarus.factions.save") {
+        return;
+    }
     crate::state::save_all();
     reply(sender, "&aAll data saved.");
 }
