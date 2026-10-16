@@ -19,6 +19,11 @@ use crate::util;
 /// Starts the repeating tasks (called from `on_load`).
 pub fn start(context: &Context) {
     context.schedule_repeating_task(20, 20, |server| tick(&server));
+    // Re-send fake blocks that were broken/placed over (next tick, after the
+    // server's own block update has been applied).
+    context.schedule_repeating_task(1, 1, |server| {
+        state().write().unwrap().glass.process_pending_regen(&server);
+    });
     // Client-side glass walls refresh a bit faster, like the original 100ms loop.
     context.schedule_repeating_task(10, 10, |server| glass_tick(&server));
 

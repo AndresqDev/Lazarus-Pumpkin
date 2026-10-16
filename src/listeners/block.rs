@@ -75,7 +75,7 @@ impl EventHandler<BlockBreakEvent> for BlockBreakListener {
 
         // Always re-assert any client-side render at this position: the client
         // predicts the break/place and would otherwise erase our fake blocks.
-        state().read().unwrap().glass.regenerate_at(
+        state().write().unwrap().glass.regenerate_at(
             &server,
             &world,
             event.block_pos.x,
@@ -112,7 +112,7 @@ impl EventHandler<BlockPlaceEvent> for BlockPlaceListener {
         let world = core::world_name(player);
 
         // Re-assert any client-side render at this position (see BlockBreakListener).
-        state().read().unwrap().glass.regenerate_at(
+        state().write().unwrap().glass.regenerate_at(
             &server,
             &world,
             event.block_pos.x,

@@ -41,6 +41,9 @@ pub struct GlassManager {
     pub entries: BTreeMap<String, BTreeMap<PosKey, (GlassType, u16)>>,
     /// uuid -> last chunk the claim map was re-generated for ("world", cx, cz)
     pub map_users: BTreeMap<String, (String, i32, i32)>,
+    /// Positions whose fake block must be re-sent on the next tick (the client
+    /// predicts breaks/places and would otherwise erase our render).
+    pub pending_regen: std::collections::BTreeSet<PosKey>,
 }
 
 impl GlassManager {
@@ -156,11 +159,31 @@ impl GlassManager {
 
     /// Regenerates the fake block at `(world, x, y, z)` for every player that sees
     /// one, so an active client-side view survives a real block break/place there.
-    pub fn regenerate_at(&self, server: &Server, world: &str, x: i32, y: i32, z: i32) {
+    ///
+    /// The immediate send is overridden by the server's own break/place update, so
+    /// the position is also queued and re-sent on the next tick.
+    pub fn regenerate_at(&mut self, server: &Server, world: &str, x: i32, y: i32, z: i32) {
         let key = (world.to_string(), x, y, z);
 
+        let mut seen = false;
+        for map in self.entries.values() {
+            if map.get(&key).is_some() {
+                seen = true;
+                break;
+            }
+        }
+        if !seen {
+            return;
+        }
+
+        self.send_at(server, &key);
+        self.pending_regen.insert(key);
+    }
+
+    fn send_at(&self, server: &Server, key: &PosKey) {
+        let (world, x, y, z) = key.clone();
         for (uuid, map) in &self.entries {
-            let Some((_, state_id)) = map.get(&key) else {
+            let Some((_, state_id)) = map.get(key) else {
                 continue;
             };
             if let Some(player) =
@@ -168,6 +191,18 @@ impl GlassManager {
             {
                 player.send_block_change(BlockPos { x, y, z }, *state_id);
             }
+        }
+    }
+
+    /// Re-sends every queued fake block (runs on the next tick).
+    pub fn process_pending_regen(&mut self, server: &Server) {
+        if self.pending_regen.is_empty() {
+            return;
+        }
+        let keys: Vec<PosKey> = self.pending_regen.iter().cloned().collect();
+        self.pending_regen.clear();
+        for key in keys {
+            self.send_at(server, &key);
         }
     }
 }
