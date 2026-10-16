@@ -194,6 +194,98 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
             }
         }
 
+        // Rogue backstab: melee from behind with a gold sword.
+        if !projectile_damager {
+            let is_rogue = {
+                let guard = state().read().unwrap();
+                guard.classes.active.get(&damager_uuid) == Some(&crate::classes::ClassKind::Rogue)
+            };
+            let holding_sword = damager
+                .get_item_in_hand(pumpkin_plugin_api::common::Hand::Right)
+                .is_some_and(|item| item.get_registry_key().contains("golden_sword"));
+
+            if is_rogue && holding_sword {
+                let victim_yaw = core::location(&victim).yaw;
+                let damager_yaw = core::location(&damager).yaw;
+                let diff = ((victim_yaw - damager_yaw + 540.0) % 360.0) - 180.0;
+                let angle = diff.abs().to_radians();
+
+                if angle < 1.4 {
+                    let (damage, cooldown_ms, effects_enabled, effects) = {
+                        let guard = state().read().unwrap();
+                        (
+                            guard.raw.config.double("ROGUE_CLASS.BACKSTAB.DAMAGE") as f32,
+                            guard.raw.config.int("ROGUE_CLASS.BACKSTAB.COOLDOWN") * 1000,
+                            guard.raw.config.bool("ROGUE_CLASS.BACKSTAB.EFFECTS_ENABLED"),
+                            guard.raw.config.keys("ROGUE_CLASS.BACKSTAB.EFFECTS"),
+                        )
+                    };
+                    let now = util::now_millis();
+                    let on_cooldown = {
+                        let guard = state().read().unwrap();
+                        guard
+                            .classes
+                            .rogue_backstabs
+                            .get(&damager_uuid)
+                            .is_some_and(|expiry| *expiry > now)
+                    };
+
+                    if !on_cooldown {
+                        event.damage = damage * 2.0;
+                        state()
+                            .write()
+                            .unwrap()
+                            .classes
+                            .rogue_backstabs
+                            .insert(damager_uuid.clone(), now + cooldown_ms);
+
+                        if effects_enabled {
+                            let (language, parsed) = {
+                                let guard = state().read().unwrap();
+                                let mut parsed = Vec::new();
+                                for name in &effects {
+                                    if let Some(effect) =
+                                        crate::classes::effect_by_name(name)
+                                    {
+                                        let base =
+                                            format!("ROGUE_CLASS.BACKSTAB.EFFECTS.{name}");
+                                        let amplifier = (guard
+                                            .raw
+                                            .config
+                                            .int(&format!("{base}.LEVEL"))
+                                            .max(1)
+                                            - 1) as u8;
+                                        let duration = (guard
+                                            .raw
+                                            .config
+                                            .int(&format!("{base}.DURATION"))
+                                            .max(1)
+                                            as u32)
+                                            * 20;
+                                        parsed.push((effect, amplifier, duration));
+                                    }
+                                }
+                                (guard.raw.language.string("ROGUE_BACKSTAB_COOLDOWN_EXPIRED"), parsed)
+                            };
+                            for (effect, amplifier, duration) in parsed {
+                                damager.add_effect(
+                                    pumpkin_plugin_api::wit::pumpkin::plugin::status_effect::StatusEffectInstance {
+                                        effect_type: effect,
+                                        duration,
+                                        amplifier,
+                                        ambient: false,
+                                        show_particles: true,
+                                        show_icon: true,
+                                    },
+                                );
+                            }
+                            let _ = language;
+                        }
+                    }
+                }
+            }
+        }
+
         // Activate combat tags for both players.
         let tag_message = util::replace(
             "&cYou are now combat tagged for &e<time>&c.",

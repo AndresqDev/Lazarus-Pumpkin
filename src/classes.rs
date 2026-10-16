@@ -120,6 +120,10 @@ fn legacy_material(id: &str) -> Option<&'static str> {
 }
 
 /// Bukkit potion-effect name (from `classes.yml`) to the Pumpkin status effect.
+pub fn effect_by_name(name: &str) -> Option<StatusEffectType> {
+    effect_from_name(name)
+}
+
 fn effect_from_name(name: &str) -> Option<StatusEffectType> {
     use StatusEffectType as E;
     Some(match name.to_ascii_uppercase().as_str() {
@@ -215,6 +219,8 @@ pub struct PvpClassManager {
     pub bard_clickables: Vec<BardClickable>,
     /// (uuid, material) -> cooldown expiry millis.
     pub bard_cooldowns: BTreeMap<(String, String), i64>,
+    /// Rogue backstab cooldown: uuid -> expiry millis.
+    pub rogue_backstabs: BTreeMap<String, i64>,
 }
 
 impl PvpClassManager {
