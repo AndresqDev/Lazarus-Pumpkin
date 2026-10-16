@@ -24,9 +24,77 @@ use crate::factions::{ClaimManager, FactionsManager};
 use crate::lang::Lang;
 use crate::timers::TimerManager;
 use crate::userdata::UserdataManager;
+use crate::yaml::ConfigFile;
+
+/// Raw YAML configs — the original files, read 1:1 (Fase 0).
+pub struct RawConfigs {
+    pub config: ConfigFile,
+    pub language: ConfigFile,
+    pub scoreboard: ConfigFile,
+    pub tab: ConfigFile,
+    pub utilities: ConfigFile,
+    pub classes: ConfigFile,
+    pub limiters: ConfigFile,
+    pub abilities: ConfigFile,
+    pub items: ConfigFile,
+}
+
+impl RawConfigs {
+    /// Loads every original YAML file, creating it from the embedded default.
+    pub fn load(folder: &str) -> Self {
+        Self {
+            config: ConfigFile::load_or_create(
+                folder,
+                "config.yml",
+                include_str!("../original-configs/config.yml"),
+            ),
+            language: ConfigFile::load_or_create(
+                folder,
+                "language.yml",
+                include_str!("../original-configs/language.yml"),
+            ),
+            scoreboard: ConfigFile::load_or_create(
+                folder,
+                "scoreboard.yml",
+                include_str!("../original-configs/scoreboard.yml"),
+            ),
+            tab: ConfigFile::load_or_create(
+                folder,
+                "tab.yml",
+                include_str!("../original-configs/tab.yml"),
+            ),
+            utilities: ConfigFile::load_or_create(
+                folder,
+                "utilities.yml",
+                include_str!("../original-configs/utilities.yml"),
+            ),
+            classes: ConfigFile::load_or_create(
+                folder,
+                "classes.yml",
+                include_str!("../original-configs/classes.yml"),
+            ),
+            limiters: ConfigFile::load_or_create(
+                folder,
+                "limiters.yml",
+                include_str!("../original-configs/limiters.yml"),
+            ),
+            abilities: ConfigFile::load_or_create(
+                folder,
+                "abilities.yml",
+                include_str!("../original-configs/abilities.yml"),
+            ),
+            items: ConfigFile::load_or_create(
+                folder,
+                "items.yml",
+                include_str!("../original-configs/items.yml"),
+            ),
+        }
+    }
+}
 
 pub struct AppState {
     pub data_folder: String,
+    pub raw: RawConfigs,
     pub config: Config,
     pub lang: Lang,
     pub tab: TabConfig,
@@ -63,6 +131,7 @@ static STATE: OnceLock<RwLock<AppState>> = OnceLock::new();
 
 /// Initialises global state from disk (creating default files on first run).
 pub fn init(data_folder: String) -> Result<(), String> {
+    let raw = RawConfigs::load(&data_folder);
     let config: Config = load_toml(&data_folder, "config.toml");
     let lang: Lang = load_toml(&data_folder, "lang.toml");
     let tab: TabConfig = load_toml(&data_folder, "tab.toml");
@@ -83,6 +152,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
     STATE
         .set(RwLock::new(AppState {
             data_folder,
+            raw,
             config,
             lang,
             tab,
@@ -125,12 +195,14 @@ pub fn save_all() {
 /// Reloads `config.toml` and `lang.toml` from disk.
 pub fn reload_config() {
     let folder = state().read().unwrap().data_folder.clone();
+    let raw = RawConfigs::load(&folder);
     let config: Config = load_toml(&folder, "config.toml");
     let lang: Lang = load_toml(&folder, "lang.toml");
     let tab: TabConfig = load_toml(&folder, "tab.toml");
     let sidebar: SidebarConfig = load_toml(&folder, "scoreboard.toml");
 
     let mut guard = state().write().unwrap();
+    guard.raw = raw;
     guard.config = config;
     guard.lang = lang;
     guard.tab = tab;

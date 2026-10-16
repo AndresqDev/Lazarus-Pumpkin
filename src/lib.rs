@@ -34,6 +34,7 @@ mod tasks;
 mod timers;
 mod userdata;
 mod util;
+mod yaml;
 
 use pumpkin_plugin_api::permissions;
 use pumpkin_plugin_api::{Context, Plugin, PluginMetadata};
