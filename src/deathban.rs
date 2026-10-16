@@ -34,8 +34,9 @@ pub fn enforce_on_join(player: &Player) -> bool {
     true
 }
 
-/// Applies the deathban (or consumes a life). Returns a message to send, if any.
-pub fn apply_on_death(player: &Player) -> Option<String> {
+/// Applies the deathban (or consumes a life). Returns `(message, banned)` where
+/// `banned` means the player must be kicked (port of `DeathbanManager#kickPlayer`).
+pub fn apply_on_death(player: &Player) -> Option<(String, bool)> {
     let uuid = crate::core::uuid_of(player);
     let world = crate::core::world_name(player);
 
@@ -73,12 +74,22 @@ pub fn apply_on_death(player: &Player) -> Option<String> {
     if config.use_lives && user.lives > 0 {
         user.lives -= 1;
         let lives = user.lives;
-        return Some(util::replace(&lang.deathban_lives_used, "<lives>", &lives.to_string()));
+        return Some((
+            util::replace(&lang.deathban_lives_used, "<lives>", &lives.to_string()),
+            false,
+        ));
     }
 
     user.deathban(config.default_ban_time);
     let time = util::format_duration(config.default_ban_time as i64 * 60 * 1000);
-    Some(util::replace(&lang.deathban_message, "<time>", &time))
+    Some((
+        util::replace(
+            &util::replace(&lang.deathban_message, "<time>", &time),
+            "<reason>",
+            "",
+        ),
+        true,
+    ))
 }
 
 /// Whether the player's deathban is still active.

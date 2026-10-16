@@ -289,8 +289,13 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
         }
 
         // Deathban / life consumption (port of DeathbanManager death handling).
-        if let Some(message) = crate::deathban::apply_on_death(&event.player) {
-            core::send(&event.player, message);
+        if let Some((message, banned)) = crate::deathban::apply_on_death(&event.player) {
+            core::send(&event.player, &message);
+            if banned {
+                if let Some(java) = event.player.as_java() {
+                    java.kick(pumpkin_plugin_api::player::JavaKickOptions::new(util::text(&message)));
+                }
+            }
         }
 
         // Drop the claim wand (port of the death handling in SelectionManager).
