@@ -17,6 +17,7 @@ pub struct Config {
 
     pub join_welcome_message_enabled: bool,
     pub commands_cooldown: u64,
+    pub spawn_mobs_in_warzone: bool,
 
     pub factions: FactionsConfig,
     pub relation_colors: RelationColors,
@@ -41,6 +42,7 @@ impl Default for Config {
             date_format: "dd.MM HH:mm:ss".into(),
             join_welcome_message_enabled: true,
             commands_cooldown: 2,
+            spawn_mobs_in_warzone: false,
             factions: FactionsConfig::default(),
             relation_colors: RelationColors::default(),
             warzone_radius: WorldRadii { overworld: 500, nether: 300, end: 300 },
