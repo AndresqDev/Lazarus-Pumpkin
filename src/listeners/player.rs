@@ -160,26 +160,12 @@ impl EventHandler<PlayerMoveEvent> for MoveListener {
             return event;
         }
 
-        // PvP protection: entering an enemy player faction / non-safezone system
-        // claim is denied (port of `PvpProtHandler#onPlayerMove`).
+        // PvP protection: only the safezone (spawn) entry is denied. Other
+        // players' claims / non-safezone system claims are walkable.
         let block_enter = {
             let guard = state().read().unwrap();
-            if !guard.timers.is_active(&uuid, TimerType::PvpProtection) {
-                false
-            } else {
-                let can_enter = guard
-                    .raw
-                    .config
-                    .bool("PVP_PROTECTION.CAN_ENTER_OWN_CLAIM");
-                match &territory {
-                    core::Territory::Faction(id) => guard
-                        .factions
-                        .get(id)
-                        .map(|faction| faction.should_cancel_pvp_timer_entrance(&uuid, can_enter))
-                        .unwrap_or(false),
-                    _ => false,
-                }
-            }
+            guard.timers.is_active(&uuid, TimerType::PvpProtection)
+                && matches!(territory, core::Territory::Safezone)
         };
 
         if block_enter {

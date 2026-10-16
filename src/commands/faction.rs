@@ -2487,8 +2487,6 @@ fn admin_claim_for(sender: &CommandSender, server: &Server, args: &ConsumedArgs)
         return;
     }
 
-    let claim_clone = claim.clone();
-    let owner_id_clone = owner_id.clone();
     guard.claims.add_claim(&owner_id, claim);
     let display = guard
         .factions
@@ -2504,9 +2502,6 @@ fn admin_claim_for(sender: &CommandSender, server: &Server, args: &ConsumedArgs)
         .glass
         .clear_type(&player, crate::glass::GlassType::ClaimSelection);
     drop(guard);
-
-    // Eject PvP-protected players that ended up inside the new claim.
-    crate::core::eject_intruders(server, &claim_clone, &owner_id_clone);
 
     reply(sender, format!("{prefix}{message}"));
 }
