@@ -51,6 +51,12 @@ jobs:
         working-directory: Pumpkin
         run: rustup show
 
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: Pumpkin
+          cache-on-failure: true
+
       - name: Inject the plugin into Pumpkin's workspace
         run: |
           mkdir -p Pumpkin/native-tab/src
@@ -68,7 +74,12 @@ jobs:
           [dependencies]
           pumpkin = { path = "../crates/pumpkin" }
           pumpkin-api-macros = { path = "../crates/pumpkin-api-macros" }
-          tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+          pumpkin-protocol = { path = "../crates/pumpkin-protocol" }
+          pumpkin-util = { path = "../crates/pumpkin-util" }
+          uuid = "1"
+          serde = { version = "1", features = ["derive"] }
+          toml = "1"
+          tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
           tracing = "0.1"
           EOF
           # Register it as a workspace member (anchored to the members line only).

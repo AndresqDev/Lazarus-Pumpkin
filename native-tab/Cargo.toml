@@ -12,10 +12,15 @@ crate-type = ["cdylib"]
 lto = true
 
 [dependencies]
-# Must match the exact Pumpkin revision the server binary was built from,
-# otherwise PUMPKIN_API_VERSION (link-time ABI guard) will differ and the
-# server will refuse to load the library.
+# Must match the exact Pumpkin revision the server binary was built from.
+# NOTE: this crate is only a reference; the real build injects it into Pumpkin's
+# workspace with path deps (see .github/workflows/native-tab.yml).
 pumpkin = { git = "https://github.com/Pumpkin-MC/Pumpkin", tag = "0.2.0+26.3-26.51" }
 pumpkin-api-macros = { git = "https://github.com/Pumpkin-MC/Pumpkin", tag = "0.2.0+26.3-26.51" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+pumpkin-protocol = { git = "https://github.com/Pumpkin-MC/Pumpkin", tag = "0.2.0+26.3-26.51" }
+pumpkin-util = { git = "https://github.com/Pumpkin-MC/Pumpkin", tag = "0.2.0+26.3-26.51" }
+uuid = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 tracing = "0.1"
