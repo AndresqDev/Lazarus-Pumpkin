@@ -1623,12 +1623,16 @@ pub fn archer_click(_server: &Server, player: &Player) {
         let prefix = guard.raw.language.string("PREFIX");
         let template = guard.raw.language.string("ARCHER_CLASS.CLICKABLE_ACTIVATED");
         let effect = clickable.effect_name.clone();
+        let seconds = (clickable.duration / 20).to_string();
         if !template.is_empty() {
             core::send(
                 player,
                 &format!(
                     "{prefix}{}",
-                    util::replace(&template, "<effect>", &effect)
+                    util::replace_all(
+                        &template,
+                        &[("<effect>", &effect), ("<seconds>", &seconds)],
+                    )
                 ),
             );
         }

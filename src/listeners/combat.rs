@@ -539,7 +539,9 @@ impl EventHandler<ProjectileHitEvent> for ProjectileHitListener {
         _server: Server,
         event: EventData<ProjectileHitEvent>,
     ) -> EventData<ProjectileHitEvent> {
-        take_projectile_shooter(event.entity_id);
+        // Do NOT remove the shooter here: the `EntityDamageByEntity` for the same
+        // arrow may fire afterwards, and it needs the shooter to resolve.
+        let _ = event;
         event
     }
 }
