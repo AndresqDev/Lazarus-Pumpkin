@@ -99,15 +99,30 @@ impl EventHandler<PlayerMoveEvent> for MoveListener {
         // Combat-tagged players may not enter the safezone (port of the original
         // `PlayerEventListener#onPlayerMove`), and the entering message matches
         // `CLAIM_MESSAGES.ENTERING`.
-        let (combat, was_safezone, is_safezone, deny_message, entering_message) = {
+        let (combat, was_safezone, is_safezone, deny_message, entering_message, leaving_message) = {
             let guard = state().read().unwrap();
 
-            let was_safezone = guard.chunk_cache.get(&uuid).is_some_and(|p| {
-                matches!(
-                    core::territory_at(&p.world, p.cx * 16, p.cz * 16),
-                    core::Territory::Safezone
-                )
-            });
+            let previous = guard.chunk_cache.get(&uuid).cloned();
+
+            let (was_safezone, prev_display, prev_deathban) = match &previous {
+                Some(p) => {
+                    let territory = core::territory_at(&p.world, p.cx * 16, p.cz * 16);
+                    let deathban = match &territory {
+                        core::Territory::Faction(id) => guard
+                            .factions
+                            .get(id)
+                            .map(|f| if f.deathban { "&cDeathban" } else { "&aNon-Deathban" })
+                            .unwrap_or("&aNon-Deathban"),
+                        _ => "&aNon-Deathban",
+                    };
+                    (
+                        matches!(territory, core::Territory::Safezone),
+                        core::territory_display(&territory, viewer_faction.as_deref()),
+                        deathban.to_string(),
+                    )
+                }
+                None => (false, String::new(), "&aNon-Deathban".to_string()),
+            };
 
             let deathban = match &territory {
                 core::Territory::Faction(id) => guard
@@ -123,6 +138,11 @@ impl EventHandler<PlayerMoveEvent> for MoveListener {
                 "<deathban>",
                 deathban,
             );
+            let leaving = util::replace(
+                &util::replace(&guard.lang.leaving_territory, "<faction>", &prev_display),
+                "<deathban>",
+                &prev_deathban,
+            );
 
             (
                 guard.timers.is_active(&uuid, TimerType::CombatTag),
@@ -130,6 +150,7 @@ impl EventHandler<PlayerMoveEvent> for MoveListener {
                 matches!(territory, core::Territory::Safezone),
                 guard.lang.safezone_deny_enter.clone(),
                 entering,
+                leaving,
             )
         };
 
@@ -151,6 +172,9 @@ impl EventHandler<PlayerMoveEvent> for MoveListener {
         };
 
         if announce {
+            if !leaving_message.is_empty() {
+                core::send(&event.player, leaving_message);
+            }
             core::send(&event.player, entering_message);
         }
 
