@@ -46,6 +46,13 @@ pub fn start(context: &Context) {
     let period_ticks = minutes * 60 * 20;
     context.schedule_repeating_task(period_ticks, period_ticks, |_server| crate::state::save_all());
 
+    // Clear stale "infinite" class effects once the server is up.
+    context.schedule_delayed_task(20, |server| {
+        for player in server.get_all_players() {
+            crate::classes::remove_infinite_effects(&player);
+        }
+    });
+
     // Recreate hologram display entities once worlds are available.
     context.schedule_delayed_task(20, |server| {
         let mut guard = state().write().unwrap();

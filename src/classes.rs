@@ -410,3 +410,14 @@ impl PvpClassManager {
         self.active.remove(&uuid);
     }
 }
+
+/// Removes every "infinite" status effect (duration >= 12000 ticks). Port of
+/// `PvpClassManager#removeInfiniteEffects`; called on join and on plugin start so
+/// stale class effects never survive a restart.
+pub fn remove_infinite_effects(player: &Player) {
+    for effect in player.get_active_effects() {
+        if effect.duration >= 12000 {
+            player.remove_effect(effect.effect_type);
+        }
+    }
+}

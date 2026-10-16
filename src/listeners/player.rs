@@ -18,6 +18,7 @@ pub struct JoinListener;
 impl EventHandler<PlayerJoinEvent> for JoinListener {
     fn handle(&self, server: Server, mut event: EventData<PlayerJoinEvent>) -> EventData<PlayerJoinEvent> {
         let uuid = core::uuid_of(&event.player);
+        crate::classes::remove_infinite_effects(&event.player);
         let name = core::name_of(&event.player);
 
         let (welcome_enabled, welcome_message, protect_seconds, show_info) = {
