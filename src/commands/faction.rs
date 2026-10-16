@@ -1161,7 +1161,7 @@ fn stuck(sender: &CommandSender, server: &Server, player: &Player, uuid: &str) {
         let own = guard.factions.by_member(uuid).map(|f| f.id.clone());
 
         let allowed = match &territory {
-            core::Territory::Warzone => true,
+            // Only enemy *player* claims (the user wants no warzone/wilderness).
             core::Territory::Faction(id) => own.as_deref() != Some(id.as_str()),
             _ => false,
         };
@@ -1201,9 +1201,9 @@ fn stuck(sender: &CommandSender, server: &Server, player: &Player, uuid: &str) {
 
         let target = crate::factions::Location {
             world: world_name,
-            x: sx as f64,
-            y: top as f64,
-            z: sz as f64,
+            x: sx as f64 + 0.5,
+            y: top as f64 + 1.0,
+            z: sz as f64 + 0.5,
             pitch: origin.pitch,
             yaw: origin.yaw,
         };
