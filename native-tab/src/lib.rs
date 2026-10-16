@@ -34,7 +34,7 @@ use uuid::Uuid;
 const COLUMN_HEIGHT: usize = 20;
 const SLOTS: usize = 80;
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
 struct TabConfig {
     enabled: bool,
@@ -54,17 +54,22 @@ impl NativeTab {
 
     #[plugin_method]
     async fn on_load(&self, context: Arc<Context>) -> Result<(), String> {
-        info!("NativeTab loaded (Pumpkin API v{PLUGIN_API_VERSION})");
+        context.log(format!("NativeTab loaded (Pumpkin API v{PLUGIN_API_VERSION})"));
 
-        let config = load_config(&context.get_data_folder());
+        // The tab layout lives in the WASM plugin's data folder, not ours.
+        let Some(config) = load_config() else {
+            context.log("NativeTab: plugins/data/lazarus/tab.toml missing or invalid; not rendering");
+            return Ok(());
+        };
         if !config.enabled {
-            info!("NativeTab: [tab] disabled in config");
+            context.log("NativeTab: tab.toml has enabled=false");
             return Ok(());
         }
 
         let server = context.server.clone();
+        let log_ctx = context.clone();
         tokio::spawn(async move {
-            run(server, config).await;
+            run(server, config, log_ctx).await;
         });
 
         Ok(())
@@ -77,7 +82,7 @@ impl NativeTab {
     }
 }
 
-async fn run(server: Arc<Server>, config: TabConfig) {
+async fn run(server: Arc<Server>, config: TabConfig, log_ctx: Arc<Context>) {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     let mut added = false;
     let mut last: Vec<String> = vec![String::new(); SLOTS];
@@ -90,6 +95,10 @@ async fn run(server: Arc<Server>, config: TabConfig) {
         if !added {
             add_entries(&server, &lines);
             added = true;
+            log_ctx.log(format!(
+                "NativeTab: added {SLOTS} artificial slots, hiding {} real player(s)",
+                server.get_all_players().len()
+            ));
         } else {
             update_names(&server, &lines, &last);
         }
@@ -100,12 +109,13 @@ async fn run(server: Arc<Server>, config: TabConfig) {
     }
 }
 
-fn load_config(folder: &std::path::Path) -> TabConfig {
-    let path = folder.join("tab.toml");
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|contents| toml::from_str(&contents).ok())
-        .unwrap_or_default()
+fn load_config() -> Option<TabConfig> {
+    let path = std::path::Path::new("plugins")
+        .join("data")
+        .join("lazarus")
+        .join("tab.toml");
+    let contents = std::fs::read_to_string(&path).ok()?;
+    toml::from_str(&contents).ok()
 }
 
 /// Builds the 80 artificial lines (4 columns of 20).
