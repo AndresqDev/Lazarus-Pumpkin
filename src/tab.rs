@@ -42,6 +42,16 @@ fn default_skin() -> Skin {
 
 /// Full rebuild for one player (called on join and every tick).
 pub fn setup(player: &Player, server: &Server) {
+    // Header/footer (static, from `tab.yml`).
+    {
+        let guard = state().read().unwrap();
+        let header = guard.raw.tab.string_list("TAB_HEADER").join("\n");
+        let footer = guard.raw.tab.string_list("TAB_FOOTER").join("\n");
+        if !header.is_empty() || !footer.is_empty() {
+            player.set_tab_list_header_footer(crate::util::text(header), crate::util::text(footer));
+        }
+    }
+
     rebuild(player, server);
 }
 

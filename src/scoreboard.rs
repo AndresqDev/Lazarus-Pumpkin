@@ -259,6 +259,7 @@ fn build_lines(guard: &AppState, player: &Player, server: &Server, uuid: &str) -
         let viewer = crate::core::faction_id_of(uuid);
         let display = crate::core::territory_display(&territory, viewer.as_deref());
         b.add(&s.claim, &display);
+        b.add_line("&5");
     }
 
     // ---- Timers (applyScoreboardTimerPlaceholders), in TimerManager order ----
@@ -277,6 +278,7 @@ fn build_lines(guard: &AppState, player: &Player, server: &Server, uuid: &str) -
             b.add(placeholder, &util::format_duration(remaining));
         }
     }
+    b.add_line("&3");
 
     b.finish()
 }
