@@ -73,6 +73,16 @@ impl EventHandler<BlockBreakEvent> for BlockBreakListener {
         let uuid = core::uuid_of(player);
         let world = core::world_name(player);
 
+        // Always re-assert any client-side render at this position: the client
+        // predicts the break/place and would otherwise erase our fake blocks.
+        state().read().unwrap().glass.regenerate_at(
+            &server,
+            &world,
+            event.block_pos.x,
+            event.block_pos.y,
+            event.block_pos.z,
+        );
+
         // Holding the selection wand must never break the block (port of
         // `SelectionManager#onBlockBreak`).
         {
@@ -87,14 +97,6 @@ impl EventHandler<BlockBreakEvent> for BlockBreakListener {
             event.cancelled = true;
             let message = deny_message(player, &world, event.block_pos.x, event.block_pos.z, false);
             core::send(player, &message);
-        } else {
-            // Keep any active client-side view (claim pillars/walls) alive at this
-            // position: real block changed, so re-send the fake block.
-            state()
-                .read()
-                .unwrap()
-                .glass
-                .regenerate_at(&server, &world, event.block_pos.x, event.block_pos.y, event.block_pos.z);
         }
 
         event
@@ -108,17 +110,20 @@ impl EventHandler<BlockPlaceEvent> for BlockPlaceListener {
         let player = &event.player;
         let uuid = core::uuid_of(player);
         let world = core::world_name(player);
+
+        // Re-assert any client-side render at this position (see BlockBreakListener).
+        state().read().unwrap().glass.regenerate_at(
+            &server,
+            &world,
+            event.block_pos.x,
+            event.block_pos.y,
+            event.block_pos.z,
+        );
+
         if !can_build(&uuid, &world, event.block_pos.x, event.block_pos.z) {
             event.cancelled = true;
             let message = deny_message(player, &world, event.block_pos.x, event.block_pos.z, false);
             core::send(player, &message);
-        } else {
-            // Re-assert any client-side view at this position.
-            state()
-                .read()
-                .unwrap()
-                .glass
-                .regenerate_at(&server, &world, event.block_pos.x, event.block_pos.y, event.block_pos.z);
         }
 
         event

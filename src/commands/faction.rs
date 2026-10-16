@@ -2498,6 +2498,9 @@ fn admin_claim_for(sender: &CommandSender, server: &Server, args: &ConsumedArgs)
         &[("<player>", &core::name_of(&player)), ("<faction>", &display)],
     );
     guard.selection.cancel_local(&player);
+    guard
+        .glass
+        .clear_type(&player, crate::glass::GlassType::ClaimSelection);
     drop(guard);
 
     reply(sender, format!("{prefix}{message}"));
