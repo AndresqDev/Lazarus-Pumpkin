@@ -141,7 +141,11 @@ fn tick(server: &Server) {
             );
             // Mage energy regen.
             if classes.active.get(&uuid) == Some(&crate::classes::ClassKind::Mage) {
-                let max = raw.config.int("MAGE_CLASS.MAX_ENERGY").max(1) as f64;
+                let max = classes
+                    .classes
+                    .get(&crate::classes::ClassKind::Mage)
+                    .map(|c| c.max_energy)
+                    .unwrap_or(120.0);
                 let energy = classes.mage_energy.entry(uuid.clone()).or_insert(max);
                 *energy = (*energy + 1.0).min(max);
             }

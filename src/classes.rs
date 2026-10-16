@@ -196,6 +196,8 @@ pub struct PvpClass {
     pub kind: ClassKind,
     pub warmup: u64,
     pub effects: Vec<PassiveEffect>,
+    /// `MAX_ENERGY` (Bard/Mage), read from `classes.yml` at load.
+    pub max_energy: f64,
 }
 
 #[derive(Debug, Default)]
@@ -263,12 +265,14 @@ impl PvpClassManager {
                 }
             }
 
+            let max_energy = raw.int(&format!("{section}.MAX_ENERGY")).max(1) as f64;
             self.classes.insert(
                 kind,
                 PvpClass {
                     kind,
                     warmup: raw.int(&format!("{section}.WARMUP")).max(0) as u64,
                     effects,
+                    max_energy,
                 },
             );
 
@@ -430,7 +434,11 @@ impl PvpClassManager {
         }
 
         // Regenerate energy (1 per tick, capped at MAX_ENERGY).
-        let max = raw_config.int("BARD_CLASS.MAX_ENERGY").max(1) as f64;
+        let max = self
+            .classes
+            .get(&ClassKind::Bard)
+            .map(|c| c.max_energy)
+            .unwrap_or(120.0);
         let energy = self.bard_energy.entry(uuid.clone()).or_insert(max);
         *energy = (*energy + 1.0).min(max);
 
@@ -754,13 +762,12 @@ impl PvpClassManager {
             });
         }
 
+        let max_energy = pvp_class.max_energy;
         if kind == ClassKind::Bard {
-            let max = raw_config.int("BARD_CLASS.MAX_ENERGY").max(1) as f64;
-            self.bard_energy.insert(uuid.clone(), max);
+            self.bard_energy.insert(uuid.clone(), max_energy);
         }
         if kind == ClassKind::Mage {
-            let max = raw_config.int("MAGE_CLASS.MAX_ENERGY").max(1) as f64;
-            self.mage_energy.insert(uuid.clone(), max);
+            self.mage_energy.insert(uuid.clone(), max_energy);
         }
         self.active.insert(uuid, kind);
         core::send(
