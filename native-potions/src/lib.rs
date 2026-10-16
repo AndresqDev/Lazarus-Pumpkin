@@ -73,9 +73,6 @@ struct ComponentTable {
     potion_components: BTreeMap<String, String>,
 }
 
-#[plugin_impl]
-pub struct NativePotions;
-
 impl NativePotions {
     pub fn new() -> Self {
         NativePotions
@@ -110,6 +107,12 @@ impl NativePotions {
         Ok(())
     }
 }
+
+// `#[plugin_impl]` MUST come after the `#[plugin_method]` methods: the method
+// macro deletes the annotated method and caches it, and `#[plugin_impl]`
+// collects everything cached so far to build the `Plugin` impl.
+#[plugin_impl]
+pub struct NativePotions;
 
 // ---------------------------------------------------------------------------
 // Table generation
