@@ -147,7 +147,7 @@ fn tick(server: &Server) {
                     .map(|c| c.max_energy)
                     .unwrap_or(120.0);
                 let energy = classes.mage_energy.entry(uuid.clone()).or_insert(max);
-                *energy = (*energy + 1.0).min(max);
+                *energy = (*energy + crate::classes::POWER_GAIN).min(max);
             }
         }
         classes.tick_warmups(&server, &raw.language, &raw.config, factions);

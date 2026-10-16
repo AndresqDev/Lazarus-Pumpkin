@@ -161,6 +161,9 @@ fn effect_from_name(name: &str) -> Option<StatusEffectType> {
 
 pub const INFINITE: u32 = u32::MAX;
 
+/// Power gained per tick (~1.7/s: the base 1/s plus the requested 0.7/s).
+pub const POWER_GAIN: f64 = 1.7;
+
 /// Bard holdable item: holding `material` buffs nearby faction members.
 #[derive(Debug, Clone)]
 pub struct BardHoldable {
@@ -440,7 +443,7 @@ impl PvpClassManager {
             .map(|c| c.max_energy)
             .unwrap_or(120.0);
         let energy = self.bard_energy.entry(uuid.clone()).or_insert(0.0);
-        *energy = (*energy + 1.0).min(max);
+        *energy = (*energy + POWER_GAIN).min(max);
 
         // `canBard` for holdables: not under pvp protection, not in the safezone.
         // NOTE: combat tag is intentionally allowed.
@@ -906,12 +909,6 @@ pub fn bard_click(server: &Server, player: &Player) {
         if guard.classes.active.get(&uuid) != Some(&ClassKind::Bard) {
             return;
         }
-        if guard
-            .timers
-            .is_active(&uuid, crate::timers::TimerType::PvpProtection)
-        {
-            return;
-        }
         if matches!(
             crate::core::territory_at_guard(&guard, &location.world, location.block_x(), location.block_z()),
             crate::core::Territory::Safezone
@@ -947,6 +944,17 @@ pub fn bard_click(server: &Server, player: &Player) {
         let energy = guard.classes.bard_energy.get(&uuid).copied().unwrap_or(0.0);
         (clickable, faction_members, energy, util::now_millis())
     };
+
+    // Clickables work under pvp protection, except poison ones.
+    if clickable.effect_name.to_ascii_uppercase().contains("POISON")
+        && state()
+            .read()
+            .unwrap()
+            .timers
+            .is_active(&uuid, crate::timers::TimerType::PvpProtection)
+    {
+        return;
+    }
 
     if energy < clickable.energy_needed {
         return;
@@ -1136,9 +1144,10 @@ pub fn mage_click(server: &Server, player: &Player) {
             ),
         )
     };
-    if pvp_protected || in_safezone {
+    if in_safezone {
         return;
     }
+    let _ = pvp_protected;
 
     let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
         return;
@@ -1167,6 +1176,17 @@ pub fn mage_click(server: &Server, player: &Player) {
         let energy = guard.classes.mage_energy.get(&uuid).copied().unwrap_or(0.0);
         (clickable, faction_members, energy, util::now_millis())
     };
+
+    // Mage clickables work under pvp protection, except poison ones.
+    if clickable.effect_name.to_ascii_uppercase().contains("POISON")
+        && state()
+            .read()
+            .unwrap()
+            .timers
+            .is_active(&uuid, crate::timers::TimerType::PvpProtection)
+    {
+        return;
+    }
 
     if energy < clickable.energy_needed {
         return;

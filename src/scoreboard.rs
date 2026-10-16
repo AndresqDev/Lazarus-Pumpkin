@@ -316,9 +316,5 @@ fn team_settings(line: &str) -> TeamSettings {
 /// Rounds to one decimal (the way the original shows Bard/Mage energy).
 fn round1(value: f64) -> String {
     let rounded = (value * 10.0).round() / 10.0;
-    if rounded == rounded.trunc() {
-        format!("{rounded:.1}")
-    } else {
-        format!("{rounded}")
-    }
+    format!("{rounded}")
 }
