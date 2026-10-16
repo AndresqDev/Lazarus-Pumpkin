@@ -41,9 +41,10 @@ pub struct GlassManager {
     pub entries: BTreeMap<String, BTreeMap<PosKey, (GlassType, u16)>>,
     /// uuid -> last chunk the claim map was re-generated for ("world", cx, cz)
     pub map_users: BTreeMap<String, (String, i32, i32)>,
-    /// Positions whose fake block must be re-sent on the next tick (the client
-    /// predicts breaks/places and would otherwise erase our render).
-    pub pending_regen: std::collections::BTreeSet<PosKey>,
+    /// Positions whose fake block must be re-sent for a few ticks (the client
+    /// predicts breaks/places and would otherwise erase our render). Value is the
+    /// number of remaining re-sends.
+    pub pending_regen: std::collections::BTreeMap<PosKey, u8>,
 }
 
 impl GlassManager {
@@ -177,7 +178,9 @@ impl GlassManager {
         }
 
         self.send_at(server, &key);
-        self.pending_regen.insert(key);
+        // Keep re-sending for a few ticks: the server's own block update may land
+        // one or two ticks later and would otherwise override this send.
+        self.pending_regen.insert(key, 6);
     }
 
     fn send_at(&self, server: &Server, key: &PosKey) {
@@ -194,15 +197,34 @@ impl GlassManager {
         }
     }
 
-    /// Re-sends every queued fake block (runs on the next tick).
+    /// Re-sends every queued fake block and decrements its countdown.
     pub fn process_pending_regen(&mut self, server: &Server) {
         if self.pending_regen.is_empty() {
             return;
         }
-        let keys: Vec<PosKey> = self.pending_regen.iter().cloned().collect();
-        self.pending_regen.clear();
+        let keys: Vec<PosKey> = self.pending_regen.keys().cloned().collect();
         for key in keys {
             self.send_at(server, &key);
+        }
+        self.pending_regen.retain(|_, remaining| {
+            *remaining = remaining.saturating_sub(1);
+            *remaining > 0
+        });
+    }
+
+    /// Re-sends every active fake block to the player that owns it. This is the
+    /// safety net that keeps the client-side render in sync (a broken/placed real
+    /// block, a plugin desync, …), and mirrors the original's periodic regeneration.
+    pub fn refresh_all(&self, server: &Server) {
+        for (uuid, map) in &self.entries {
+            let Some(player) =
+                pumpkin_plugin_api::uuid::parse(uuid).and_then(|id| server.get_player_by_uuid(id))
+            else {
+                continue;
+            };
+            for ((_, x, y, z), (_, state_id)) in map {
+                player.send_block_change(BlockPos { x: *x, y: *y, z: *z }, *state_id);
+            }
         }
     }
 }

@@ -88,6 +88,10 @@ fn glass_tick(server: &Server) {
         let AppState { glass, factions, claims, config, timers, .. } = &mut *guard;
         glass::update_walls(glass, &player, claims, factions, timers);
         glass::update_map(glass, &player, claims, config);
+        // Safety net: re-send every active fake block so a broken/placed real block
+        // (or any desync) is corrected. Only positions that pass the conditions are
+        // in `entries`, so red walls stay correct.
+        glass.refresh_all(server);
     }
 }
 
