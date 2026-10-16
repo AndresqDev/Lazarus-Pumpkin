@@ -5,12 +5,8 @@ name: native-tab
 # in native-tab/ is only a reference; here we inject it as a workspace member with
 # path dependencies.
 #
-# Produces two artifacts:
-#   - native_tab_aarch64  -> for ARM64 servers (libnative_tab.so)
-#   - native_tab_x86_64   -> for x86_64 servers (libnative_tab.so)
-#
-# Put the matching libnative_tab.so in the server's plugins/ folder as
-# native_tab.so.
+# Produces one artifact: native_tab_x86_64 (libnative_tab.so).
+# Put it in the server's plugins/ folder as native_tab.so.
 
 on:
   workflow_dispatch:
@@ -25,17 +21,7 @@ env:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            artifact: native_tab_aarch64
-          - runner: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: native_tab_x86_64
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout plugin repo
         uses: actions/checkout@v4
@@ -83,13 +69,11 @@ jobs:
 
       - name: Build native plugin
         working-directory: Pumpkin
-        # `--target` overrides the `wasm32-wasip2` inherited from our repo's
-        # .cargo/config.toml (Pumpkin is checked out inside this repo).
-        run: cargo build --release -p native_tab --target ${{ matrix.target }}
+        run: cargo build --release -p native_tab --target x86_64-unknown-linux-gnu
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: Pumpkin/target/${{ matrix.target }}/release/libnative_tab.so
+          name: native_tab_x86_64
+          path: Pumpkin/target/x86_64-unknown-linux-gnu/release/libnative_tab.so
           if-no-files-found: error
