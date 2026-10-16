@@ -55,6 +55,8 @@ enum Action {
     Ally,
     Unally,
     AdminSetDtr,
+    AdminAddDtr,
+    AdminRemoveDtr,
     AdminSetPoints,
     AdminSetBalance,
     AdminSetLives,
@@ -154,6 +156,22 @@ pub fn register(context: &Context) -> Result<(), String> {
             ),
         )
         .then(
+            CommandNode::literal("adddtr").then(
+                str_node("faction").then(
+                    CommandNode::argument("value", &ArgumentType::Double((None, None)))
+                        .execute(FactionExecutor(Action::AdminAddDtr)),
+                ),
+            ),
+        )
+        .then(
+            CommandNode::literal("removedtr").then(
+                str_node("faction").then(
+                    CommandNode::argument("value", &ArgumentType::Double((None, None)))
+                        .execute(FactionExecutor(Action::AdminRemoveDtr)),
+                ),
+            ),
+        )
+        .then(
             CommandNode::literal("setpoints").then(
                 str_node("faction").then(int_node("value").execute(FactionExecutor(Action::AdminSetPoints))),
             ),
@@ -224,6 +242,8 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::Ally => ally(sender, server, &uuid, args, true),
         Action::Unally => ally(sender, server, &uuid, args, false),
         Action::AdminSetDtr => admin_set_dtr(sender, server, args),
+        Action::AdminAddDtr => admin_change_dtr(sender, server, args, true),
+        Action::AdminRemoveDtr => admin_change_dtr(sender, server, args, false),
         Action::AdminSetPoints => admin_set_int(sender, server, args, AdminField::Points),
         Action::AdminSetBalance => admin_set_int(sender, server, args, AdminField::Balance),
         Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
@@ -1372,6 +1392,108 @@ fn require_admin(sender: &CommandSender, server: &Server) -> bool {
     }
     reply(sender, "&cYou do not have permission.");
     false
+}
+
+fn admin_change_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs, add: bool) {
+    if !require_admin(sender, server) {
+        return;
+    }
+    let Some(name) = string_arg(args, "faction") else {
+        return;
+    };
+    let Some(value) = double_arg(args, "value") else {
+        let message = state().read().unwrap().raw.language.string("COMMANDS.INVALID_NUMBER");
+        reply(sender, message);
+        return;
+    };
+
+    let mut guard = state().write().unwrap();
+    let config = guard.config.clone();
+    let prefix = guard.raw.language.string("FACTIONS.PREFIX");
+    let sender_tpl = guard.raw.language.string(if add {
+        "FACTIONS.ADD_DTR_COMMAND.CHANGED_SENDER"
+    } else {
+        "FACTIONS.REMOVE_DTR_COMMAND.CHANGED_SENDER"
+    });
+    let faction_tpl = guard.raw.language.string(if add {
+        "FACTIONS.ADD_DTR_COMMAND.CHANGED_FACTION"
+    } else {
+        "FACTIONS.REMOVE_DTR_COMMAND.CHANGED_FACTION"
+    });
+    let missing_tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
+
+    let Some(id) = guard
+        .factions
+        .by_name(&name)
+        .filter(|f| f.is_player())
+        .map(|f| f.id.clone())
+    else {
+        let message = util::replace(&missing_tpl, "<argument>", &name);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    };
+
+    let (faction_name, members, max, current) = {
+        let faction = guard.factions.get(&id).unwrap();
+        (
+            faction.name.clone(),
+            faction.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
+            faction.max_dtr(&config),
+            faction.dtr,
+        )
+    };
+
+    let amount = if add { current + value } else { current - value };
+    let clamped = if amount < 0.0 {
+        amount.max(config.factions.min_dtr)
+    } else {
+        amount.min(max)
+    };
+    let new_dtr = (clamped * 100.0).round() / 100.0;
+    if let Some(faction) = guard.factions.get_mut(&id) {
+        faction.dtr = new_dtr;
+    }
+
+    let color = if new_dtr <= 0.0 {
+        "&c"
+    } else if new_dtr <= 1.0 {
+        "&e"
+    } else {
+        "&a"
+    };
+    let character = if new_dtr >= max {
+        guard.raw.config.string("FACTION_DTR.DTR_CHARACTERS.FULL_DTR")
+    } else {
+        guard.raw.config.string("FACTION_DTR.DTR_CHARACTERS.REGENERATING")
+    };
+    let number = if new_dtr == new_dtr.trunc() {
+        format!("{new_dtr:.1}")
+    } else {
+        format!("{new_dtr}")
+    };
+    let dtr_string = format!("{color}{number}{character}");
+
+    let sender_message = format!(
+        "{prefix}{}",
+        util::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<value>", &dtr_string)])
+    );
+    let faction_message = format!(
+        "{prefix}{}",
+        util::replace_all(
+            &faction_tpl,
+            &[("<player>", &sender.get_name()), ("<dtr>", &dtr_string)]
+        )
+    );
+
+    for uuid in members {
+        if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
+            && let Some(player) = server.get_player_by_uuid(id)
+        {
+            core::send(&player, &faction_message);
+        }
+    }
+
+    reply(sender, sender_message);
 }
 
 fn admin_set_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
