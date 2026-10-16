@@ -76,6 +76,8 @@ enum Action {
     AdminRemoveClaim,
     AdminChatSpy,
     AdminTpHere,
+    FriendlyFire,
+    Uninvite,
     AdminSetPoints,
     AdminSetBalance,
     AdminSetLives,
@@ -264,7 +266,11 @@ pub fn register(context: &Context) -> Result<(), String> {
         .then(CommandNode::literal("claimfor").then(str_node("faction").execute(FactionExecutor(Action::AdminClaimFor))))
         .then(CommandNode::literal("removeclaim").execute(FactionExecutor(Action::AdminRemoveClaim)))
         .then(CommandNode::literal("chatspy").execute(FactionExecutor(Action::AdminChatSpy)))
-        .then(CommandNode::literal("tphere").then(str_node("faction").execute(FactionExecutor(Action::AdminTpHere))));
+        .then(CommandNode::literal("tphere").then(str_node("faction").execute(FactionExecutor(Action::AdminTpHere))))
+        .then(CommandNode::literal("friendlyfire").execute(FactionExecutor(Action::FriendlyFire)))
+        .then(CommandNode::literal("ff").execute(FactionExecutor(Action::FriendlyFire)))
+        .then(CommandNode::literal("uninvite").then(str_node("player").execute(FactionExecutor(Action::Uninvite))))
+        .then(CommandNode::literal("uninv").then(str_node("player").execute(FactionExecutor(Action::Uninvite))));
 
     context.register_command(root, "lazarus:command.faction");
     Ok(())
@@ -337,6 +343,8 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::AdminRemoveClaim => admin_remove_claim(sender, server),
         Action::AdminChatSpy => admin_chat_spy(sender, server),
         Action::AdminTpHere => admin_tp_here(sender, server, args),
+        Action::FriendlyFire => friendly_fire(sender, server),
+        Action::Uninvite => uninvite(sender, server, args),
         Action::AdminSetPoints => admin_set_int(sender, server, args, AdminField::Points),
         Action::AdminSetBalance => admin_set_int(sender, server, args, AdminField::Balance),
         Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
@@ -2476,6 +2484,139 @@ fn admin_claim_for(sender: &CommandSender, server: &Server, args: &ConsumedArgs)
     drop(guard);
 
     reply(sender, format!("{prefix}{message}"));
+}
+
+fn friendly_fire(sender: &CommandSender, server: &Server) {
+    let Some(player) = sender.as_player() else {
+        return;
+    };
+    let uuid = core::uuid_of(&player);
+
+    let (message, members) = {
+        let mut guard = state().write().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let not_in_faction = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
+        let no_permission_tpl = guard.raw.language.string("FACTIONS.NO_PERMISSION");
+        let on_tpl = guard.raw.language.string("FACTIONS.FRIENDLY_FIRE_TOGGLED_ON");
+        let off_tpl = guard.raw.language.string("FACTIONS.FRIENDLY_FIRE_TOGGLED_OFF");
+
+        let Some(id) = guard.factions.by_member(&uuid).map(|f| f.id.clone()) else {
+            return reply(sender, format!("{prefix}{not_in_faction}"));
+        };
+
+        let role = guard.factions.get(&id).and_then(|f| f.member(&uuid)).map(|m| m.role);
+        if role.map(|r| r.is_at_least(Role::CoLeader)) != Some(true) {
+            let message = util::replace(&no_permission_tpl, "<role>", Role::CoLeader.name());
+            return reply(sender, format!("{prefix}{message}"));
+        }
+
+        let faction = guard.factions.get_mut(&id).unwrap();
+        faction.friendly_fire = !faction.friendly_fire;
+        let template = if faction.friendly_fire { on_tpl } else { off_tpl };
+        let members = guard
+            .factions
+            .get(&id)
+            .unwrap()
+            .members
+            .values()
+            .map(|m| m.uuid.clone())
+            .collect::<Vec<_>>();
+        (format!("{prefix}{template}"), members)
+    };
+
+    for member_uuid in members {
+        if let Some(id) = pumpkin_plugin_api::uuid::parse(&member_uuid)
+            && let Some(online) = server.get_player_by_uuid(id)
+        {
+            core::send(&online, &message);
+        }
+    }
+}
+
+fn uninvite(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    let Some(player) = sender.as_player() else {
+        return;
+    };
+    let uuid = core::uuid_of(&player);
+
+    let mut guard = state().write().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+    let not_in_faction = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
+    let no_permission_tpl = guard.raw.language.string("FACTIONS.NO_PERMISSION");
+    let usage = guard.raw.language.string("FACTIONS.UNINVITE_COMMAND.USAGE");
+    let all_tpl = guard.raw.language.string("FACTIONS.UNINVITE_COMMAND.ALL");
+    let uninvited_tpl = guard.raw.language.string("FACTIONS.UNINVITE_COMMAND.UNINVITED");
+    let not_invited_tpl = guard.raw.language.string("FACTIONS.UNINVITE_COMMAND.NOT_INVITED");
+
+    let Some(id) = guard.factions.by_member(&uuid).map(|f| f.id.clone()) else {
+        drop(guard);
+        return reply(sender, format!("{prefix}{not_in_faction}"));
+    };
+
+    let Some(target) = string_arg(args, "player") else {
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
+    };
+
+    let role = guard.factions.get(&id).and_then(|f| f.member(&uuid)).map(|m| m.role);
+    if role.map(|r| r.is_at_least(Role::Captain)) != Some(true) {
+        let message = util::replace(&no_permission_tpl, "<role>", Role::Captain.name());
+        drop(guard);
+        return reply(sender, format!("{prefix}{message}"));
+    }
+
+    let player_name = core::name_of(&player);
+
+    if target.eq_ignore_ascii_case("all") {
+        if let Some(faction) = guard.factions.get_mut(&id) {
+            faction.invitations.clear();
+        }
+        let message = util::replace(&all_tpl, "<player>", &player_name);
+        let members = guard
+            .factions
+            .get(&id)
+            .map(|f| f.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>())
+            .unwrap_or_default();
+        drop(guard);
+        let message = format!("{prefix}{message}");
+        for member_uuid in members {
+            if let Some(id) = pumpkin_plugin_api::uuid::parse(&member_uuid)
+                && let Some(online) = server.get_player_by_uuid(id)
+            {
+                core::send(&online, &message);
+            }
+        }
+        return;
+    }
+
+    let target_uuid = server.get_player_by_name(&target).map(|p| core::uuid_of(&p));
+    let removed = match (target_uuid, guard.factions.get_mut(&id)) {
+        (Some(target_uuid), Some(faction)) if faction.invitations.contains(&target_uuid) => {
+            faction.invitations.retain(|id| id != &target_uuid);
+            true
+        }
+        _ => false,
+    };
+
+    let template = if removed { uninvited_tpl } else { not_invited_tpl };
+    let message = format!("{prefix}{}", util::replace(&template, "<player>", &target));
+    let members = guard
+        .factions
+        .get(&id)
+        .map(|f| f.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    drop(guard);
+
+    if !removed {
+        return reply(sender, message);
+    }
+    for member_uuid in members {
+        if let Some(id) = pumpkin_plugin_api::uuid::parse(&member_uuid)
+            && let Some(online) = server.get_player_by_uuid(id)
+        {
+            core::send(&online, &message);
+        }
+    }
 }
 
 fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
