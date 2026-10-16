@@ -34,6 +34,53 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
             })
         });
 
+        // Archer tag on a *non-player* living entity (e.g. a mannequin) — for
+        // testing: apply the damage multiplier and notify the shooter.
+        if projectile_damager && victim.is_none() {
+            if let Some(shooter) = damager.as_ref() {
+                let shooter_uuid = core::uuid_of(shooter);
+                let (is_archer, multiplier, duration) = {
+                    let guard = state().read().unwrap();
+                    (
+                        guard
+                            .classes
+                            .active
+                            .get(&shooter_uuid)
+                            == Some(&crate::classes::ClassKind::Archer),
+                        guard
+                            .raw
+                            .config
+                            .double("ARCHER_CLASS.ARCHER_TAG.DAMAGE_MULTIPLIER") as f32,
+                        guard
+                            .raw
+                            .config
+                            .int("ARCHER_CLASS.ARCHER_TAG.DURATION")
+                            .max(0) as u64,
+                    )
+                };
+                if is_archer {
+                    event.damage *= multiplier;
+                    let (prefix, template) = {
+                        let guard = state().read().unwrap();
+                        (
+                            guard.raw.language.string("PREFIX"),
+                            guard.raw.language.string("ARCHER_TAG.TAGGED_TAGGER"),
+                        )
+                    };
+                    core::send(
+                        shooter,
+                        &format!(
+                            "{prefix}{}",
+                            util::replace_all(
+                                &template,
+                                &[("<victim>", "mannequin"), ("<seconds>", &duration.to_string())],
+                            )
+                        ),
+                    );
+                }
+            }
+        }
+
         let (Some(victim), Some(damager)) = (victim, damager) else {
             return event;
         };
