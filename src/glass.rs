@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use pumpkin_plugin_api::common::BlockPos;
 use pumpkin_plugin_api::world::Block;
-use pumpkin_plugin_api::Player;
+use pumpkin_plugin_api::{Player, Server};
 
 use crate::config::Config;
 use crate::factions::{Claim, ClaimManager, FactionKind, FactionsManager};
@@ -31,16 +31,20 @@ pub enum GlassType {
 type PosKey = (String, i32, i32, i32);
 
 /// Per-player fake-block bookkeeping.
+///
+/// Each entry stores the [`GlassType`] (so it can be cleared per view) and the
+/// block-state id that was sent (so the view can be regenerated if the player
+/// breaks/places a real block at that position).
 #[derive(Debug, Default)]
 pub struct GlassManager {
-    /// uuid -> (world, x, y, z) -> type
-    pub entries: BTreeMap<String, BTreeMap<PosKey, GlassType>>,
+    /// uuid -> (world, x, y, z) -> (type, block-state id)
+    pub entries: BTreeMap<String, BTreeMap<PosKey, (GlassType, u16)>>,
     /// uuid -> last chunk the claim map was re-generated for ("world", cx, cz)
     pub map_users: BTreeMap<String, (String, i32, i32)>,
 }
 
 impl GlassManager {
-    fn bucket(&mut self, uuid: &str) -> &mut BTreeMap<PosKey, GlassType> {
+    fn bucket(&mut self, uuid: &str) -> &mut BTreeMap<PosKey, (GlassType, u16)> {
         self.entries.entry(uuid.to_string()).or_default()
     }
 
@@ -54,7 +58,7 @@ impl GlassManager {
         }
 
         player.send_block_change(BlockPos { x, y, z }, state_id);
-        self.bucket(&uuid).insert(key, kind);
+        self.bucket(&uuid).insert(key, (kind, state_id));
     }
 
     /// Reverts every fake block of a given type for a player.
@@ -68,7 +72,7 @@ impl GlassManager {
 
         let keys: Vec<PosKey> = map
             .iter()
-            .filter(|(_, value)| **value == kind)
+            .filter(|(_, (value, _))| *value == kind)
             .map(|(key, _)| key.clone())
             .collect();
 
@@ -101,7 +105,7 @@ impl GlassManager {
 
         let keys: Vec<PosKey> = map
             .iter()
-            .filter(|(_, value)| **value == kind)
+            .filter(|(_, (value, _))| *value == kind)
             .filter(|((world, x, y, z), _)| {
                 world != to_world
                     || (x - to_x).abs() > width
@@ -148,6 +152,23 @@ impl GlassManager {
     pub fn forget(&mut self, uuid: &str) {
         self.entries.remove(uuid);
         self.map_users.remove(uuid);
+    }
+
+    /// Regenerates the fake block at `(world, x, y, z)` for every player that sees
+    /// one, so an active client-side view survives a real block break/place there.
+    pub fn regenerate_at(&self, server: &Server, world: &str, x: i32, y: i32, z: i32) {
+        let key = (world.to_string(), x, y, z);
+
+        for (uuid, map) in &self.entries {
+            let Some((_, state_id)) = map.get(&key) else {
+                continue;
+            };
+            if let Some(player) =
+                pumpkin_plugin_api::uuid::parse(uuid).and_then(|id| server.get_player_by_uuid(id))
+            {
+                player.send_block_change(BlockPos { x, y, z }, *state_id);
+            }
+        }
     }
 }
 

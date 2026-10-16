@@ -157,6 +157,34 @@ pub fn apply_world_borders_from_config(server: &Server) {
     }
 }
 
+/// Creates the spawn/safezone faction claim from config if it does not exist yet.
+///
+/// The safezone is *exclusively* the spawn claim, so this materialises a square
+/// claim (`spawn.safezone_radius`) owned by the safezone faction.
+pub fn setup_spawn_claim(server: &Server) {
+    let mut guard = state().write().unwrap();
+    let radius = guard.config.spawn.safezone_radius;
+    if radius <= 0 {
+        return;
+    }
+
+    let safezone_id = guard.factions.safezone_id.clone();
+    if !guard.claims.claims_of(&safezone_id).is_empty() {
+        return;
+    }
+
+    let world = server
+        .get_all_worlds()
+        .into_iter()
+        .find(|w| dimension_of(&w.get_name()) == Dimension::Overworld)
+        .map(|w| w.get_name())
+        .unwrap_or_else(|| "world".to_string());
+
+    let claim = crate::factions::Claim::new(world.clone(), -radius, radius, -radius, radius);
+    guard.claims.add_claim(&safezone_id, claim);
+    tracing::info!("lazarus-spawn created safezone claim world={world} radius={radius}");
+}
+
 /// Resolves the territory at `(world, x, z)`.
 pub fn territory_at(world: &str, x: i32, z: i32) -> Territory {
     let guard = state().read().unwrap();
@@ -173,18 +201,16 @@ pub fn territory_at(world: &str, x: i32, z: i32) -> Territory {
     }
 
     let dimension = dimension_of(world);
-    let safe_radius = guard.config.spawn.safezone_radius;
     let war_radius = match dimension {
         Dimension::Overworld => guard.config.warzone_radius.overworld,
         Dimension::Nether => guard.config.warzone_radius.nether,
         Dimension::End => guard.config.warzone_radius.end,
     };
 
-    let (center_x, center_z) = (0, 0);
-    let distance = (x - center_x).abs().max((z - center_z).abs());
-    if safe_radius > 0 && distance <= safe_radius {
-        Territory::Safezone
-    } else if war_radius > 0 && distance <= war_radius {
+    // Safezone is *only* the spawn faction's claims (handled above via the claim
+    // index); the radius below is purely the warzone.
+    let distance = x.abs().max(z.abs());
+    if war_radius > 0 && distance <= war_radius {
         Territory::Warzone
     } else {
         Territory::Wilderness

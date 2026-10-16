@@ -37,6 +37,7 @@ pub fn start(context: &Context) {
     // Apply the configured world borders (square, infinite on Y), centred on spawn.
     context.schedule_delayed_task(20, |server| {
         crate::core::refresh_spawn_centers(&server);
+        crate::core::setup_spawn_claim(&server);
         crate::core::apply_world_borders_from_config(&server);
     });
 }

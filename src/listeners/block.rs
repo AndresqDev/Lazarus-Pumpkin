@@ -48,7 +48,7 @@ fn can_build(player_uuid: &str, world: &str, x: i32, z: i32) -> bool {
 pub struct BlockBreakListener;
 
 impl EventHandler<BlockBreakEvent> for BlockBreakListener {
-    fn handle(&self, _server: Server, mut event: EventData<BlockBreakEvent>) -> EventData<BlockBreakEvent> {
+    fn handle(&self, server: Server, mut event: EventData<BlockBreakEvent>) -> EventData<BlockBreakEvent> {
         let Some(player) = event.player.as_ref() else {
             return event;
         };
@@ -69,6 +69,14 @@ impl EventHandler<BlockBreakEvent> for BlockBreakListener {
         if !allowed {
             event.cancelled = true;
             core::send(player, "&cYou cannot break blocks here.");
+        } else {
+            // Keep any active client-side view (claim pillars/walls) alive at this
+            // position: real block changed, so re-send the fake block.
+            state()
+                .read()
+                .unwrap()
+                .glass
+                .regenerate_at(&server, &world, event.block_pos.x, event.block_pos.y, event.block_pos.z);
         }
 
         event
@@ -78,13 +86,20 @@ impl EventHandler<BlockBreakEvent> for BlockBreakListener {
 pub struct BlockPlaceListener;
 
 impl EventHandler<BlockPlaceEvent> for BlockPlaceListener {
-    fn handle(&self, _server: Server, mut event: EventData<BlockPlaceEvent>) -> EventData<BlockPlaceEvent> {
+    fn handle(&self, server: Server, mut event: EventData<BlockPlaceEvent>) -> EventData<BlockPlaceEvent> {
         let player = &event.player;
         let uuid = core::uuid_of(player);
         let world = core::world_name(player);
         if !can_build(&uuid, &world, event.block_pos.x, event.block_pos.z) {
             event.cancelled = true;
             core::send(player, "&cYou cannot place blocks here.");
+        } else {
+            // Re-assert any client-side view at this position.
+            state()
+                .read()
+                .unwrap()
+                .glass
+                .regenerate_at(&server, &world, event.block_pos.x, event.block_pos.y, event.block_pos.z);
         }
 
         event

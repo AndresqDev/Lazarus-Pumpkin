@@ -66,6 +66,9 @@ impl Plugin for LazarusPlugin {
         // Cache world spawns before anything else so the warzone is centred correctly.
         core::refresh_spawn_centers(&context.get_server());
 
+        // Materialise the spawn safezone claim (safezone == spawn claim).
+        core::setup_spawn_claim(&context.get_server());
+
         commands::register(&context)?;
         listeners::register(&context)?;
         tasks::start(&context);
