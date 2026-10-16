@@ -432,20 +432,21 @@ impl PvpClassManager {
             return;
         }
 
-        // `canBard` for holdables: not under pvp protection, not in the safezone.
-        // NOTE: combat tag is intentionally allowed.
-        if pvp_protected || in_safezone {
-            return;
-        }
-
-        // Regenerate energy (1 per tick, capped at MAX_ENERGY).
+        // Energy regenerates regardless of pvp protection / safezone (only *using*
+        // clickables/holdables is restricted).
         let max = self
             .classes
             .get(&ClassKind::Bard)
             .map(|c| c.max_energy)
             .unwrap_or(120.0);
-        let energy = self.bard_energy.entry(uuid.clone()).or_insert(max);
+        let energy = self.bard_energy.entry(uuid.clone()).or_insert(0.0);
         *energy = (*energy + 1.0).min(max);
+
+        // `canBard` for holdables: not under pvp protection, not in the safezone.
+        // NOTE: combat tag is intentionally allowed.
+        if pvp_protected || in_safezone {
+            return;
+        }
 
         let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
             return;
