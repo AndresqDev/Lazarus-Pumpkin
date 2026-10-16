@@ -43,15 +43,21 @@ impl EventHandler<PlayerInteractEvent> for InteractListener {
         event.cancelled = true;
 
         let sneaking = state().read().unwrap().selection.is_sneaking(&uuid);
+        // System selections (`/f claimfor`) never buy through sneaking: the claim is
+        // created by re-running the command (original `SelectionManager`).
+        let is_system = matches!(
+            state().read().unwrap().selection.get(&uuid).map(|s| s.kind.clone()),
+            Some(crate::selection::SelectionKind::System(_))
+        );
 
         match action {
             InteractAction::LeftClickBlock => match clicked {
-                Some(_) if sneaking => purchase(&server, &event.player, &uuid),
+                Some(_) if sneaking && !is_system => purchase(&server, &event.player, &uuid),
                 Some(pos) => set_position(&event.player, &uuid, pos, true),
                 None => {}
             },
             InteractAction::LeftClickAir => {
-                if sneaking {
+                if sneaking && !is_system {
                     purchase(&server, &event.player, &uuid);
                 }
             }
@@ -105,6 +111,13 @@ fn set_position(player: &Player, uuid: &str, pos: BlockPos, left: bool) {
     // deadlocks (which trapped the WASM store).
     let is_overworld = core::dimension_of(&world) == Dimension::Overworld;
     let is_wilderness = matches!(core::territory_at(&world, x, z), Territory::Wilderness);
+    // `/f claimfor` (system) selections are placed by `SelectionManager` in the
+    // original: no wilderness / min-max / price checks, so they can cover the
+    // warzone or the safezone.
+    let is_system = matches!(
+        state().read().unwrap().selection.get(uuid).map(|s| s.kind.clone()),
+        Some(crate::selection::SelectionKind::System(_))
+    );
 
     {
         let mut guard = state().write().unwrap();
@@ -119,18 +132,22 @@ fn set_position(player: &Player, uuid: &str, pos: BlockPos, left: bool) {
             .map(|f| f.balance)
             .unwrap_or(0);
 
-        // Can only claim in the overworld.
-        if !is_overworld {
+        // Can only claim in the overworld (player claims only).
+        if !is_system && !is_overworld {
             messages.push(lang.faction_claim_only_overworld.clone());
-        } else if !is_wilderness {
-            // The clicked location must be wilderness.
+        } else if !is_system && !is_wilderness {
+            // The clicked location must be wilderness (player claims only).
             messages.push(lang.faction_claim_location_claimed.clone());
         } else {
             // Min/max size restriction (original `Selection#getSize`).
-            let (min_size, max_size) = selection
-                .get(uuid)
-                .map(|s| s.get_size(left, x, z))
-                .unwrap_or((-1, -1));
+            let (min_size, max_size) = if is_system {
+                (-1, -1)
+            } else {
+                selection
+                    .get(uuid)
+                    .map(|s| s.get_size(left, x, z))
+                    .unwrap_or((-1, -1))
+            };
 
             if min_size != -1 && min_size < config.factions.min_claim_size {
                 messages.push(util::replace(
@@ -168,8 +185,10 @@ fn set_position(player: &Player, uuid: &str, pos: BlockPos, left: bool) {
                 };
                 messages.push(util::replace(template, "<location>", &location_string(x, z)));
 
-                // Price message when both positions are set.
-                if let Some(claim) = current.to_claim() {
+                // Price message when both positions are set (player claims only).
+                if !is_system
+                    && let Some(claim) = current.to_claim()
+                {
                     let size = claim.size_x() * claim.size_z();
                     let price = (size as f64 * config.factions.claim_price_per_block) as i64;
                     let price_string = if faction_balance < price {

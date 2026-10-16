@@ -73,6 +73,16 @@ impl EventHandler<BlockBreakEvent> for BlockBreakListener {
         let uuid = core::uuid_of(player);
         let world = core::world_name(player);
 
+        // Holding the selection wand must never break the block (port of
+        // `SelectionManager#onBlockBreak`).
+        {
+            let guard = state().read().unwrap();
+            if guard.selection.is_active(&uuid) && guard.selection.holds_wand(player) {
+                event.cancelled = true;
+                return event;
+            }
+        }
+
         if !can_build(&uuid, &world, event.block_pos.x, event.block_pos.z) {
             event.cancelled = true;
             let message = deny_message(player, &world, event.block_pos.x, event.block_pos.z, false);
