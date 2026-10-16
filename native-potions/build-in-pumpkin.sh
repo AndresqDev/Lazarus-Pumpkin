@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Builds the native tab-list plugin *inside* Pumpkin's workspace so it uses the
-# server's own Cargo.lock (avoiding pre-release dependency mismatches such as
-# rsa/pkcs1) and the exact same `pumpkin` crate (guaranteeing ABI compatibility).
+# Builds the native potion-component factory *inside* Pumpkin's workspace so it
+# uses the server's own Cargo.lock and the exact same crate sources as the
+# server's network codec (the serialized component bytes must match).
+#
+# Only the .so is built: the server binary is NOT patched, modified nor rebuilt.
 #
 # Usage:  bash native-potions/build-in-pumpkin.sh [workdir]
 set -euo pipefail
@@ -29,7 +31,7 @@ cat > "$WORK/native-potions/Cargo.toml" <<'EOF'
 name = "native_potions"
 version = "0.1.0"
 edition = "2024"
-description = "Native tab list companion for Lazarus"
+description = "Native potion-component factory for Lazarus"
 
 [lib]
 crate-type = ["cdylib"]
@@ -38,8 +40,10 @@ crate-type = ["cdylib"]
 pumpkin = { path = "../crates/pumpkin" }
 pumpkin-api-macros = { path = "../crates/pumpkin-api-macros" }
 pumpkin-data = { path = "../crates/pumpkin-data" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-tracing = "0.1"
+pumpkin-protocol = { path = "../crates/pumpkin-protocol" }
+base64 = { version = "0.23", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 EOF
 
 # Register as a workspace member (idempotent). Anchor the match to the members
@@ -48,7 +52,7 @@ if ! grep -q '"native-potions"' "$WORK/Cargo.toml"; then
     sed -i 's#^    "crates/pumpkin-world",$#    "crates/pumpkin-world",\n    "native-potions",#' "$WORK/Cargo.toml"
 fi
 
-echo ">> Building (this is heavy: ~700 crates, first time 20-40 min)"
+echo ">> Building only the plugin target (the server is not built nor touched)"
 cd "$WORK"
 # Build for the host explicitly (avoids any target inherited from a parent .cargo config).
 HOST_TRIPLE="$(rustc -vV | awk '/^host:/{print $2}')"

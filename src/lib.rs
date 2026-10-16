@@ -25,7 +25,7 @@ mod hologram;
 mod kits;
 mod lang;
 mod listeners;
-mod potion_api;
+mod potion_components;
 mod scoreboard;
 mod selection;
 mod staffmode;
@@ -65,7 +65,8 @@ impl Plugin for LazarusPlugin {
     fn on_load(&self, context: Context) -> pumpkin_plugin_api::Result<()> {
         // The plugin's private data folder is our persistence + config location.
         let data_folder = context.get_data_folder();
-        state::init(data_folder)?;
+        state::init(data_folder.clone())?;
+        potion_components::init(&data_folder);
 
         // Cache world spawns before anything else so the warzone is centred correctly.
         core::refresh_spawn_centers(&context.get_server());

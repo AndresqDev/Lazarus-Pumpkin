@@ -98,9 +98,6 @@ pub fn capture(player: &Player, name: &str, delay_seconds: i64) -> Kit {
 
 /// Gives a kit to a player by filling its stored slots.
 pub fn give(player: &Player, kit: &Kit) {
-    let uuid = crate::core::uuid_of(player);
-    let mut potion_slots: Vec<(u8, String)> = Vec::new();
-
     for entry in &kit.items {
         let item = ItemStack::new(&entry.key, entry.count);
 
@@ -110,11 +107,22 @@ pub fn give(player: &Player, kit: &Kit) {
             item.set_custom_name(Some(component));
         }
 
-        let lore: Vec<TextComponent> = entry
+        let mut lore: Vec<TextComponent> = entry
             .lore
             .iter()
             .filter_map(|line| TextComponent::from_json(line).ok())
             .collect();
+
+        // Potions: append the delivery marker. `potion_components::apply_marker`
+        // below detects it, replaces it with the real potion (the byte table is
+        // produced by the native `native_potions` companion) and strips this
+        // line before the player ever sees the item.
+        if let Some(potion) = &entry.potion
+            && let Some(marker) = potion_marker_line(potion)
+        {
+            lore.push(marker);
+        }
+
         if !lore.is_empty() {
             item.set_lore(lore);
         }
@@ -125,20 +133,29 @@ pub fn give(player: &Player, kit: &Kit) {
             }
         }
 
+        // Convert marked items into the real potion before handing them over.
+        crate::potion_components::apply_marker(&item);
+
         player.set_inventory_item(entry.slot, Some(item));
-
-        // Potions need the native bridge to set the `potion-contents` component.
-        if let Some(potion) = &entry.potion {
-            potion_slots.push((entry.slot, potion.clone()));
-        }
     }
+}
 
-    if !potion_slots.is_empty() {
-        let folder = crate::state::state().read().unwrap().data_folder.clone();
-        for (slot, potion) in potion_slots {
-            crate::potion_api::request(&folder, &uuid, slot, &potion);
-        }
-    }
+/// base64 of the binary code `yosoyelplugin` that marks Lazarus potion items.
+/// Keep in sync with `native-potions/src/lib.rs` (`MARKER_CODE_B64`) and
+/// `potion_components.rs` (`MARKER_CODE`).
+pub const POTION_MARKER_B64: &str = "eW9zb3llbHB1Z2lu";
+
+/// Builds the lore line consumed by `potion_components::apply_marker`: its plain
+/// text is the JSON `{"lzp":"<base64 code>","potion":"<id>"}`, wrapped as a text
+/// component (`{"text":"..."}`).
+fn potion_marker_line(potion: &str) -> Option<TextComponent> {
+    let marker = serde_json::json!({
+        "lzp": POTION_MARKER_B64,
+        "potion": potion,
+    })
+    .to_string();
+    let component = serde_json::json!({ "text": marker }).to_string();
+    TextComponent::from_json(&component).ok()
 }
 
 /// A stable string key for a vanilla enchantment (used for persistence).

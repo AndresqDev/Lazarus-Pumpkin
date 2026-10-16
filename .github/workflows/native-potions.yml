@@ -1,8 +1,10 @@
 name: native-potions
 
-# Builds the native potion-contents bridge INSIDE Pumpkin's workspace so it uses
-# the exact same Cargo.lock (dependency versions) and `pumpkin`/`pumpkin-data`
-# crates as the server (guaranteeing ABI + type compatibility).
+# Builds the native potion-component factory INSIDE Pumpkin's workspace so it
+# uses the exact same Cargo.lock (dependency versions) and the same
+# `pumpkin-data`/`pumpkin-protocol` sources as the server network codec.
+#
+# Only the .so is built: the server binary is never patched nor rebuilt.
 #
 # Produces one artifact: native_potions_x86_64 (libnative_potions.so).
 # Put it in the server's plugins/ folder as native_potions.so.
@@ -45,7 +47,7 @@ jobs:
           name = "native_potions"
           version = "0.1.0"
           edition = "2024"
-          description = "Native potion-contents bridge for Lazarus"
+          description = "Native potion-component factory for Lazarus"
 
           [lib]
           crate-type = ["cdylib"]
@@ -54,17 +56,16 @@ jobs:
           pumpkin = { path = "../crates/pumpkin" }
           pumpkin-api-macros = { path = "../crates/pumpkin-api-macros" }
           pumpkin-data = { path = "../crates/pumpkin-data" }
-          uuid = "1"
+          pumpkin-protocol = { path = "../crates/pumpkin-protocol" }
+          base64 = { version = "0.23", default-features = false, features = ["std"] }
           serde = { version = "1", features = ["derive"] }
           serde_json = "1"
-          tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
-          tracing = "0.1"
           EOF
           # Register it as a workspace member (anchored to the members line only).
           sed -i 's#^    "crates/pumpkin-world",$#    "crates/pumpkin-world",\n    "native-potions",#' Pumpkin/Cargo.toml
           grep -n "native-potions" Pumpkin/Cargo.toml
 
-      - name: Build native plugin
+      - name: Build the native plugin (server untouched)
         working-directory: Pumpkin
         run: cargo build --release -p native_potions --target x86_64-unknown-linux-gnu
 
