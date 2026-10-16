@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use pumpkin_plugin_api::{Player, Server};
 
 use crate::state::{state, AppState};
-use crate::tab_api::{SlotSpec, TabState};
+use crate::tab_api::{Skin, SlotSpec, TabState};
 use crate::util;
 
 const COLUMN_HEIGHT: usize = 20;
@@ -29,34 +29,83 @@ const FACES: [&str; 8] = ["S", "SW", "W", "NW", "N", "NE", "E", "SE"];
 static STATE: Mutex<Option<TabState>> = Mutex::new(None);
 static DIRTY: AtomicBool = AtomicBool::new(false);
 
-/// Pushes the whole artificial layout (called on join / reload).
+/// Pushes the whole artificial layout + faction info + member heads (on join).
 pub fn setup(player: &Player, server: &Server) {
-    let lines = {
+    let uuid = crate::core::uuid_of(player);
+
+    let (lines, skins) = {
         let guard = state().read().unwrap();
-        if !guard.config.tab.enabled {
+        if !guard.tab.enabled {
             return;
         }
-        compute_lines(&guard, player, server)
+
+        let mut lines = compute_lines(&guard, player, server);
+        let mut skins: BTreeMap<usize, Skin> = BTreeMap::new();
+
+        // FactionInfoModule (slots 3,4) + PlayerListModule (slot 24 + members),
+        // exactly like the original tab.yml modules.
+        if let Some(faction) = guard.factions.by_member(&uuid) {
+            let max_dtr = faction.max_dtr(&guard.config);
+            lines[3] = format!("&7DTR: &c{:.2}&7/&a{max_dtr:.2}", faction.dtr);
+            lines[4] = format!("&7Home: &7{}", faction.home_string());
+            lines[24] = format!("{}{}", guard.config.relation_colors.teammate, faction.name);
+
+            let mut members: Vec<&crate::factions::FactionMember> =
+                faction.members.values().collect();
+            members.sort_by(|a, b| b.role.cmp(&a.role));
+
+            for (i, member) in members.iter().take(10).enumerate() {
+                let slot = 25 + i;
+                if slot >= lines.len() {
+                    break;
+                }
+                lines[slot] = format!(
+                    "{}{}{}",
+                    guard.config.relation_colors.teammate,
+                    member.role.prefix(),
+                    member.name
+                );
+                if let Some(skin) = member_skin(server, &member.uuid) {
+                    skins.insert(slot, skin);
+                }
+            }
+        } else {
+            lines[3] = "&7Not in faction.".to_string();
+            lines[4] = "&7/f create <name>".to_string();
+        }
+
+        (lines, skins)
     };
 
     let mut state = STATE.lock().unwrap();
     let tab = state.get_or_insert_with(TabState::default);
+    let viewer = tab.viewers.entry(uuid).or_default();
+    viewer.clear();
 
-    let mut global = BTreeMap::new();
     for (slot, line) in lines.iter().enumerate() {
-        global.insert(
+        viewer.insert(
             slot.to_string(),
             SlotSpec {
                 text: line.clone(),
                 name: None,
-                order: Some(slot as i32),
-                skin: None,
+                order: Some((SLOTS as i32 - 1) - slot as i32),
+                skin: skins.get(&slot).cloned(),
             },
         );
     }
-    tab.global = global;
 
     DIRTY.store(true, Ordering::Relaxed);
+}
+
+/// Reads a player's skin (head) for the tab entry.
+fn member_skin(server: &Server, uuid: &str) -> Option<Skin> {
+    let id = pumpkin_plugin_api::uuid::parse(uuid)?;
+    let player = server.get_player_by_uuid(id)?;
+    let skin = player.get_skin()?;
+    Some(Skin {
+        value: skin.value,
+        signature: skin.signature,
+    })
 }
 
 /// Per-player dynamic updates (called every tick).
@@ -109,7 +158,7 @@ fn state_folder() -> String {
 
 /// Builds the 80 configured lines (4 columns of 20), resolving placeholders.
 fn compute_lines(guard: &AppState, player: &Player, server: &Server) -> Vec<String> {
-    let tab = &guard.config.tab;
+    let tab = &guard.tab;
 
     let mut flat: Vec<String> = Vec::with_capacity(SLOTS);
     for column in [&tab.left, &tab.center, &tab.right, &tab.far_right] {
