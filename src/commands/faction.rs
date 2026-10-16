@@ -64,6 +64,9 @@ enum Action {
     AdminForceDemote,
     AdminForceJoin,
     AdminForceRename,
+    AdminSystemCreate,
+    AdminSystemList,
+    AdminSystemRename,
     AdminSetPoints,
     AdminSetBalance,
     AdminSetLives,
@@ -113,6 +116,9 @@ pub fn register(context: &Context) -> Result<(), String> {
         "lazarus.factions.forcedemote",
         "lazarus.factions.forcejoin",
         "lazarus.factions.forcerename",
+        "lazarus.factions.systemcreate",
+        "lazarus.factions.systemlist",
+        "lazarus.factions.systemrename",
     ] {
         register_op_permission(context, node, "Lazarus faction admin command")?;
     }
@@ -228,7 +234,10 @@ pub fn register(context: &Context) -> Result<(), String> {
         .then(CommandNode::literal("forcepromote").then(str_node("player").execute(FactionExecutor(Action::AdminForcePromote))))
         .then(CommandNode::literal("forcedemote").then(str_node("player").execute(FactionExecutor(Action::AdminForceDemote))))
         .then(CommandNode::literal("forcejoin").then(str_node("faction").execute(FactionExecutor(Action::AdminForceJoin))))
-        .then(CommandNode::literal("forcerename").then(str_node("faction").then(str_node("name").execute(FactionExecutor(Action::AdminForceRename)))));
+        .then(CommandNode::literal("forcerename").then(str_node("faction").then(str_node("name").execute(FactionExecutor(Action::AdminForceRename)))))
+        .then(CommandNode::literal("systemcreate").then(str_node("name").execute(FactionExecutor(Action::AdminSystemCreate))))
+        .then(CommandNode::literal("systemlist").execute(FactionExecutor(Action::AdminSystemList)))
+        .then(CommandNode::literal("systemrename").then(str_node("faction").then(str_node("name").execute(FactionExecutor(Action::AdminSystemRename)))));
 
     context.register_command(root, "lazarus:command.faction");
     Ok(())
@@ -289,6 +298,9 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::AdminForceDemote => admin_force_role(sender, server, args, false),
         Action::AdminForceJoin => admin_force_join(sender, server, args),
         Action::AdminForceRename => admin_force_rename(sender, server, args),
+        Action::AdminSystemCreate => admin_system_create(sender, server, args),
+        Action::AdminSystemList => admin_system_list(sender),
+        Action::AdminSystemRename => admin_system_rename(sender, server, args),
         Action::AdminSetPoints => admin_set_int(sender, server, args, AdminField::Points),
         Action::AdminSetBalance => admin_set_int(sender, server, args, AdminField::Balance),
         Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
@@ -1820,6 +1832,160 @@ fn admin_force_rename(sender: &CommandSender, server: &Server, args: &ConsumedAr
     for player in server.get_all_players() {
         core::send(&player, &message);
     }
+}
+
+fn admin_system_create(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    let _ = server;
+    if !require_permission(sender, server, "lazarus.factions.systemcreate") {
+        return;
+    }
+    let Some(name) = string_arg(args, "name") else {
+        return;
+    };
+
+    let mut guard = state().write().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+    if guard.factions.name_taken(&name) {
+        let tpl = guard.raw.language.string("FACTIONS.FACTION_ALREADY_EXISTS");
+        drop(guard);
+        reply(sender, format!("{prefix}{}", util::replace(&tpl, "<name>", &name)));
+        return;
+    }
+    let created = guard.raw.language.string("FACTIONS.SYSTEM_CREATE_COMMAND.CREATED");
+
+    let id = crate::factions::new_id();
+    let faction = Faction::new_system(
+        id.clone(),
+        name.clone(),
+        crate::factions::FactionKind::System,
+        "&7".to_string(),
+    );
+    guard.factions.factions.insert(id, faction);
+    drop(guard);
+
+    reply(
+        sender,
+        format!("{prefix}{}", util::replace(&created, "<name>", &name)),
+    );
+}
+
+fn admin_system_list(sender: &CommandSender) {
+    fn kind_order(kind: crate::factions::FactionKind) -> u8 {
+        match kind {
+            crate::factions::FactionKind::System => 0,
+            crate::factions::FactionKind::Safezone => 1,
+            crate::factions::FactionKind::Warzone => 2,
+            crate::factions::FactionKind::Wilderness => 3,
+            crate::factions::FactionKind::Road => 4,
+            crate::factions::FactionKind::Player => 5,
+        }
+    }
+
+    let (header, format_tpl, footer, factions) = {
+        let guard = state().read().unwrap();
+        let lang = &guard.raw.language;
+        let mut list: Vec<(u8, String, String)> = guard
+            .factions
+            .factions
+            .values()
+            .filter(|f| f.is_system())
+            .map(|f| (kind_order(f.kind), f.color.clone(), f.name.clone()))
+            .collect();
+        list.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.2.cmp(&b.2)));
+        (
+            lang.string_list("FACTIONS.SYSTEM_LIST_COMMAND.HEADER"),
+            lang.string("FACTIONS.SYSTEM_LIST_COMMAND.FACTION_FORMAT"),
+            lang.string("FACTIONS.SYSTEM_LIST_COMMAND.FOOTER"),
+            list,
+        )
+    };
+
+    let count = factions.len().to_string();
+    for line in &header {
+        reply(sender, util::replace(line, "<count>", &count));
+    }
+    for (index, (_, color, name)) in factions.iter().enumerate() {
+        let number = (index + 1).to_string();
+        let display = format!("{color}{name}");
+        reply(
+            sender,
+            util::replace_all(
+                &format_tpl,
+                &[("<number>", &number), ("<name>", &display)],
+            ),
+        );
+    }
+    reply(sender, footer);
+}
+
+fn admin_system_rename(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    let _ = server;
+    if !require_permission(sender, server, "lazarus.factions.systemrename") {
+        return;
+    }
+    let Some(old_arg) = string_arg(args, "faction") else {
+        return;
+    };
+    let Some(new_name) = string_arg(args, "name") else {
+        return;
+    };
+
+    let mut guard = state().write().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+    let missing_tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
+    let not_system = guard.raw.language.string("FACTIONS.SYSTEM_RENAME_COMMAND.NOT_SYSTEM_FACTION");
+    let cannot = guard
+        .raw
+        .language
+        .string("FACTIONS.SYSTEM_RENAME_COMMAND.CANNOT_RENAME_THIS_TYPE");
+    let same_tpl = guard.raw.language.string("FACTIONS.SYSTEM_RENAME_COMMAND.SAME_NAME");
+    let exists_tpl = guard.raw.language.string("FACTIONS.FACTION_ALREADY_EXISTS");
+    let renamed_tpl = guard.raw.language.string("FACTIONS.SYSTEM_RENAME_COMMAND.RENAMED");
+
+    let Some(id) = guard.factions.by_name(&old_arg).map(|f| f.id.clone()) else {
+        reply(sender, format!("{prefix}{}", util::replace(&missing_tpl, "<argument>", &old_arg)));
+        return;
+    };
+
+    let Some(faction) = guard.factions.get(&id) else {
+        return;
+    };
+    let kind = faction.kind;
+    let old_name = faction.name.clone();
+    let color = faction.color.clone();
+
+    if kind == crate::factions::FactionKind::Player {
+        reply(sender, format!("{prefix}{not_system}"));
+        return;
+    }
+    if kind != crate::factions::FactionKind::System {
+        reply(sender, format!("{prefix}{cannot}"));
+        return;
+    }
+    if old_name.eq_ignore_ascii_case(&new_name) {
+        reply(sender, format!("{prefix}{}", util::replace(&same_tpl, "<name>", &new_name)));
+        return;
+    }
+    if guard.factions.name_taken(&new_name) {
+        reply(sender, format!("{prefix}{}", util::replace(&exists_tpl, "<name>", &new_name)));
+        return;
+    }
+
+    if let Some(faction) = guard.factions.get_mut(&id) {
+        faction.name = new_name.clone();
+    }
+    drop(guard);
+
+    reply(
+        sender,
+        format!(
+            "{prefix}{}",
+            util::replace_all(
+                &renamed_tpl,
+                &[("<faction>", &format!("{color}{old_name}")), ("<name>", &format!("{color}{new_name}"))],
+            )
+        ),
+    );
 }
 
 fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {

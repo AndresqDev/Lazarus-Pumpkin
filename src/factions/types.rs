@@ -131,6 +131,8 @@ pub enum FactionKind {
     Warzone,
     Safezone,
     Road,
+    /// Generic admin-created system faction (`/f systemcreate`).
+    System,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
