@@ -58,9 +58,24 @@ impl NativeTab {
 
         // The tab layout lives in the WASM plugin's data folder, not ours.
         let Some(config) = load_config() else {
+            let _ = std::fs::write(
+                "plugins/native_tab_debug.txt",
+                "on_load: plugins/data/lazarus/tab.toml missing or invalid",
+            );
             context.log("NativeTab: plugins/data/lazarus/tab.toml missing or invalid; not rendering");
             return Ok(());
         };
+        let _ = std::fs::write(
+            "plugins/native_tab_debug.txt",
+            format!(
+                "on_load: enabled={} left={} center={} right={} far_right={}",
+                config.enabled,
+                config.left.len(),
+                config.center.len(),
+                config.right.len(),
+                config.far_right.len()
+            ),
+        );
         if !config.enabled {
             context.log("NativeTab: tab.toml has enabled=false");
             return Ok(());
@@ -86,9 +101,11 @@ async fn run(server: Arc<Server>, config: TabConfig, log_ctx: Arc<Context>) {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     let mut added = false;
     let mut last: Vec<String> = vec![String::new(); SLOTS];
+    let mut ticks: u64 = 0;
 
     loop {
         interval.tick().await;
+        ticks += 1;
 
         let lines = build_lines(&config, &server);
 
@@ -106,6 +123,20 @@ async fn run(server: Arc<Server>, config: TabConfig, log_ctx: Arc<Context>) {
 
         // Real players must not show up on the artificial tab.
         hide_real_players(&server);
+
+        // Debug trace (native plugins have real fs access).
+        let _ = std::fs::write(
+            "plugins/native_tab_debug.txt",
+            format!(
+                "tick={ticks} added={added} players={} left={} center={} right={} far_right={}\nfirst_lines={:?}\n",
+                server.get_all_players().len(),
+                config.left.len(),
+                config.center.len(),
+                config.right.len(),
+                config.far_right.len(),
+                &last[..5.min(last.len())]
+            ),
+        );
     }
 }
 
