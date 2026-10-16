@@ -229,6 +229,10 @@ pub struct PvpClassManager {
     pub mage_energy: BTreeMap<String, f64>,
     pub mage_clickables: Vec<BardClickable>,
     pub mage_cooldowns: BTreeMap<(String, String), i64>,
+    /// Bomber TNT gun: (material, cooldown ms).
+    pub bomber_gun: Option<(String, i64)>,
+    /// Bomber cooldown: uuid -> expiry millis.
+    pub bomber_cooldowns: BTreeMap<String, i64>,
 }
 
 impl PvpClassManager {
@@ -310,6 +314,16 @@ impl PvpClassManager {
                         duration: (raw.int(&format!("{base}.DURATION")).max(1) as u32) * 20,
                     });
                 }
+            }
+
+            if kind == ClassKind::Bomber {
+                let material = legacy_material(&raw.string("BOMBER_CLASS.TNT_GUN.MATERIAL_ID"))
+                    .unwrap_or_default()
+                    .to_string();
+                self.bomber_gun = Some((
+                    material,
+                    raw.int("BOMBER_CLASS.TNT_GUN.COOLDOWN").max(0) * 1000,
+                ));
             }
 
             if kind == ClassKind::Mage {
@@ -1098,4 +1112,84 @@ pub fn mage_click(server: &Server, player: &Player) {
         .classes
         .mage_cooldowns
         .insert((uuid, clickable.material.clone()), now + clickable.cooldown_ms);
+}
+
+/// Handles the Bomber TNT gun (right-click): spawns a primed TNT.
+pub fn bomber_click(server: &Server, player: &Player) {
+    let uuid = crate::core::uuid_of(player);
+
+    let (pvp_protected, in_safezone, gun) = {
+        let guard = state().read().unwrap();
+        if guard.classes.active.get(&uuid) != Some(&ClassKind::Bomber) {
+            return;
+        }
+        let location = crate::core::location(player);
+        (
+            guard
+                .timers
+                .is_active(&uuid, crate::timers::TimerType::PvpProtection),
+            matches!(
+                crate::core::territory_at_guard(&guard, &location.world, location.block_x(), location.block_z()),
+                crate::core::Territory::Safezone
+            ),
+            guard.classes.bomber_gun.clone(),
+        )
+    };
+    if pvp_protected || in_safezone {
+        return;
+    }
+    let Some((material, cooldown_ms)) = gun else {
+        return;
+    };
+
+    let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
+        return;
+    };
+    if item.get_registry_key().trim_start_matches("minecraft:") != material.trim_start_matches("minecraft:") {
+        return;
+    }
+
+    let now = util::now_millis();
+    {
+        let guard = state().read().unwrap();
+        if guard
+            .classes
+            .bomber_cooldowns
+            .get(&uuid)
+            .is_some_and(|expiry| *expiry > now)
+        {
+            return;
+        }
+    }
+
+    let location = crate::core::location(player);
+    if let Some(world) = server
+        .get_all_worlds()
+        .into_iter()
+        .find(|w| w.get_name() == location.world)
+    {
+        let _ = world.spawn_entity(
+            pumpkin_plugin_api::EntityType::Tnt,
+            (location.x, location.y + 1.0, location.z),
+        );
+    }
+
+    let combat_tag = state()
+        .read()
+        .unwrap()
+        .raw
+        .config
+        .bool("BOMBER_CLASS.COMBAT_TAG_ON_TNT_USE");
+    let tag_seconds = state().read().unwrap().config.timers.combat_tag_seconds;
+
+    let mut guard = state().write().unwrap();
+    guard
+        .classes
+        .bomber_cooldowns
+        .insert(uuid.clone(), now + cooldown_ms);
+    if combat_tag {
+        guard
+            .timers
+            .activate(&uuid, crate::timers::TimerType::CombatTag, tag_seconds);
+    }
 }
