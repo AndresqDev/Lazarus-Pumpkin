@@ -108,6 +108,9 @@ fn tick(server: &Server) {
             classes.tick_player(&player, &server, &raw.language, &raw.config, faction_id.as_deref());
         }
         classes.tick_warmups(&server, &raw.language, &raw.config, factions);
+        for player in server.get_all_players() {
+            classes.bard_tick(&player, &server, factions);
+        }
     }
 
     // Persist the tab state file once per tick (the native plugin diffs it).

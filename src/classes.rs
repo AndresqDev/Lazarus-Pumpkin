@@ -98,6 +98,27 @@ impl ClassKind {
     }
 }
 
+/// Legacy 1.8 `MATERIAL_ID` (e.g. `"353:0"`) to a modern registry name.
+fn legacy_material(id: &str) -> Option<&'static str> {
+    let base = id.split(':').next().unwrap_or(id);
+    Some(match base {
+        "263" => "minecraft:coal",
+        "265" => "minecraft:iron_ingot",
+        "280" => "minecraft:stick",
+        "288" => "minecraft:feather",
+        "295" => "minecraft:wheat_seeds",
+        "351" => "minecraft:green_dye", // :2 cactus green
+        "353" => "minecraft:sugar",
+        "367" => "minecraft:rotten_flesh",
+        "370" => "minecraft:ghast_tear",
+        "371" => "minecraft:gold_nugget",
+        "375" => "minecraft:spider_eye",
+        "377" => "minecraft:blaze_powder",
+        "378" => "minecraft:magma_cream",
+        _ => return None,
+    })
+}
+
 /// Bukkit potion-effect name (from `classes.yml`) to the Pumpkin status effect.
 fn effect_from_name(name: &str) -> Option<StatusEffectType> {
     use StatusEffectType as E;
@@ -136,6 +157,16 @@ fn effect_from_name(name: &str) -> Option<StatusEffectType> {
 
 pub const INFINITE: u32 = u32::MAX;
 
+/// Bard holdable item: holding `material` buffs nearby faction members.
+#[derive(Debug, Clone)]
+pub struct BardHoldable {
+    pub material: String,
+    pub distance_sq: f64,
+    pub can_bard_himself: bool,
+    pub effect: PassiveEffect,
+    pub duration: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct PassiveEffect {
     pub effect: StatusEffectType,
@@ -162,6 +193,8 @@ pub struct PvpClassManager {
     pub miner_rewards: Vec<(i32, String, Vec<PassiveEffect>)>,
     /// Archer-tagged players: uuid -> expiry millis.
     pub archer_tags: BTreeMap<String, i64>,
+    /// Bard holdable items.
+    pub bard_holdables: Vec<BardHoldable>,
 }
 
 impl PvpClassManager {
@@ -198,6 +231,30 @@ impl PvpClassManager {
                 },
             );
 
+            if kind == ClassKind::Bard {
+                self.bard_holdables.clear();
+                for potion in raw.keys("BARD_CLASS.HOLDABLE_ITEMS") {
+                    let base = format!("BARD_CLASS.HOLDABLE_ITEMS.{potion}");
+                    let Some(effect) = effect_from_name(&potion) else { continue };
+                    let material = legacy_material(
+                        &raw.string(&format!("{base}.MATERIAL_ID")),
+                    )
+                    .unwrap_or_default()
+                    .to_string();
+                    let distance = raw.int(&format!("{base}.DISTANCE")).max(0) as f64;
+                    self.bard_holdables.push(BardHoldable {
+                        material,
+                        distance_sq: distance * distance,
+                        can_bard_himself: raw.bool(&format!("{base}.CAN_BARD_HIMSELF")),
+                        effect: PassiveEffect {
+                            effect,
+                            amplifier: (raw.int(&format!("{base}.LEVEL")).max(1) - 1) as u8,
+                        },
+                        duration: (raw.int(&format!("{base}.DURATION")).max(1) as u32) * 20,
+                    });
+                }
+            }
+
             if kind == ClassKind::Miner {
                 self.miner_rewards.clear();
                 let mut thresholds: Vec<i32> = raw
@@ -224,6 +281,72 @@ impl PvpClassManager {
 
     pub fn active_class(&self, uuid: &str) -> Option<ClassKind> {
         self.active.get(uuid).copied()
+    }
+
+    /// Applies the Bard holdable buff when the active Bard holds the item.
+    pub fn bard_tick(
+        &mut self,
+        player: &Player,
+        server: &Server,
+        factions: &crate::factions::FactionsManager,
+    ) {
+        let uuid = crate::core::uuid_of(player);
+        if self.active.get(&uuid) != Some(&ClassKind::Bard) {
+            return;
+        }
+
+        let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
+            return;
+        };
+        let key = item.get_registry_key();
+        let key = key.trim_start_matches("minecraft:").to_string();
+
+        let Some(holdable) = self
+            .bard_holdables
+            .iter()
+            .find(|h| h.material.trim_start_matches("minecraft:") == key)
+            .cloned()
+        else {
+            return;
+        };
+
+        let faction_id = factions.by_member(&uuid).map(|f| f.id.clone());
+        let origin = crate::core::location(player);
+
+        for online in server.get_all_players() {
+            let member_uuid = crate::core::uuid_of(&online);
+            if member_uuid != uuid {
+                let same_faction = match &faction_id {
+                    Some(id) => factions.by_member(&member_uuid).map(|f| &f.id) == Some(id),
+                    None => false,
+                };
+                if !same_faction {
+                    continue;
+                }
+            } else if !holdable.can_bard_himself {
+                continue;
+            }
+
+            let target = crate::core::location(&online);
+            if target.world != origin.world {
+                continue;
+            }
+            let dx = target.x - origin.x;
+            let dy = target.y - origin.y;
+            let dz = target.z - origin.z;
+            if dx * dx + dy * dy + dz * dz > holdable.distance_sq {
+                continue;
+            }
+
+            online.add_effect(StatusEffectInstance {
+                effect_type: holdable.effect.effect,
+                duration: holdable.duration,
+                amplifier: holdable.effect.amplifier,
+                ambient: false,
+                show_particles: true,
+                show_icon: true,
+            });
+        }
     }
 
     pub fn is_archer_tagged(&self, uuid: &str) -> bool {
