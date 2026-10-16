@@ -57,6 +57,9 @@ enum Action {
     AdminSetDtr,
     AdminAddDtr,
     AdminRemoveDtr,
+    AdminRemove,
+    AdminClearClaims,
+    AdminSetKills,
     AdminSetPoints,
     AdminSetBalance,
     AdminSetLives,
@@ -190,7 +193,14 @@ pub fn register(context: &Context) -> Result<(), String> {
         .then(CommandNode::literal("forceleader").then(str_node("player").execute(FactionExecutor(Action::AdminForceLeader))))
         .then(CommandNode::literal("freeze").then(str_node("faction").execute(FactionExecutor(Action::AdminFreeze))))
         .then(CommandNode::literal("thaw").then(str_node("faction").execute(FactionExecutor(Action::AdminThaw))))
-        .then(CommandNode::literal("save").execute(FactionExecutor(Action::AdminSave)));
+        .then(CommandNode::literal("save").execute(FactionExecutor(Action::AdminSave)))
+        .then(CommandNode::literal("remove").then(str_node("faction").execute(FactionExecutor(Action::AdminRemove))))
+        .then(CommandNode::literal("clearclaims").then(str_node("faction").execute(FactionExecutor(Action::AdminClearClaims))))
+        .then(
+            CommandNode::literal("setkills").then(
+                str_node("faction").then(int_node("amount").execute(FactionExecutor(Action::AdminSetKills))),
+            ),
+        );
 
     context.register_command(root, "lazarus:command.faction");
     Ok(())
@@ -244,6 +254,9 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::AdminSetDtr => admin_set_dtr(sender, server, args),
         Action::AdminAddDtr => admin_change_dtr(sender, server, args, true),
         Action::AdminRemoveDtr => admin_change_dtr(sender, server, args, false),
+        Action::AdminRemove => admin_remove(sender, server, args),
+        Action::AdminClearClaims => admin_clear_claims(sender, server, args),
+        Action::AdminSetKills => admin_set_kills(sender, server, args),
         Action::AdminSetPoints => admin_set_int(sender, server, args, AdminField::Points),
         Action::AdminSetBalance => admin_set_int(sender, server, args, AdminField::Balance),
         Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
@@ -1409,7 +1422,7 @@ fn admin_change_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs
 
     let mut guard = state().write().unwrap();
     let config = guard.config.clone();
-    let prefix = guard.raw.language.string("FACTIONS.PREFIX");
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
     let sender_tpl = guard.raw.language.string(if add {
         "FACTIONS.ADD_DTR_COMMAND.CHANGED_SENDER"
     } else {
@@ -1494,6 +1507,215 @@ fn admin_change_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs
     }
 
     reply(sender, sender_message);
+}
+
+fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    if !require_admin(sender, server) {
+        return;
+    }
+
+    let (prefix, usage, missing_tpl, invalid_type, sender_tpl, faction_tpl, found) = {
+        let guard = state().read().unwrap();
+        let lang = &guard.raw.language;
+        let found = guard.factions.by_name(&string_arg(args, "faction").unwrap_or_default()).map(|f| {
+            (
+                f.id.clone(),
+                f.name.clone(),
+                f.is_player(),
+                f.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
+            )
+        });
+        (
+            lang.string("FACTION_PREFIX"),
+            lang.string("FACTIONS.REMOVE_COMMAND.USAGE"),
+            lang.string("FACTIONS.FACTION_DOESNT_EXIST"),
+            lang.string("FACTIONS.REMOVE_COMMAND.CANNOT_REMOVE_THIS_TYPE"),
+            lang.string("FACTIONS.REMOVE_COMMAND.REMOVED_SENDER"),
+            lang.string("FACTIONS.REMOVE_COMMAND.REMOVED_FACTION"),
+            found,
+        )
+    };
+
+    let Some(name) = string_arg(args, "faction") else {
+        reply(sender, format!("{prefix}{usage}"));
+        return;
+    };
+    let Some((id, faction_name, is_player, members)) = found else {
+        let message = util::replace(&missing_tpl, "<argument>", &name);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    };
+    if !is_player {
+        reply(sender, format!("{prefix}{invalid_type}"));
+        return;
+    }
+
+    {
+        let mut guard = state().write().unwrap();
+        guard.claims.remove_all(&id);
+        guard.factions.disband(&id);
+    }
+
+    reply(
+        sender,
+        format!("{prefix}{}", util::replace(&sender_tpl, "<faction>", &faction_name)),
+    );
+
+    let message = format!(
+        "{prefix}{}",
+        util::replace(&faction_tpl, "<player>", &sender.get_name())
+    );
+    for uuid in members {
+        if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
+            && let Some(player) = server.get_player_by_uuid(id)
+        {
+            core::send(&player, &message);
+        }
+    }
+}
+
+fn admin_clear_claims(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    if !require_admin(sender, server) {
+        return;
+    }
+
+    let (prefix, usage, missing_tpl, sender_tpl, faction_tpl, home_tpl, found) = {
+        let guard = state().read().unwrap();
+        let lang = &guard.raw.language;
+        let found = guard.factions.by_name(&string_arg(args, "faction").unwrap_or_default()).map(|f| {
+            (
+                f.id.clone(),
+                f.name.clone(),
+                f.is_player(),
+                f.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
+            )
+        });
+        (
+            lang.string("FACTION_PREFIX"),
+            lang.string("FACTIONS.CLEAR_CLAIMS_COMMAND.USAGE"),
+            lang.string("FACTIONS.FACTION_DOESNT_EXIST"),
+            lang.string("FACTIONS.CLEAR_CLAIMS_COMMAND.CLEARED_SENDER"),
+            lang.string("FACTIONS.CLEAR_CLAIMS_COMMAND.CLEARED_FACTION"),
+            lang.string("FACTIONS.CLEAR_CLAIMS_COMMAND.HOME_TELEPORT_CANCELLED"),
+            found,
+        )
+    };
+
+    let Some(name) = string_arg(args, "faction") else {
+        reply(sender, format!("{prefix}{usage}"));
+        return;
+    };
+    let Some((id, faction_name, is_player, members)) = found else {
+        let message = util::replace(&missing_tpl, "<argument>", &name);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    };
+
+    {
+        let mut guard = state().write().unwrap();
+        guard.claims.remove_all(&id);
+        if is_player {
+            if let Some(faction) = guard.factions.get_mut(&id) {
+                faction.home = None;
+            }
+        }
+    }
+
+    reply(
+        sender,
+        format!("{prefix}{}", util::replace(&sender_tpl, "<faction>", &faction_name)),
+    );
+
+    if !is_player {
+        return;
+    }
+
+    let message = format!(
+        "{prefix}{}",
+        util::replace(&faction_tpl, "<player>", &sender.get_name())
+    );
+    for uuid in members {
+        if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
+            && let Some(player) = server.get_player_by_uuid(id)
+        {
+            core::send(&player, &message);
+            core::send(&player, format!("{prefix}{home_tpl}"));
+        }
+    }
+}
+
+fn admin_set_kills(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    if !require_admin(sender, server) {
+        return;
+    }
+
+    let (prefix, usage, missing_tpl, invalid, sender_tpl, faction_tpl, found) = {
+        let guard = state().read().unwrap();
+        let lang = &guard.raw.language;
+        let found = guard
+            .factions
+            .by_name(&string_arg(args, "faction").unwrap_or_default())
+            .filter(|f| f.is_player())
+            .map(|f| {
+                (
+                    f.id.clone(),
+                    f.name.clone(),
+                    f.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
+                )
+            });
+        (
+            lang.string("FACTION_PREFIX"),
+            lang.string("FACTIONS.SET_KILLS_COMMAND.USAGE"),
+            lang.string("FACTIONS.FACTION_DOESNT_EXIST"),
+            lang.string("COMMANDS.INVALID_NUMBER"),
+            lang.string("FACTIONS.SET_KILLS_COMMAND.CHANGED_SENDER"),
+            lang.string("FACTIONS.SET_KILLS_COMMAND.CHANGED_FACTION"),
+            found,
+        )
+    };
+
+    let Some(name) = string_arg(args, "faction") else {
+        reply(sender, format!("{prefix}{usage}"));
+        return;
+    };
+    let Some(amount) = int_arg(args, "amount") else {
+        reply(sender, format!("{prefix}{invalid}"));
+        return;
+    };
+    let Some((id, faction_name, members)) = found else {
+        let message = util::replace(&missing_tpl, "<argument>", &name);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    };
+
+    let amount = amount.abs();
+    if let Some(faction) = state().write().unwrap().factions.get_mut(&id) {
+        faction.kills = amount as i32;
+    }
+
+    let amount = amount.to_string();
+    reply(
+        sender,
+        format!(
+            "{prefix}{}",
+            util::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<amount>", &amount)])
+        ),
+    );
+
+    let message = format!(
+        "{prefix}{}",
+        util::replace_all(
+            &faction_tpl,
+            &[("<player>", &sender.get_name()), ("<amount>", &amount)]
+        )
+    );
+    for uuid in members {
+        if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
+            && let Some(player) = server.get_player_by_uuid(id)
+        {
+            core::send(&player, &message);
+        }
+    }
 }
 
 fn admin_set_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
