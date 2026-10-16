@@ -230,7 +230,31 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
                             .is_some_and(|expiry| *expiry > now)
                     };
 
-                    if !on_cooldown {
+                    if on_cooldown {
+                        let (prefix, template) = {
+                            let guard = state().read().unwrap();
+                            (
+                                guard.raw.language.string("PREFIX"),
+                                guard.raw.language.string("ROGUE_CLASS.BACKSTAB_COOLDOWN"),
+                            )
+                        };
+                        let seconds = {
+                            let guard = state().read().unwrap();
+                            guard
+                                .classes
+                                .rogue_backstabs
+                                .get(&damager_uuid)
+                                .map(|expiry| (*expiry - now) / 1000)
+                                .unwrap_or(0)
+                        };
+                        core::send(
+                            &damager,
+                            format!(
+                                "{prefix}{}",
+                                util::replace(&template, "<seconds>", &seconds.to_string())
+                            ),
+                        );
+                    } else {
                         event.damage = damage * 2.0;
                         state()
                             .write()

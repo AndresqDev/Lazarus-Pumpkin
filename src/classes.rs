@@ -912,7 +912,7 @@ pub fn miner_diamond(player: &Player, server: &Server) {
         let message = {
             let guard = state().read().unwrap();
             util::replace_all(
-                &guard.raw.language.string("MINER_EFFECT_REWARD"),
+                &guard.raw.language.string("MINER_CLASS.EFFECT_REWARD"),
                 &[("<player>", &crate::core::name_of(player)), ("<name>", &name)],
             )
         };
@@ -938,6 +938,8 @@ pub fn bard_click(server: &Server, player: &Player) {
             crate::core::territory_at_guard(&guard, &location.world, location.block_x(), location.block_z()),
             crate::core::Territory::Safezone
         ) {
+            drop(guard);
+            warn(player, "BARD_CLASS.CAN_NOT_BARD_IN_SAFEZONE");
             return;
         }
     }
@@ -1075,7 +1077,7 @@ pub fn bard_click(server: &Server, player: &Player) {
                     "{}{}",
                     language_prefix(),
                     util::replace(
-                        &state().read().unwrap().raw.language.string("BARD_CLICKABLE_MESSAGE_OTHERS"),
+                        &state().read().unwrap().raw.language.string("BARD_CLASS.CLICKABLE_ITEM.MESSAGE_OTHERS"),
                         "<effect>",
                         &format!("{}{}", clickable.chat_color, clickable.material),
                     )
@@ -1088,9 +1090,9 @@ pub fn bard_click(server: &Server, player: &Player) {
     {
         let guard = state().read().unwrap();
         let template = if clickable.apply_to_enemy {
-            guard.raw.language.string("BARD_CLICKABLE_MESSAGE_ENEMY")
+            guard.raw.language.string("BARD_CLASS.CLICKABLE_ITEM.MESSAGE_ENEMY")
         } else {
-            guard.raw.language.string("BARD_CLICKABLE_MESSAGE_FRIENDLY")
+            guard.raw.language.string("BARD_CLASS.CLICKABLE_ITEM.MESSAGE_FRIENDLY")
         };
         let prefix = guard.raw.language.string("PREFIX");
         if !template.is_empty() {
@@ -1121,6 +1123,20 @@ pub fn bard_click(server: &Server, player: &Player) {
 
 fn language_prefix() -> String {
     state().read().unwrap().raw.language.string("PREFIX")
+}
+
+/// Sends `<key>` (with optional replacements) prefixed with the server PREFIX.
+fn warn(player: &Player, key: &str) {
+    let (prefix, template) = {
+        let guard = state().read().unwrap();
+        (
+            guard.raw.language.string("PREFIX"),
+            guard.raw.language.string(key),
+        )
+    };
+    if !template.is_empty() {
+        core::send(player, format!("{prefix}{template}"));
+    }
 }
 
 /// Handles a Rogue clickable (right-click, self-only effect with cooldown).
@@ -1157,12 +1173,17 @@ pub fn rogue_click(_server: &Server, player: &Player) {
 
     {
         let guard = state().read().unwrap();
-        if guard
+        if let Some(expiry) = guard
             .classes
             .rogue_click_cooldowns
             .get(&(uuid.clone(), clickable.material.clone()))
-            .is_some_and(|expiry| *expiry > now)
+            && *expiry > now
         {
+            let prefix = guard.raw.language.string("PREFIX");
+            let template = guard.raw.language.string("ROGUE_CLASS.CLICKABLE_COOLDOWN");
+            let seconds = (*expiry - now) / 1000;
+            drop(guard);
+            core::send(player, format!("{prefix}{}", util::replace_all(&template, &[("<effect>", &clickable.effect_name), ("<seconds>", &seconds.to_string())])));
             return;
         }
     }
@@ -1207,6 +1228,7 @@ pub fn mage_click(server: &Server, player: &Player) {
         )
     };
     if in_safezone {
+        warn(player, "MAGE_CLASS.CAN_NOT_USE_MAGE_IN_SAFEZONE");
         return;
     }
     let _ = pvp_protected;
@@ -1342,6 +1364,22 @@ pub fn mage_click(server: &Server, player: &Player) {
 
         apply(&online);
 
+        {
+            let guard = state().read().unwrap();
+            let prefix = guard.raw.language.string("PREFIX");
+            let template = guard
+                .raw
+                .language
+                .string("MAGE_CLASS.CLICKABLE_ITEM.MESSAGE_OTHERS");
+            let effect = format!("{}{}", clickable.chat_color, clickable.effect_name);
+            if !template.is_empty() {
+                core::send(
+                    &online,
+                    &format!("{prefix}{}", util::replace(&template, "<effect>", &effect)),
+                );
+            }
+        }
+
         if combat_tag {
             state().write().unwrap().timers.activate(
                 &member_uuid,
@@ -1382,7 +1420,12 @@ pub fn bomber_click(server: &Server, player: &Player) {
             guard.classes.bomber_gun.clone(),
         )
     };
-    if pvp_protected || in_safezone {
+    if in_safezone {
+        warn(player, "BOMBER_CLASS.CAN_NOT_SHOOT_TNT_IN_SAFEZONE");
+        return;
+    }
+    if pvp_protected {
+        warn(player, "BOMBER_CLASS.CAN_NOT_SHOOT_TNT_WITH_PVP_TIMER");
         return;
     }
     let Some((material, cooldown_ms)) = gun else {
@@ -1399,12 +1442,17 @@ pub fn bomber_click(server: &Server, player: &Player) {
     let now = util::now_millis();
     {
         let guard = state().read().unwrap();
-        if guard
-            .classes
-            .bomber_cooldowns
-            .get(&uuid)
-            .is_some_and(|expiry| *expiry > now)
+        if let Some(expiry) = guard.classes.bomber_cooldowns.get(&uuid)
+            && *expiry > now
         {
+            let prefix = guard.raw.language.string("PREFIX");
+            let template = guard
+                .raw
+                .language
+                .string("BOMBER_CLASS.TNT_GUN.ACTIVE_COOLDOWN");
+            let seconds = (*expiry - now) / 1000;
+            drop(guard);
+            core::send(player, format!("{prefix}{}", util::replace(&template, "<seconds>", &seconds.to_string())));
             return;
         }
     }
