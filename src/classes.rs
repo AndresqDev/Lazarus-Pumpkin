@@ -488,6 +488,49 @@ impl PvpClassManager {
         }
     }
 
+    /// Remaining cooldown (seconds) of the active class's clickable, if any.
+    pub fn active_cooldown_seconds(&self, uuid: &str) -> Option<i64> {
+        let kind = self.active.get(uuid)?;
+        let now = util::now_millis();
+        let mut remaining = 0i64;
+
+        match kind {
+            ClassKind::Bard => {
+                for ((owner, _), expiry) in &self.bard_cooldowns {
+                    if owner == uuid {
+                        remaining = remaining.max(*expiry - now);
+                    }
+                }
+            }
+            ClassKind::Mage => {
+                for ((owner, _), expiry) in &self.mage_cooldowns {
+                    if owner == uuid {
+                        remaining = remaining.max(*expiry - now);
+                    }
+                }
+            }
+            ClassKind::Rogue => {
+                for ((owner, _), expiry) in &self.rogue_click_cooldowns {
+                    if owner == uuid {
+                        remaining = remaining.max(*expiry - now);
+                    }
+                }
+            }
+            ClassKind::Bomber => {
+                if let Some(expiry) = self.bomber_cooldowns.get(uuid) {
+                    remaining = remaining.max(*expiry - now);
+                }
+            }
+            _ => {}
+        }
+
+        if remaining > 0 {
+            Some(remaining / 1000)
+        } else {
+            None
+        }
+    }
+
     /// Passive effects of the player's currently active class.
     pub fn active_passive_effects(&self, uuid: &str) -> Vec<PassiveEffect> {
         self.active

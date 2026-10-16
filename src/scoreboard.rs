@@ -97,6 +97,13 @@ pub fn update(player: &Player, server: &Server) {
                 }
                 _ => {}
             }
+
+            if let Some(seconds) = guard.classes.active_cooldown_seconds(&uuid) {
+                let placeholder = guard.raw.scoreboard.string("COOLDOWN_PLACEHOLDER");
+                if !placeholder.is_empty() {
+                    lines.push(format!("{placeholder}{seconds}s"));
+                }
+            }
         }
 
         lines
