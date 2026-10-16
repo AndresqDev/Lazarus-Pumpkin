@@ -175,6 +175,8 @@ pub struct BardHoldable {
 #[derive(Debug, Clone)]
 pub struct BardClickable {
     pub material: String,
+    /// Config key / display name (e.g. "DAMAGE_RESISTANCE").
+    pub effect_name: String,
     pub energy_needed: f64,
     pub distance_sq: f64,
     pub cooldown_ms: i64,
@@ -287,6 +289,7 @@ impl PvpClassManager {
                     let distance = raw.int(&format!("{base}.DISTANCE")).max(0) as f64;
                     self.bard_clickables.push(BardClickable {
                         material,
+                        effect_name: potion.clone(),
                         energy_needed: raw.int(&format!("{base}.ENERGY_NEEDED")).max(0) as f64,
                         distance_sq: distance * distance,
                         cooldown_ms: raw.int(&format!("{base}.COOLDOWN")).max(0) * 1000,
@@ -344,6 +347,7 @@ impl PvpClassManager {
                     let distance = raw.int(&format!("{base}.DISTANCE")).max(0) as f64;
                     self.mage_clickables.push(BardClickable {
                         material,
+                        effect_name: potion.clone(),
                         energy_needed: raw.int(&format!("{base}.ENERGY_NEEDED")).max(0) as f64,
                         distance_sq: distance * distance,
                         cooldown_ms: raw.int(&format!("{base}.COOLDOWN")).max(0) * 1000,
@@ -369,6 +373,7 @@ impl PvpClassManager {
                         .to_string();
                     self.rogue_clickables.push(BardClickable {
                         material,
+                        effect_name: potion.clone(),
                         energy_needed: 0.0,
                         distance_sq: 0.0,
                         cooldown_ms: raw.int(&format!("{base}.COOLDOWN")).max(0) * 1000,
@@ -762,12 +767,13 @@ impl PvpClassManager {
             });
         }
 
-        let max_energy = pvp_class.max_energy;
+        let _ = pvp_class.max_energy;
+        // Energy starts at 0 (seconds since equip) and regenerates 1/s.
         if kind == ClassKind::Bard {
-            self.bard_energy.insert(uuid.clone(), max_energy);
+            self.bard_energy.insert(uuid.clone(), 0.0);
         }
         if kind == ClassKind::Mage {
-            self.mage_energy.insert(uuid.clone(), max_energy);
+            self.mage_energy.insert(uuid.clone(), 0.0);
         }
         self.active.insert(uuid, kind);
         core::send(
@@ -956,6 +962,7 @@ pub fn bard_click(server: &Server, player: &Player) {
         }
     }
 
+    let mut affected = 0usize;
     for online in server.get_all_players() {
         let member_uuid = crate::core::uuid_of(&online);
         let is_self = member_uuid == uuid;
@@ -989,6 +996,9 @@ pub fn bard_click(server: &Server, player: &Player) {
             show_particles: true,
             show_icon: true,
         });
+        if !is_self {
+            affected += 1;
+        }
 
         if clickable.apply_to_enemy && !is_self {
             core::send(
@@ -1000,6 +1010,30 @@ pub fn bard_click(server: &Server, player: &Player) {
                         &state().read().unwrap().raw.language.string("BARD_CLICKABLE_MESSAGE_OTHERS"),
                         "<effect>",
                         &format!("{}{}", clickable.chat_color, clickable.material),
+                    )
+                ),
+            );
+        }
+    }
+
+    // Confirmation to the bard.
+    {
+        let guard = state().read().unwrap();
+        let template = if clickable.apply_to_enemy {
+            guard.raw.language.string("BARD_CLICKABLE_MESSAGE_ENEMY")
+        } else {
+            guard.raw.language.string("BARD_CLICKABLE_MESSAGE_FRIENDLY")
+        };
+        let prefix = guard.raw.language.string("PREFIX");
+        if !template.is_empty() {
+            let effect = format!("{}{}", clickable.chat_color, clickable.effect_name);
+            core::send(
+                player,
+                &format!(
+                    "{prefix}{}",
+                    util::replace_all(
+                        &template,
+                        &[("<effect>", &effect), ("<amount>", &affected.to_string())],
                     )
                 ),
             );
