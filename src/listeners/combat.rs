@@ -245,9 +245,25 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
                 let guard = state().read().unwrap();
                 guard.classes.active.get(&damager_uuid) == Some(&crate::classes::ClassKind::Rogue)
             };
+            let backstab_item = {
+                let raw = state().read().unwrap();
+                raw.raw
+                    .classes
+                    .string("ROGUE_CLASS.BACKSTAB.ITEM")
+                    .to_lowercase()
+            };
+            let backstab_item = if backstab_item == "gold_sword" {
+                "golden_sword".to_string()
+            } else {
+                backstab_item
+            };
             let holding_sword = damager
                 .get_item_in_hand(pumpkin_plugin_api::common::Hand::Right)
-                .is_some_and(|item| item.get_registry_key().contains("golden_sword"));
+                .is_some_and(|item| {
+                    item.get_registry_key()
+                        .trim_start_matches("minecraft:")
+                        .contains(&backstab_item)
+                });
 
             if is_rogue && holding_sword {
                 let victim_yaw = core::location(&victim).yaw;

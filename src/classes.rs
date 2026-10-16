@@ -1147,7 +1147,17 @@ pub fn bard_click(server: &Server, player: &Player) {
     guard
         .classes
         .bard_cooldowns
-        .insert((uuid, clickable.material.clone()), now + clickable.cooldown_ms);
+        .insert((uuid.clone(), clickable.material.clone()), now + clickable.cooldown_ms);
+    if guard
+        .raw
+        .classes
+        .bool("BARD_CLASS.COMBAT_TAG_ON_CLICKABLE_ITEM")
+    {
+        let seconds = guard.config.timers.combat_tag_seconds;
+        guard
+            .timers
+            .activate(&uuid, crate::timers::TimerType::CombatTag, seconds);
+    }
 }
 
 fn language_prefix() -> String {
@@ -1233,7 +1243,7 @@ pub fn rogue_click(_server: &Server, player: &Player) {
         .unwrap()
         .classes
         .rogue_click_cooldowns
-        .insert((uuid, clickable.material.clone()), now + clickable.cooldown_ms);
+        .insert((uuid.clone(), clickable.material.clone()), now + clickable.cooldown_ms);
 }
 
 /// Handles a Mage clickable (right-click): buffs self and debuffs nearby enemies.
@@ -1423,7 +1433,7 @@ pub fn mage_click(server: &Server, player: &Player) {
     guard
         .classes
         .mage_cooldowns
-        .insert((uuid, clickable.material.clone()), now + clickable.cooldown_ms);
+        .insert((uuid.clone(), clickable.material.clone()), now + clickable.cooldown_ms);
 }
 
 /// Handles the Bomber TNT gun (right-click): spawns a primed TNT.
@@ -1638,5 +1648,5 @@ pub fn archer_click(_server: &Server, player: &Player) {
         .unwrap()
         .classes
         .archer_click_cooldowns
-        .insert((uuid, clickable.material.clone()), now + clickable.cooldown_ms);
+        .insert((uuid.clone(), clickable.material.clone()), now + clickable.cooldown_ms);
 }
