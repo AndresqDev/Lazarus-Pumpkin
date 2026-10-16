@@ -61,7 +61,17 @@ pub fn update(player: &Player, server: &Server) {
             return;
         }
 
-        build_lines(&guard, player, server, &uuid)
+        let mut lines = build_lines(&guard, player, server, &uuid);
+
+        // Active PvP class line.
+        if let Some(kind) = guard.classes.active_class(&uuid) {
+            let template = guard.raw.scoreboard.string("PVPCLASS_ACTIVE_PLACEHOLDER");
+            if !template.is_empty() {
+                lines.push(format!("{template}{}", kind.name()));
+            }
+        }
+
+        lines
     };
 
     render(player, &lines);

@@ -233,6 +233,9 @@ pub struct PvpClassManager {
     pub bomber_gun: Option<(String, i64)>,
     /// Bomber cooldown: uuid -> expiry millis.
     pub bomber_cooldowns: BTreeMap<String, i64>,
+    /// Effects snapshot taken when a class activates, restored on deactivation:
+    /// uuid -> (effect, duration ticks, amplifier).
+    pub effect_cache: BTreeMap<String, Vec<(StatusEffectType, u32, u8)>>,
 }
 
 impl PvpClassManager {
@@ -671,6 +674,16 @@ impl PvpClassManager {
                 .or_insert(0) += 1;
         }
 
+        // Snapshot the player's current effects so we can restore them when the
+        // class is removed (the class effects would otherwise overwrite them).
+        let snapshot: Vec<(StatusEffectType, u32, u8)> = player
+            .get_active_effects()
+            .into_iter()
+            .filter(|effect| effect.duration < 12000)
+            .map(|effect| (effect.effect_type, effect.duration, effect.amplifier))
+            .collect();
+        self.effect_cache.insert(uuid.clone(), snapshot);
+
         for effect in &pvp_class.effects {
             player.add_effect(StatusEffectInstance {
                 effect_type: effect.effect,
@@ -719,6 +732,20 @@ impl PvpClassManager {
             self.mage_energy.remove(&uuid);
         }
         self.active.remove(&uuid);
+
+        // Restore the effects the player had before the class activated.
+        if let Some(snapshot) = self.effect_cache.remove(&uuid) {
+            for (effect, duration, amplifier) in snapshot {
+                player.add_effect(StatusEffectInstance {
+                    effect_type: effect,
+                    duration,
+                    amplifier,
+                    ambient: false,
+                    show_particles: true,
+                    show_icon: true,
+                });
+            }
+        }
     }
 }
 
