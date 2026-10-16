@@ -110,6 +110,7 @@ pub struct AppState {
     /// Runtime display entities per hologram (recreated on startup).
     pub hologram_entities: std::collections::BTreeMap<String, Vec<Entity>>,
     pub kits: KitsManager,
+    pub classes: crate::classes::PvpClassManager,
     /// Transient: last chunk each player occupied, for territory-entry messages.
     pub chunk_cache: std::collections::BTreeMap<String, ChunkState>,
     /// Transient: last tab lines sent per viewer (for the packet-based tab list).
@@ -149,6 +150,8 @@ pub fn init(data_folder: String) -> Result<(), String> {
     let holograms: std::collections::BTreeMap<String, Hologram> =
         load_json(&data_folder, "holograms.json");
     let kits: KitsManager = load_json(&data_folder, "kits.json");
+    let mut classes = crate::classes::PvpClassManager::new();
+    classes.load(&raw.classes);
 
     STATE
         .set(RwLock::new(AppState {
@@ -168,6 +171,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
             holograms,
             hologram_entities: std::collections::BTreeMap::new(),
             kits,
+            classes,
             chunk_cache: std::collections::BTreeMap::new(),
             tab_cache: std::collections::BTreeMap::new(),
             spawn_centers: std::collections::BTreeMap::new(),

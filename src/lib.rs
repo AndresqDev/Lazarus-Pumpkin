@@ -14,6 +14,7 @@
 // are used across modules. Silence the resulting false-positive lints.
 #![allow(dead_code, unused_imports)]
 
+mod classes;
 mod commands;
 mod config;
 mod core;

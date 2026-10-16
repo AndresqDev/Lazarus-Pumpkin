@@ -91,6 +91,18 @@ fn tick(server: &Server) {
         tab::update(&player, server);
     }
 
+    // PvP classes: per-tick armour check + finish warmups.
+    {
+        let mut guard = state().write().unwrap();
+        let crate::state::AppState { classes, raw, factions, .. } = &mut *guard;
+        for player in server.get_all_players() {
+            let uuid = crate::core::uuid_of(&player);
+            let faction_id = factions.by_member(&uuid).map(|f| f.id.clone());
+            classes.tick_player(&player, &server, &raw.language, &raw.config, faction_id.as_deref());
+        }
+        classes.tick_warmups(&server, &raw.language, &raw.config, factions);
+    }
+
     // Persist the tab state file once per tick (the native plugin diffs it).
     tab::flush();
 }
