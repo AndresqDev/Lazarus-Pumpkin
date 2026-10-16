@@ -2456,8 +2456,21 @@ fn admin_claim_for(sender: &CommandSender, server: &Server, args: &ConsumedArgs)
         return;
     };
 
-    let Some(claim) = guard.selection.get(&uuid).and_then(|s| s.to_claim()) else {
+    // Start (or continue) the selection process. A missing/partial selection means
+    // we hand out the wand, exactly like the original `toggleSelectionProcess`.
+    if !guard.selection.is_active(&uuid) {
         let message = guard.raw.language.string("FACTIONS.CLAIM_FOR_COMMAND.MAKE_A_SELECTION");
+        guard.selection.start(&player);
+        drop(guard);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    }
+
+    let Some(claim) = guard.selection.get(&uuid).and_then(|s| s.to_claim()) else {
+        let message = guard
+            .raw
+            .language
+            .string("FACTIONS.CLAIM_FOR_COMMAND.SET_BOTH_POSITIONS");
         drop(guard);
         reply(sender, format!("{prefix}{message}"));
         return;
