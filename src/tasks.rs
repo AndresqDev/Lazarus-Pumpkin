@@ -26,6 +26,10 @@ pub fn start(context: &Context) {
     });
     // Client-side glass walls refresh a bit faster, like the original 100ms loop.
     context.schedule_repeating_task(10, 10, |server| glass_tick(&server));
+    // Re-send all active fake blocks frequently (fast resync of the render).
+    context.schedule_repeating_task(2, 2, |server| {
+        state().write().unwrap().glass.refresh_all(&server);
+    });
 
     // Periodic autosave (config: factions.auto_save_minutes).
     let minutes = state().read().unwrap().config.factions.auto_save_minutes.max(1);

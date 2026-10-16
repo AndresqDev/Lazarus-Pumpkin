@@ -21,6 +21,25 @@ use crate::selection::SelectedPos;
 use crate::state::{state, AppState};
 use crate::util;
 
+/// Dedupes interaction events: the host fires them once per hand (main + off),
+/// and the event carries no hand field, so identical interactions within a short
+/// window must be collapsed (otherwise wand messages/positions duplicate).
+static LAST_INTERACT: std::sync::Mutex<Option<std::collections::HashMap<String, i64>>> =
+    std::sync::Mutex::new(None);
+
+fn is_duplicate(key: &str) -> bool {
+    let now = crate::util::now_millis();
+    let mut guard = LAST_INTERACT.lock().unwrap();
+    let map = guard.get_or_insert_with(std::collections::HashMap::new);
+    if let Some(last) = map.get(key)
+        && now - last < 120
+    {
+        return true;
+    }
+    map.insert(key.to_string(), now);
+    false
+}
+
 pub struct InteractListener;
 
 impl EventHandler<PlayerInteractEvent> for InteractListener {
@@ -37,6 +56,10 @@ impl EventHandler<PlayerInteractEvent> for InteractListener {
             )
         };
         if !(has_selection && holds_wand) {
+            return event;
+        }
+
+        if is_duplicate(&format!("{uuid}:{action:?}:{clicked:?}")) {
             return event;
         }
 
