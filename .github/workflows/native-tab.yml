@@ -51,12 +51,6 @@ jobs:
         working-directory: Pumpkin
         run: rustup show
 
-      - name: Cache cargo + target
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: Pumpkin
-          cache-on-failure: true
-
       - name: Inject the plugin into Pumpkin's workspace
         run: |
           mkdir -p Pumpkin/native-tab/src
