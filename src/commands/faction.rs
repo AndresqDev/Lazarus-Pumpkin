@@ -284,7 +284,7 @@ fn create(sender: &CommandSender, _player: &Player, uuid: &str, name: &str, args
 }
 
 fn disband(sender: &CommandSender, server: &Server, uuid: &str) {
-    let messages;
+    let messages: Option<String>;
     {
         let mut guard = state().write().unwrap();
         let lang = guard.lang.clone();
@@ -313,6 +313,8 @@ fn disband(sender: &CommandSender, server: &Server, uuid: &str) {
             "<player>",
             &sender.get_name(),
         );
+        // `PlayerFaction#sendMessage` reaches every member, the commanding leader
+        // included, so there is no separate reply here (that caused a double send).
         for member in faction.members.values() {
             if let Some(uuid) = pumpkin_plugin_api::uuid::parse(&member.uuid)
                 && let Some(player) = server.get_player_by_uuid(uuid)
@@ -320,9 +322,11 @@ fn disband(sender: &CommandSender, server: &Server, uuid: &str) {
                 core::send(&player, &message);
             }
         }
-        messages = message;
+        messages = None;
     }
-    reply(sender, messages);
+    if let Some(message) = messages {
+        reply(sender, message);
+    }
 }
 
 fn invite(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs) {
