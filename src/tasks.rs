@@ -109,7 +109,7 @@ fn tick(server: &Server) {
         }
         classes.tick_warmups(&server, &raw.language, &raw.config, factions);
         for player in server.get_all_players() {
-            classes.bard_tick(&player, &server, factions);
+            classes.bard_tick(&player, &server, factions, &raw.config);
         }
     }
 

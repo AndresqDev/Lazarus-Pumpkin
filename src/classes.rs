@@ -195,6 +195,8 @@ pub struct PvpClassManager {
     pub archer_tags: BTreeMap<String, i64>,
     /// Bard holdable items.
     pub bard_holdables: Vec<BardHoldable>,
+    /// Bard energy: uuid -> current (0..MAX_ENERGY).
+    pub bard_energy: BTreeMap<String, f64>,
 }
 
 impl PvpClassManager {
@@ -289,11 +291,17 @@ impl PvpClassManager {
         player: &Player,
         server: &Server,
         factions: &crate::factions::FactionsManager,
+        raw_config: &crate::yaml::ConfigFile,
     ) {
         let uuid = crate::core::uuid_of(player);
         if self.active.get(&uuid) != Some(&ClassKind::Bard) {
             return;
         }
+
+        // Regenerate energy (1 per tick, capped at MAX_ENERGY).
+        let max = raw_config.int("BARD_CLASS.MAX_ENERGY").max(1) as f64;
+        let energy = self.bard_energy.entry(uuid.clone()).or_insert(max);
+        *energy = (*energy + 1.0).min(max);
 
         let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
             return;
@@ -546,6 +554,10 @@ impl PvpClassManager {
             });
         }
 
+        if kind == ClassKind::Bard {
+            let max = raw_config.int("BARD_CLASS.MAX_ENERGY").max(1) as f64;
+            self.bard_energy.insert(uuid.clone(), max);
+        }
         self.active.insert(uuid, kind);
         core::send(
             player,
@@ -568,6 +580,9 @@ impl PvpClassManager {
             *entry = (*entry - 1).max(0);
         }
 
+        if kind == ClassKind::Bard {
+            self.bard_energy.remove(&uuid);
+        }
         self.active.remove(&uuid);
     }
 }
