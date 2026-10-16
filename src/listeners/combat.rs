@@ -26,7 +26,9 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
         let victim = core::player_by_entity(&server, event.entity_id);
         // Projectiles (arrows, snowballs, …) have their own entity id, so resolve
         // the shooter we tracked on launch.
-        let projectile_damager = core::player_by_entity(&server, event.damager_id).is_none();
+        // Pumpkin attributes projectile damage directly to the shooter player, so
+        // detect arrows via the damage type (the damager entity IS the player).
+        let projectile_damager = event.cause.to_ascii_lowercase().contains("arrow");
         let damager = core::player_by_entity(&server, event.damager_id).or_else(|| {
             take_projectile_shooter(event.damager_id).and_then(|uuid| {
                 pumpkin_plugin_api::uuid::parse(&uuid)
