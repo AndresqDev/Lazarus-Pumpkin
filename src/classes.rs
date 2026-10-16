@@ -641,7 +641,7 @@ impl PvpClassManager {
             }
 
             if self.active.get(&uuid) == Some(&kind) {
-                self.deactivate(player, kind);
+                self.deactivate(player, kind, faction_id);
                 core::send(
                     player,
                     &util::replace(
@@ -769,7 +769,7 @@ impl PvpClassManager {
         );
     }
 
-    fn deactivate(&mut self, player: &Player, kind: ClassKind) {
+    fn deactivate(&mut self, player: &Player, kind: ClassKind, faction_id: Option<&str>) {
         let uuid = crate::core::uuid_of(player);
         let Some(pvp_class) = self.classes.get(&kind).cloned() else {
             return;
@@ -779,8 +779,11 @@ impl PvpClassManager {
             player.remove_effect(effect.effect);
         }
 
-        if let Some(faction_id) = crate::core::faction_id_of(&uuid) {
-            let entry = self.faction_limits.entry((kind, faction_id)).or_insert(0);
+        if let Some(faction_id) = faction_id {
+            let entry = self
+                .faction_limits
+                .entry((kind, faction_id.to_string()))
+                .or_insert(0);
             *entry = (*entry - 1).max(0);
         }
 

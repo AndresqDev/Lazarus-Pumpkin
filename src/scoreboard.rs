@@ -61,59 +61,7 @@ pub fn update(player: &Player, server: &Server) {
             return;
         }
 
-        let mut lines = build_lines(&guard, player, server, &uuid);
-
-        // Active PvP class line + class-specific values.
-        if let Some(kind) = guard.classes.active_class(&uuid) {
-            use crate::classes::ClassKind;
-            let template = guard.raw.scoreboard.string("PVPCLASS_ACTIVE_PLACEHOLDER");
-            if !template.is_empty() {
-                lines.push(format!("{template}{}", kind.name()));
-            }
-            match kind {
-                ClassKind::Bard => {
-                    let value = guard.classes.bard_energy.get(&uuid).copied().unwrap_or(0.0);
-                    let placeholder = guard.raw.scoreboard.string("BARD_ENERGY_PLACEHOLDER");
-                    if !placeholder.is_empty() {
-                        lines.push(format!("{placeholder}{}", round1(value)));
-                    }
-                }
-                ClassKind::Mage => {
-                    let value = guard.classes.mage_energy.get(&uuid).copied().unwrap_or(0.0);
-                    let placeholder = guard.raw.scoreboard.string("MAGE_ENERGY_PLACEHOLDER");
-                    if !placeholder.is_empty() {
-                        lines.push(format!("{placeholder}{}", round1(value)));
-                    }
-                }
-                ClassKind::Miner => {
-                    let diamonds = guard.userdata.get(&uuid).map(|u| u.diamonds_mined).unwrap_or(0);
-                    let placeholder = guard
-                        .raw
-                        .scoreboard
-                        .string("MINER_DIAMOND_COUNT_PLACEHOLDER");
-                    if !placeholder.is_empty() {
-                        lines.push(format!("{placeholder}{diamonds}"));
-                    }
-                }
-                _ => {}
-            }
-
-            if let Some((kind, seconds)) = guard.classes.warmup_info(&uuid) {
-                let placeholder = guard.raw.scoreboard.string("PVPCLASS_WARMUP_PLACEHOLDER");
-                if !placeholder.is_empty() {
-                    lines.push(format!("{placeholder}{} &7({seconds}s)", kind.name()));
-                }
-            }
-
-            if let Some(seconds) = guard.classes.active_cooldown_seconds(&uuid) {
-                let placeholder = guard.raw.scoreboard.string("COOLDOWN_PLACEHOLDER");
-                if !placeholder.is_empty() {
-                    lines.push(format!("{placeholder}{seconds}s"));
-                }
-            }
-        }
-
-        lines
+        build_lines(&guard, player, server, &uuid)
     };
 
     render(player, &lines);
@@ -258,6 +206,51 @@ fn build_lines(guard: &AppState, player: &Player, server: &Server, uuid: &str) -
         b.add(&s.visibility, &s.staff_visibility_vanished);
         b.add_line("&3");
     }
+
+    // ---- PvP class section ----
+    if let Some(kind) = guard.classes.active_class(uuid) {
+        use crate::classes::ClassKind;
+        b.add(
+            &guard.raw.scoreboard.string("PVPCLASS_ACTIVE_PLACEHOLDER"),
+            kind.name(),
+        );
+        match kind {
+            ClassKind::Bard => {
+                let value = guard.classes.bard_energy.get(uuid).copied().unwrap_or(0.0);
+                b.add(
+                    &guard.raw.scoreboard.string("BARD_ENERGY_PLACEHOLDER"),
+                    &round1(value),
+                );
+            }
+            ClassKind::Mage => {
+                let value = guard.classes.mage_energy.get(uuid).copied().unwrap_or(0.0);
+                b.add(
+                    &guard.raw.scoreboard.string("MAGE_ENERGY_PLACEHOLDER"),
+                    &round1(value),
+                );
+            }
+            ClassKind::Miner => {
+                let diamonds = guard.userdata.get(uuid).map(|u| u.diamonds_mined).unwrap_or(0);
+                b.add(
+                    &guard.raw.scoreboard.string("MINER_DIAMOND_COUNT_PLACEHOLDER"),
+                    &diamonds.to_string(),
+                );
+            }
+            _ => {}
+        }
+        if let Some(seconds) = guard.classes.active_cooldown_seconds(uuid) {
+            b.add(
+                &guard.raw.scoreboard.string("COOLDOWN_PLACEHOLDER"),
+                &format!("{seconds}s"),
+            );
+        }
+    } else if let Some((kind, seconds)) = guard.classes.warmup_info(uuid) {
+        b.add(
+            &guard.raw.scoreboard.string("PVPCLASS_WARMUP_PLACEHOLDER"),
+            &format!("{} &7({seconds}s)", kind.name()),
+        );
+    }
+    b.add_line("&9");
 
     // ---- Territory (applyMiscellaneousPlaceholders) ----
     {
