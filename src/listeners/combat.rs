@@ -5,7 +5,7 @@
 
 use pumpkin_plugin_api::events::{
     EntityDamageByEntityEvent, EntityDamageEvent, EntityShootBowEvent, EventData, EventHandler,
-    FoodLevelChangeEvent, ProjectileHitEvent, ProjectileLaunchEvent,
+    FoodLevelChangeEvent, PlayerItemConsumeEvent, ProjectileHitEvent, ProjectileLaunchEvent,
 };
 use pumpkin_plugin_api::{Player, Server};
 
@@ -509,6 +509,22 @@ impl EventHandler<EntityShootBowEvent> for ShootBowListener {
     ) -> EventData<EntityShootBowEvent> {
         if let Some(shooter) = core::player_by_entity(&server, event.entity_id) {
             set_bow_force(&core::uuid_of(&shooter), event.force);
+        }
+        event
+    }
+}
+
+/// Re-applies the active class effects after drinking milk.
+pub struct MilkListener;
+
+impl EventHandler<PlayerItemConsumeEvent> for MilkListener {
+    fn handle(
+        &self,
+        _server: Server,
+        event: EventData<PlayerItemConsumeEvent>,
+    ) -> EventData<PlayerItemConsumeEvent> {
+        if event.item_name.contains("milk") {
+            crate::classes::reapply_class_effects(&event.player);
         }
         event
     }

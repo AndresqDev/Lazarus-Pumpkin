@@ -488,6 +488,15 @@ impl PvpClassManager {
         }
     }
 
+    /// Passive effects of the player's currently active class.
+    pub fn active_passive_effects(&self, uuid: &str) -> Vec<PassiveEffect> {
+        self.active
+            .get(uuid)
+            .and_then(|kind| self.classes.get(kind))
+            .map(|class| class.effects.clone())
+            .unwrap_or_default()
+    }
+
     pub fn is_archer_tagged(&self, uuid: &str) -> bool {
         self.archer_tags
             .get(uuid)
@@ -1218,5 +1227,21 @@ pub fn bomber_click(server: &Server, player: &Player) {
         guard
             .timers
             .activate(&uuid, crate::timers::TimerType::CombatTag, tag_seconds);
+    }
+}
+
+/// Re-applies the active class passive effects (used after drinking milk).
+pub fn reapply_class_effects(player: &Player) {
+    let uuid = crate::core::uuid_of(player);
+    let effects = state().read().unwrap().classes.active_passive_effects(&uuid);
+    for effect in effects {
+        player.add_effect(StatusEffectInstance {
+            effect_type: effect.effect,
+            duration: INFINITE,
+            amplifier: effect.amplifier,
+            ambient: false,
+            show_particles: false,
+            show_icon: true,
+        });
     }
 }
