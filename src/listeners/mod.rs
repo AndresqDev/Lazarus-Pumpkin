@@ -37,6 +37,8 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(block::BlockExplodeListener, EventPriority::High, true)?;
     context.register_event_handler(block::BlockFromToListner, EventPriority::High, true)?;
     context.register_event_handler(block::BlockIgniteListener, EventPriority::High, true)?;
+    context.register_event_handler(block::PistonExtendListener, EventPriority::High, true)?;
+    context.register_event_handler(block::PistonRetractListener, EventPriority::High, true)?;
 
     context.register_event_handler(command::CommandPreprocessListener, EventPriority::Lowest, true)?;
 

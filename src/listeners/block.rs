@@ -306,3 +306,31 @@ impl EventHandler<pumpkin_plugin_api::events::BlockIgniteEvent> for BlockIgniteL
         event
     }
 }
+
+/// Pistons are disabled entirely (no lag machines): both extend and retract are
+/// cancelled.
+pub struct PistonExtendListener;
+
+impl EventHandler<pumpkin_plugin_api::events::BlockPistonExtendEvent> for PistonExtendListener {
+    fn handle(
+        &self,
+        _server: Server,
+        mut event: EventData<pumpkin_plugin_api::events::BlockPistonExtendEvent>,
+    ) -> EventData<pumpkin_plugin_api::events::BlockPistonExtendEvent> {
+        event.cancelled = true;
+        event
+    }
+}
+
+pub struct PistonRetractListener;
+
+impl EventHandler<pumpkin_plugin_api::events::BlockPistonRetractEvent> for PistonRetractListener {
+    fn handle(
+        &self,
+        _server: Server,
+        mut event: EventData<pumpkin_plugin_api::events::BlockPistonRetractEvent>,
+    ) -> EventData<pumpkin_plugin_api::events::BlockPistonRetractEvent> {
+        event.cancelled = true;
+        event
+    }
+}
