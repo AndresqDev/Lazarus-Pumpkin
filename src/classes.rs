@@ -225,6 +225,10 @@ pub struct PvpClassManager {
     pub rogue_clickables: Vec<BardClickable>,
     /// (uuid, material) -> cooldown expiry millis.
     pub rogue_click_cooldowns: BTreeMap<(String, String), i64>,
+    /// Mage energy and clickables.
+    pub mage_energy: BTreeMap<String, f64>,
+    pub mage_clickables: Vec<BardClickable>,
+    pub mage_cooldowns: BTreeMap<(String, String), i64>,
 }
 
 impl PvpClassManager {
@@ -299,6 +303,32 @@ impl PvpClassManager {
                         material,
                         distance_sq: distance * distance,
                         can_bard_himself: raw.bool(&format!("{base}.CAN_BARD_HIMSELF")),
+                        effect: PassiveEffect {
+                            effect,
+                            amplifier: (raw.int(&format!("{base}.LEVEL")).max(1) - 1) as u8,
+                        },
+                        duration: (raw.int(&format!("{base}.DURATION")).max(1) as u32) * 20,
+                    });
+                }
+            }
+
+            if kind == ClassKind::Mage {
+                self.mage_clickables.clear();
+                for potion in raw.keys("MAGE_CLASS.CLICKABLE_ITEMS") {
+                    let base = format!("MAGE_CLASS.CLICKABLE_ITEMS.{potion}");
+                    let Some(effect) = effect_from_name(&potion) else { continue };
+                    let material = legacy_material(&raw.string(&format!("{base}.MATERIAL_ID")))
+                        .unwrap_or_default()
+                        .to_string();
+                    let distance = raw.int(&format!("{base}.DISTANCE")).max(0) as f64;
+                    self.mage_clickables.push(BardClickable {
+                        material,
+                        energy_needed: raw.int(&format!("{base}.ENERGY_NEEDED")).max(0) as f64,
+                        distance_sq: distance * distance,
+                        cooldown_ms: raw.int(&format!("{base}.COOLDOWN")).max(0) * 1000,
+                        can_bard_himself: raw.bool(&format!("{base}.APPLY_TO_HIMSELF")),
+                        apply_to_enemy: true,
+                        chat_color: raw.string(&format!("{base}.CHAT_COLOR")),
                         effect: PassiveEffect {
                             effect,
                             amplifier: (raw.int(&format!("{base}.LEVEL")).max(1) - 1) as u8,
@@ -642,6 +672,10 @@ impl PvpClassManager {
             let max = raw_config.int("BARD_CLASS.MAX_ENERGY").max(1) as f64;
             self.bard_energy.insert(uuid.clone(), max);
         }
+        if kind == ClassKind::Mage {
+            let max = raw_config.int("MAGE_CLASS.MAX_ENERGY").max(1) as f64;
+            self.mage_energy.insert(uuid.clone(), max);
+        }
         self.active.insert(uuid, kind);
         core::send(
             player,
@@ -666,6 +700,9 @@ impl PvpClassManager {
 
         if kind == ClassKind::Bard {
             self.bard_energy.remove(&uuid);
+        }
+        if kind == ClassKind::Mage {
+            self.mage_energy.remove(&uuid);
         }
         self.active.remove(&uuid);
     }
@@ -931,5 +968,134 @@ pub fn rogue_click(_server: &Server, player: &Player) {
         .unwrap()
         .classes
         .rogue_click_cooldowns
+        .insert((uuid, clickable.material.clone()), now + clickable.cooldown_ms);
+}
+
+/// Handles a Mage clickable (right-click): buffs self and debuffs nearby enemies.
+pub fn mage_click(server: &Server, player: &Player) {
+    let uuid = crate::core::uuid_of(player);
+
+    let (pvp_protected, in_safezone) = {
+        let guard = state().read().unwrap();
+        if guard.classes.active.get(&uuid) != Some(&ClassKind::Mage) {
+            return;
+        }
+        let location = crate::core::location(player);
+        (
+            guard
+                .timers
+                .is_active(&uuid, crate::timers::TimerType::PvpProtection),
+            matches!(
+                crate::core::territory_at_guard(&guard, &location.world, location.block_x(), location.block_z()),
+                crate::core::Territory::Safezone
+            ),
+        )
+    };
+    if pvp_protected || in_safezone {
+        return;
+    }
+
+    let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
+        return;
+    };
+    let key = item
+        .get_registry_key()
+        .trim_start_matches("minecraft:")
+        .to_string();
+
+    let (clickable, faction_members, energy, now) = {
+        let guard = state().read().unwrap();
+        let Some(clickable) = guard
+            .classes
+            .mage_clickables
+            .iter()
+            .find(|c| c.material.trim_start_matches("minecraft:") == key)
+            .cloned()
+        else {
+            return;
+        };
+        let faction_members: std::collections::BTreeSet<String> = guard
+            .factions
+            .by_member(&uuid)
+            .map(|f| f.members.keys().cloned().collect())
+            .unwrap_or_default();
+        let energy = guard.classes.mage_energy.get(&uuid).copied().unwrap_or(0.0);
+        (clickable, faction_members, energy, util::now_millis())
+    };
+
+    if energy < clickable.energy_needed {
+        return;
+    }
+    {
+        let guard = state().read().unwrap();
+        if guard
+            .classes
+            .mage_cooldowns
+            .get(&(uuid.clone(), clickable.material.clone()))
+            .is_some_and(|expiry| *expiry > now)
+        {
+            return;
+        }
+    }
+
+    let location = crate::core::location(player);
+    let apply = |target: &Player| {
+        target.add_effect(StatusEffectInstance {
+            effect_type: clickable.effect.effect,
+            duration: clickable.duration,
+            amplifier: clickable.effect.amplifier,
+            ambient: false,
+            show_particles: true,
+            show_icon: true,
+        });
+    };
+
+    if clickable.can_bard_himself {
+        apply(player);
+    }
+
+    let combat_tag = state()
+        .read()
+        .unwrap()
+        .raw
+        .config
+        .bool("MAGE_CLASS.COMBAT_TAG_ON_CLICKABLE_ITEM");
+    let tag_seconds = state().read().unwrap().config.timers.combat_tag_seconds;
+
+    for online in server.get_all_players() {
+        let member_uuid = crate::core::uuid_of(&online);
+        if member_uuid == uuid || faction_members.contains(&member_uuid) {
+            continue;
+        }
+
+        let target = crate::core::location(&online);
+        if target.world != location.world {
+            continue;
+        }
+        let dx = target.x - location.x;
+        let dy = target.y - location.y;
+        let dz = target.z - location.z;
+        if dx * dx + dy * dy + dz * dz > clickable.distance_sq {
+            continue;
+        }
+
+        apply(&online);
+
+        if combat_tag {
+            state().write().unwrap().timers.activate(
+                &member_uuid,
+                crate::timers::TimerType::CombatTag,
+                tag_seconds,
+            );
+        }
+    }
+
+    let mut guard = state().write().unwrap();
+    if let Some(current) = guard.classes.mage_energy.get_mut(&uuid) {
+        *current = (*current - clickable.energy_needed).max(0.0);
+    }
+    guard
+        .classes
+        .mage_cooldowns
         .insert((uuid, clickable.material.clone()), now + clickable.cooldown_ms);
 }

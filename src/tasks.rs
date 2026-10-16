@@ -139,6 +139,12 @@ fn tick(server: &Server) {
                 pvp_protected,
                 in_safezone,
             );
+            // Mage energy regen.
+            if classes.active.get(&uuid) == Some(&crate::classes::ClassKind::Mage) {
+                let max = raw.config.int("MAGE_CLASS.MAX_ENERGY").max(1) as f64;
+                let energy = classes.mage_energy.entry(uuid.clone()).or_insert(max);
+                *energy = (*energy + 1.0).min(max);
+            }
         }
         classes.tick_warmups(&server, &raw.language, &raw.config, factions);
     }

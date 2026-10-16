@@ -56,6 +56,7 @@ impl EventHandler<PlayerInteractEvent> for InteractListener {
         {
             crate::classes::bard_click(&server, &event.player);
             crate::classes::rogue_click(&server, &event.player);
+            crate::classes::mage_click(&server, &event.player);
         }
 
         let (has_selection, holds_wand) = {
