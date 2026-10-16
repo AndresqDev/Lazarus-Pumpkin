@@ -29,6 +29,7 @@ mod selection;
 mod staffmode;
 mod state;
 mod tab;
+mod tab_api;
 mod tasks;
 mod timers;
 mod userdata;

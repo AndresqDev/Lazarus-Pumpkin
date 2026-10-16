@@ -22,5 +22,6 @@ pumpkin-util = { git = "https://github.com/Pumpkin-MC/Pumpkin", tag = "0.2.0+26.
 uuid = "1"
 serde = { version = "1", features = ["derive"] }
 toml = "1"
+serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 tracing = "0.1"
