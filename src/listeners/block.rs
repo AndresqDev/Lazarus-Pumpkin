@@ -129,3 +129,150 @@ impl EventHandler<BlockPlaceEvent> for BlockPlaceListener {
         event
     }
 }
+
+// ---------------------------------------------------------------------------
+// Grief protection (blocks/liquids). Port of the rest of `BlockEventListener`.
+//
+// NOTE: Pumpkin's `block-from-to` (fluid flow) / `block-explode` / `entity-explode`
+// events carry no world, so per-claim checks are impossible there. We still stop
+// the two main player-driven grief vectors:
+//   * buckets (have a player -> we know the world),
+//   * explosions (cancelled when `DISABLE_EXPLOSIONS_BLOCK_DAMAGE` is on).
+// ---------------------------------------------------------------------------
+
+pub struct BucketEmptyListener;
+
+impl EventHandler<pumpkin_plugin_api::events::PlayerBucketEmptyEvent> for BucketEmptyListener {
+    fn handle(
+        &self,
+        _server: Server,
+        mut event: EventData<pumpkin_plugin_api::events::PlayerBucketEmptyEvent>,
+    ) -> EventData<pumpkin_plugin_api::events::PlayerBucketEmptyEvent> {
+        let player = &event.player;
+        let uuid = core::uuid_of(player);
+        let world = core::world_name(player);
+
+        if !can_build(&uuid, &world, event.block_pos.x, event.block_pos.z) {
+            event.cancelled = true;
+            let message = deny_message(player, &world, event.block_pos.x, event.block_pos.z, true);
+            core::send(player, &message);
+        }
+
+        event
+    }
+}
+
+pub struct BucketFillListener;
+
+impl EventHandler<pumpkin_plugin_api::events::PlayerBucketFillEvent> for BucketFillListener {
+    fn handle(
+        &self,
+        _server: Server,
+        mut event: EventData<pumpkin_plugin_api::events::PlayerBucketFillEvent>,
+    ) -> EventData<pumpkin_plugin_api::events::PlayerBucketFillEvent> {
+        let player = &event.player;
+        let uuid = core::uuid_of(player);
+        let world = core::world_name(player);
+
+        if !can_build(&uuid, &world, event.block_pos.x, event.block_pos.z) {
+            event.cancelled = true;
+            let message = deny_message(player, &world, event.block_pos.x, event.block_pos.z, true);
+            core::send(player, &message);
+        }
+
+        event
+    }
+}
+
+/// Cancels explosion block damage when `DISABLE_EXPLOSIONS_BLOCK_DAMAGE` is on
+/// (the original default). The event has no world, so this is the only possible
+/// protection there.
+pub struct EntityExplodeListener;
+
+impl EventHandler<pumpkin_plugin_api::events::EntityExplodeEvent> for EntityExplodeListener {
+    fn handle(
+        &self,
+        _server: Server,
+        mut event: EventData<pumpkin_plugin_api::events::EntityExplodeEvent>,
+    ) -> EventData<pumpkin_plugin_api::events::EntityExplodeEvent> {
+        if state().read().unwrap().raw.config.bool("DISABLE_EXPLOSIONS_BLOCK_DAMAGE") {
+            event.cancelled = true;
+        }
+        event
+    }
+}
+
+pub struct BlockExplodeListener;
+
+impl EventHandler<pumpkin_plugin_api::events::BlockExplodeEvent> for BlockExplodeListener {
+    fn handle(
+        &self,
+        _server: Server,
+        mut event: EventData<pumpkin_plugin_api::events::BlockExplodeEvent>,
+    ) -> EventData<pumpkin_plugin_api::events::BlockExplodeEvent> {
+        if state().read().unwrap().raw.config.bool("DISABLE_EXPLOSIONS_BLOCK_DAMAGE") {
+            event.cancelled = true;
+        }
+        event
+    }
+}
+
+/// Fluid (water/lava) flowing between territories — port of `onBlockFromTo`.
+///
+/// The event carries no world, so we infer it: the world whose block at `from_pos`
+/// is the liquid that is flowing. If the source is wilderness/warzone and the
+/// destination is a claim/system faction, the flow is cancelled (unless the config
+/// explicitly allows flowing from wilderness into claims).
+pub struct BlockFromToListner;
+
+impl EventHandler<pumpkin_plugin_api::events::BlockFromToEvent> for BlockFromToListner {
+    fn handle(
+        &self,
+        server: Server,
+        mut event: EventData<pumpkin_plugin_api::events::BlockFromToEvent>,
+    ) -> EventData<pumpkin_plugin_api::events::BlockFromToEvent> {
+        if state()
+            .read()
+            .unwrap()
+            .raw
+            .config
+            .bool("FACTION_CLAIM.LIQUID_FLOW_FROM_WILDERNESS_TO_CLAIMS")
+        {
+            return event;
+        }
+
+        let from_pos = event.from_pos;
+        let to_pos = event.to_pos;
+
+        let Some(world) = server
+            .get_all_worlds()
+            .into_iter()
+            .find(|world| world.get_block_state(from_pos).is_liquid)
+        else {
+            return event;
+        };
+
+        let world_name = world.get_name();
+        let blocked = {
+            let guard = state().read().unwrap();
+            let from = core::territory_at_guard(&guard, &world_name, from_pos.x, from_pos.z);
+            let to = core::territory_at_guard(&guard, &world_name, to_pos.x, to_pos.z);
+
+            let source_is_wild = matches!(
+                from,
+                core::Territory::Wilderness | core::Territory::Warzone
+            );
+            let target_is_claim = matches!(
+                to,
+                core::Territory::Faction(_) | core::Territory::Safezone
+            );
+            source_is_wild && target_is_claim
+        };
+
+        if blocked {
+            event.cancelled = true;
+        }
+
+        event
+    }
+}

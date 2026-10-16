@@ -184,7 +184,7 @@ impl GlassManager {
     }
 
     fn send_at(&self, server: &Server, key: &PosKey) {
-        let (world, x, y, z) = key.clone();
+        let (_world, x, y, z) = key.clone();
         for (uuid, map) in &self.entries {
             let Some((_, state_id)) = map.get(key) else {
                 continue;

@@ -31,6 +31,11 @@ pub fn register(context: &Context) -> Result<(), String> {
 
     context.register_event_handler(block::BlockBreakListener, EventPriority::High, true)?;
     context.register_event_handler(block::BlockPlaceListener, EventPriority::High, true)?;
+    context.register_event_handler(block::BucketEmptyListener, EventPriority::High, true)?;
+    context.register_event_handler(block::BucketFillListener, EventPriority::High, true)?;
+    context.register_event_handler(block::EntityExplodeListener, EventPriority::High, true)?;
+    context.register_event_handler(block::BlockExplodeListener, EventPriority::High, true)?;
+    context.register_event_handler(block::BlockFromToListner, EventPriority::High, true)?;
 
     context.register_event_handler(command::CommandPreprocessListener, EventPriority::Lowest, true)?;
 
