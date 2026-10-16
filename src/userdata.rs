@@ -49,6 +49,9 @@ pub struct Userdata {
 
     pub balance: i64,
     pub lives: i32,
+    /// Diamonds mined (used by the Miner class rewards).
+    #[serde(default)]
+    pub diamonds_mined: i32,
     pub spawn_credits: i32,
 
     pub reclaim_used: bool,
@@ -76,6 +79,7 @@ impl Userdata {
             highest_killstreak: 0,
             balance: config.economy.default_player_balance,
             lives: config.timers.default_lives,
+            diamonds_mined: 0,
             spawn_credits: 0,
             reclaim_used: false,
             settings: Settings::default(),

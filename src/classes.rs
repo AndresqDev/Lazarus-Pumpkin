@@ -158,6 +158,8 @@ pub struct PvpClassManager {
     pub warmups: BTreeMap<String, (ClassKind, i64)>,
     /// (class, faction id) -> count
     pub faction_limits: BTreeMap<(ClassKind, String), i32>,
+    /// Miner diamond thresholds: (diamonds, name, effects)
+    pub miner_rewards: Vec<(i32, String, Vec<PassiveEffect>)>,
 }
 
 impl PvpClassManager {
@@ -193,6 +195,28 @@ impl PvpClassManager {
                     effects,
                 },
             );
+
+            if kind == ClassKind::Miner {
+                self.miner_rewards.clear();
+                let mut thresholds: Vec<i32> = raw
+                    .keys("MINER_CLASS.POTION_EFFECT_REWARDS")
+                    .iter()
+                    .filter_map(|k| k.parse::<i32>().ok())
+                    .collect();
+                thresholds.sort_unstable();
+                for threshold in thresholds {
+                    let base = format!("MINER_CLASS.POTION_EFFECT_REWARDS.{threshold}");
+                    let name = raw.string(&format!("{base}.NAME"));
+                    let mut effects = Vec::new();
+                    for effect_name in raw.keys(&format!("{base}.EFFECTS")) {
+                        if let Some(effect) = effect_from_name(&effect_name) {
+                            let level = raw.int(&format!("{base}.EFFECTS.{effect_name}")).max(1) as u8;
+                            effects.push(PassiveEffect { effect, amplifier: level - 1 });
+                        }
+                    }
+                    self.miner_rewards.push((threshold, name, effects));
+                }
+            }
         }
     }
 
@@ -418,6 +442,64 @@ pub fn remove_infinite_effects(player: &Player) {
     for effect in player.get_active_effects() {
         if effect.duration >= 12000 {
             player.remove_effect(effect.effect_type);
+        }
+    }
+}
+
+/// Handles a diamond-ore break for an active Miner (port of `Miner#onBlockBreak`).
+pub fn miner_diamond(player: &Player, server: &Server) {
+    let uuid = crate::core::uuid_of(player);
+    let mut guard = state().write().unwrap();
+    if guard.classes.active.get(&uuid) != Some(&ClassKind::Miner) {
+        return;
+    }
+
+    let count = {
+        let Some(user) = guard.userdata.get_mut(&uuid) else {
+            return;
+        };
+        user.diamonds_mined += 1;
+        user.diamonds_mined
+    };
+
+    let reward = guard
+        .classes
+        .miner_rewards
+        .iter()
+        .find(|(threshold, _, _)| *threshold == count)
+        .cloned();
+
+    // Re-apply every reward reached so far (the original applies them cumulatively).
+    let reached: Vec<PassiveEffect> = guard
+        .classes
+        .miner_rewards
+        .iter()
+        .filter(|(threshold, _, _)| *threshold <= count)
+        .flat_map(|(_, _, effects)| effects.iter().cloned())
+        .collect();
+    drop(guard);
+
+    for effect in reached {
+        player.add_effect(StatusEffectInstance {
+            effect_type: effect.effect,
+            duration: INFINITE,
+            amplifier: effect.amplifier,
+            ambient: false,
+            show_particles: false,
+            show_icon: true,
+        });
+    }
+
+    if let Some((_, name, _)) = reward {
+        let message = {
+            let guard = state().read().unwrap();
+            util::replace_all(
+                &guard.raw.language.string("MINER_EFFECT_REWARD"),
+                &[("<player>", &crate::core::name_of(player)), ("<name>", &name)],
+            )
+        };
+        for online in server.get_all_players() {
+            crate::core::send(&online, &message);
         }
     }
 }

@@ -100,6 +100,10 @@ impl EventHandler<BlockBreakEvent> for BlockBreakListener {
             core::send(player, &message);
         }
 
+        if !event.cancelled && event.block.contains("diamond_ore") {
+            crate::classes::miner_diamond(player, &server);
+        }
+
         event
     }
 }
