@@ -24,8 +24,20 @@ pub fn is_wand_key(key: &str) -> bool {
     key.trim_start_matches("minecraft:") == "golden_hoe"
 }
 
+/// What a player's active selection is for. The original uses two selection types
+/// (`CLAIM` and `SYSTEM_CLAIM`); we keep the same separation so a system-claim wand
+/// never buys a claim for the player's own faction.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SelectionKind {
+    #[default]
+    Claim,
+    /// `/f claimfor <faction>` — claims for the given system faction id.
+    System(String),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Selection {
+    pub kind: SelectionKind,
     pub pos_one: Option<SelectedPos>,
     pub pos_two: Option<SelectedPos>,
 }
@@ -106,6 +118,20 @@ impl SelectionManager {
         self.give_wand(player);
         let uuid = crate::core::uuid_of(player);
         self.selections.insert(uuid, Selection::default());
+    }
+
+    /// Starts (or restarts) a selection bound to a system faction.
+    pub fn start_system(&mut self, player: &Player, faction_id: String) {
+        self.cancel_local(player);
+        self.give_wand(player);
+        let uuid = crate::core::uuid_of(player);
+        self.selections.insert(
+            uuid,
+            Selection {
+                kind: SelectionKind::System(faction_id),
+                ..Selection::default()
+            },
+        );
     }
 
     /// Ends the selection process, removing the wand and selection visuals.

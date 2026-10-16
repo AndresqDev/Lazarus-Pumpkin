@@ -2456,11 +2456,15 @@ fn admin_claim_for(sender: &CommandSender, server: &Server, args: &ConsumedArgs)
         return;
     };
 
-    // Start (or continue) the selection process. A missing/partial selection means
-    // we hand out the wand, exactly like the original `toggleSelectionProcess`.
-    if !guard.selection.is_active(&uuid) {
+    // Start (or continue) a SYSTEM_CLAIM selection bound to this faction. A missing,
+    // partial or differently-bound selection means we (re)hand out the wand.
+    let bound = matches!(
+        guard.selection.get(&uuid).map(|s| s.kind.clone()),
+        Some(crate::selection::SelectionKind::System(id)) if id == owner_id
+    );
+    if !bound {
         let message = guard.raw.language.string("FACTIONS.CLAIM_FOR_COMMAND.MAKE_A_SELECTION");
-        guard.selection.start(&player);
+        guard.selection.start_system(&player, owner_id.clone());
         drop(guard);
         reply(sender, format!("{prefix}{message}"));
         return;

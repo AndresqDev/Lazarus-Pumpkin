@@ -104,10 +104,14 @@ fn set_position(player: &Player, uuid: &str, pos: BlockPos, left: bool) {
         let mut guard = state().write().unwrap();
         let AppState { selection, glass, factions, config, lang, .. } = &mut *guard;
 
-        let Some(faction_id) = factions.by_member(uuid).map(|f| f.id.clone()) else {
-            return;
-        };
-        let faction_balance = factions.get(&faction_id).map(|f| f.balance).unwrap_or(0);
+        // Staff using a `/f claimfor` (system) selection are not required to be in
+        // a faction, so only the player-claim price message needs one.
+        let faction_id = factions.by_member(uuid).map(|f| f.id.clone());
+        let faction_balance = faction_id
+            .as_deref()
+            .and_then(|id| factions.get(id))
+            .map(|f| f.balance)
+            .unwrap_or(0);
 
         // Can only claim in the overworld.
         if core::dimension_of(&world) != Dimension::Overworld {
@@ -203,6 +207,17 @@ fn clear_selection(player: &Player, uuid: &str) {
 fn purchase(server: &Server, player: &Player, uuid: &str) {
     let mut messages: Vec<String> = Vec::new();
 
+    let (system_missing, system_claimed) = {
+        let guard = state().read().unwrap();
+        (
+            guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST"),
+            guard
+                .raw
+                .language
+                .string("FACTIONS.CLAIM_FOR_COMMAND.CLAIM_CLAIMED"),
+        )
+    };
+
     {
         let mut guard = state().write().unwrap();
         let AppState { factions, claims, config, lang, selection, glass, .. } = &mut *guard;
@@ -212,11 +227,47 @@ fn purchase(server: &Server, player: &Player, uuid: &str) {
             return apply(server, player, &messages);
         };
 
+        // ---- System claim (`/f claimfor`): never touches the player's own faction ----
+        if let Some(crate::selection::SelectionKind::System(target_id)) =
+            selection.get(uuid).map(|s| s.kind.clone())
+        {
+            if claims.overlaps(&claim) {
+                messages.push(lang.faction_claim_overlap.clone());
+                return apply(server, player, &messages);
+            }
+
+            match factions.get(&target_id).cloned() {
+                Some(target) => {
+                    claims.add_claim(&target_id, claim.clone());
+                    messages.push(util::replace_all(
+                        &system_claimed,
+                        &[
+                            ("<player>", &core::name_of(player)),
+                            ("<faction>", &format!("{}{}", target.color, target.name)),
+                        ],
+                    ));
+                }
+                None => {
+                    // The faction disappeared: drop the wand instead of erroring.
+                    messages.push(util::replace(&system_missing, "<argument>", &target_id));
+                }
+            }
+
+            selection.cancel_local(player);
+            glass::update_selection(glass, player, None, None);
+            return apply(server, player, &messages);
+        }
+
         let Some(faction_id) = factions.by_member(uuid).map(|f| f.id.clone()) else {
             messages.push(lang.faction_not_in.clone());
             return apply(server, player, &messages);
         };
-        let faction = factions.get(&faction_id).cloned().unwrap();
+        let Some(faction) = factions.get(&faction_id).cloned() else {
+            // Faction gone: cancel the selection and remove the wand.
+            selection.cancel_local(player);
+            glass::update_selection(glass, player, None, None);
+            return apply(server, player, &messages);
+        };
 
         // isSelectionConnected
         if !is_selection_connected(
