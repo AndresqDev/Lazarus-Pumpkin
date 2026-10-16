@@ -4,8 +4,8 @@
 //! fire checks from the faction entity listener.
 
 use pumpkin_plugin_api::events::{
-    EntityDamageByEntityEvent, EntityDamageEvent, EventData, EventHandler, FoodLevelChangeEvent,
-    ProjectileHitEvent, ProjectileLaunchEvent,
+    EntityDamageByEntityEvent, EntityDamageEvent, EntityShootBowEvent, EventData, EventHandler,
+    FoodLevelChangeEvent, ProjectileHitEvent, ProjectileLaunchEvent,
 };
 use pumpkin_plugin_api::{Player, Server};
 
@@ -26,6 +26,7 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
         let victim = core::player_by_entity(&server, event.entity_id);
         // Projectiles (arrows, snowballs, …) have their own entity id, so resolve
         // the shooter we tracked on launch.
+        let projectile_damager = core::player_by_entity(&server, event.damager_id).is_none();
         let damager = core::player_by_entity(&server, event.damager_id).or_else(|| {
             take_projectile_shooter(event.damager_id).and_then(|uuid| {
                 pumpkin_plugin_api::uuid::parse(&uuid)
@@ -145,6 +146,54 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
             return event;
         }
 
+        // Archer tag: arrow damage from an active Archer.
+        if projectile_damager {
+            let (is_archer, victim_is_archer, can_tag_archers, require_force, duration) = {
+                let guard = state().read().unwrap();
+                (
+                    guard.classes.active.get(&damager_uuid) == Some(&crate::classes::ClassKind::Archer),
+                    guard.classes.active.get(&victim_uuid) == Some(&crate::classes::ClassKind::Archer),
+                    guard.raw.config.bool("ARCHER_CLASS.ARCHER_TAG.CAN_TAG_OTHER_ARCHERS"),
+                    guard.raw.config.bool("ARCHER_CLASS.ARCHER_TAG.REQUIRE_FULL_FORCE"),
+                    guard.raw.config.int("ARCHER_CLASS.ARCHER_TAG.DURATION").max(0) as u64,
+                )
+            };
+            let force_ok = !require_force || bow_force(&damager_uuid) >= 0.5;
+            if is_archer && duration > 0 && (can_tag_archers || !victim_is_archer) && force_ok {
+                state().write().unwrap().classes.tag_archer(&victim_uuid, duration);
+                let (victim_tpl, tagger_tpl, prefix) = {
+                    let guard = state().read().unwrap();
+                    (
+                        guard.raw.language.string("ARCHER_TAG.TAGGED_VICTIM"),
+                        guard.raw.language.string("ARCHER_TAG.TAGGED_TAGGER"),
+                        guard.raw.language.string("PREFIX"),
+                    )
+                };
+                let tagger_name = core::name_of(&damager);
+                let victim_name = core::name_of(&victim);
+                core::send(
+                    &victim,
+                    &format!(
+                        "{prefix}{}",
+                        util::replace_all(
+                            &victim_tpl,
+                            &[("<player>", &tagger_name), ("<seconds>", &duration.to_string())],
+                        )
+                    ),
+                );
+                core::send(
+                    &damager,
+                    &format!(
+                        "{prefix}{}",
+                        util::replace_all(
+                            &tagger_tpl,
+                            &[("<victim>", &victim_name), ("<seconds>", &duration.to_string())],
+                        )
+                    ),
+                );
+            }
+        }
+
         // Activate combat tags for both players.
         let tag_message = util::replace(
             "&cYou are now combat tagged for &e<time>&c.",
@@ -180,6 +229,19 @@ impl EventHandler<EntityDamageEvent> for EntityDamageListener {
         };
 
         let uuid = core::uuid_of(&player);
+
+        // Archer tag: increased damage taken.
+        let archer_multiplier = {
+            let guard = state().read().unwrap();
+            if guard.classes.is_archer_tagged(&uuid) {
+                guard.raw.config.double("ARCHER_CLASS.ARCHER_TAG.DAMAGE_MULTIPLIER") as f32
+            } else {
+                1.0
+            }
+        };
+        if archer_multiplier != 1.0 {
+            event.damage *= archer_multiplier;
+        }
 
         // All damage is cancelled inside the safezone (port of `onEntityDamage`).
         {
@@ -315,6 +377,47 @@ impl EventHandler<ProjectileHitEvent> for ProjectileHitListener {
         event: EventData<ProjectileHitEvent>,
     ) -> EventData<ProjectileHitEvent> {
         take_projectile_shooter(event.entity_id);
+        event
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Archer class: bow force + tag
+// ---------------------------------------------------------------------------
+
+static LAST_BOW_FORCE: std::sync::Mutex<Option<std::collections::HashMap<String, f32>>> =
+    std::sync::Mutex::new(None);
+
+fn set_bow_force(uuid: &str, force: f32) {
+    LAST_BOW_FORCE
+        .lock()
+        .unwrap()
+        .get_or_insert_with(std::collections::HashMap::new)
+        .insert(uuid.to_string(), force);
+}
+
+fn bow_force(uuid: &str) -> f32 {
+    LAST_BOW_FORCE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|map| map.get(uuid).copied())
+        .unwrap_or(1.0)
+}
+
+/// Records the bow force of the shooter (used by `REQUIRE_FULL_FORCE`).
+pub struct ShootBowListener;
+
+impl EventHandler<EntityShootBowEvent> for ShootBowListener {
+    fn handle(
+        &self,
+        server: Server,
+        event: EventData<EntityShootBowEvent>,
+    ) -> EventData<EntityShootBowEvent> {
+        if let Some(shooter) = core::player_by_entity(&server, event.entity_id) {
+            set_bow_force(&core::uuid_of(&shooter), event.force);
+        }
         event
     }
 }

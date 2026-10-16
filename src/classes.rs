@@ -160,6 +160,8 @@ pub struct PvpClassManager {
     pub faction_limits: BTreeMap<(ClassKind, String), i32>,
     /// Miner diamond thresholds: (diamonds, name, effects)
     pub miner_rewards: Vec<(i32, String, Vec<PassiveEffect>)>,
+    /// Archer-tagged players: uuid -> expiry millis.
+    pub archer_tags: BTreeMap<String, i64>,
 }
 
 impl PvpClassManager {
@@ -222,6 +224,18 @@ impl PvpClassManager {
 
     pub fn active_class(&self, uuid: &str) -> Option<ClassKind> {
         self.active.get(uuid).copied()
+    }
+
+    pub fn is_archer_tagged(&self, uuid: &str) -> bool {
+        self.archer_tags
+            .get(uuid)
+            .is_some_and(|expiry| *expiry > util::now_millis())
+    }
+
+    /// Tags `victim` with the Archer effect for `seconds`.
+    pub fn tag_archer(&mut self, victim_uuid: &str, seconds: u64) {
+        self.archer_tags
+            .insert(victim_uuid.to_string(), util::now_millis() + seconds as i64 * 1000);
     }
 
     /// Wearing the full armour set of a class?
