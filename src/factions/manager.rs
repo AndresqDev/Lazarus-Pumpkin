@@ -98,6 +98,15 @@ impl FactionsManager {
         self.factions.values().filter(|f| f.is_player())
     }
 
+    /// Ids of road system factions (used to ignore them in the claim buffer).
+    pub fn road_ids(&self) -> Vec<String> {
+        self.factions
+            .values()
+            .filter(|f| f.kind == FactionKind::Road)
+            .map(|f| f.id.clone())
+            .collect()
+    }
+
     pub fn player_factions_mut(&mut self) -> impl Iterator<Item = &mut Faction> {
         self.factions.values_mut().filter(|f| f.is_player())
     }

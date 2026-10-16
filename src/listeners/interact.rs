@@ -247,14 +247,24 @@ fn purchase(server: &Server, player: &Player, uuid: &str) {
             return apply(server, player, &messages);
         }
 
-        // canClaimSelection -> overlap
-        if claims.overlaps(&claim, &faction_id) {
+        // canClaimSelection -> overlap (every faction, including your own)
+        if claims.overlaps(&claim) {
             messages.push(lang.faction_claim_overlap.clone());
             return apply(server, player, &messages);
         }
 
-        // canClaimSelection -> buffer
-        if claims.within_buffer(&claim, config.factions.claim_buffer, &faction_id, &[]) {
+        // canClaimSelection -> buffer (roads may be ignored)
+        let ignore_factions = if config.factions.claim_buffer_ignore_roads {
+            factions.road_ids()
+        } else {
+            Vec::new()
+        };
+        if claims.within_buffer(
+            &claim,
+            config.factions.claim_buffer,
+            &faction_id,
+            &ignore_factions,
+        ) {
             messages.push(util::replace(
                 &lang.faction_claim_buffer,
                 "<buffer>",

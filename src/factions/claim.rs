@@ -176,13 +176,14 @@ impl ClaimManager {
         removed
     }
 
-    /// Exact overlap check (port of `ClaimManager#getClaimsInSelection` + the
-    /// `canClaimSelection` "claims not empty" test).
-    pub fn overlaps(&self, candidate: &Claim, ignore_faction: &str) -> bool {
+    /// Overlap check — port of `ClaimManager#canClaimSelection`'s
+    /// `getClaimsInSelection(selection)` test. The original returns the claims of
+    /// **every** faction (including the claimant's own), so claiming over your own
+    /// claim is also denied.
+    pub fn overlaps(&self, candidate: &Claim) -> bool {
         self.claims
-            .iter()
-            .filter(|(owner, _)| owner.as_str() != ignore_faction)
-            .flat_map(|(_, list)| list.iter())
+            .values()
+            .flat_map(|list| list.iter())
             .any(|claim| claim.intersects(candidate))
     }
 

@@ -95,6 +95,7 @@ pub struct FactionsConfig {
     pub min_claim_size: i32,
     pub max_claim_size: i32,
     pub claim_buffer: i32,
+    pub claim_buffer_ignore_roads: bool,
     pub claim_price_per_block: f64,
     pub unclaim_price_multiplier: f64,
 
@@ -136,6 +137,7 @@ impl Default for FactionsConfig {
             min_claim_size: 5,
             max_claim_size: 40,
             claim_buffer: 2,
+            claim_buffer_ignore_roads: true,
             claim_price_per_block: 0.5,
             unclaim_price_multiplier: 0.5,
             name_min_length: 3,
