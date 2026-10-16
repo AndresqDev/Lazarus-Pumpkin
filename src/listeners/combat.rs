@@ -159,7 +159,8 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
     }
 }
 
-/// Blocks all damage (e.g. fall damage) while a player has PvP protection.
+/// Blocks all damage (e.g. fall damage) while a player has PvP protection, and
+/// cancels warmup teleports when damaged (port of `cancelHomeAndStuckTimersOnDamage`).
 pub struct EntityDamageListener;
 
 impl EventHandler<EntityDamageEvent> for EntityDamageListener {
@@ -167,6 +168,36 @@ impl EventHandler<EntityDamageEvent> for EntityDamageListener {
         let Some(player) = core::player_by_entity(&server, event.entity_id) else {
             return event;
         };
+
+        let uuid = core::uuid_of(&player);
+
+        let message = {
+            let mut guard = state().write().unwrap();
+            match guard.timers.pending(&uuid).map(|p| p.timer_type) {
+                Some(TimerType::Home) => {
+                    guard.timers.clear_pending(&uuid);
+                    Some(
+                        guard
+                            .raw
+                            .language
+                            .string("FACTIONS.HOME_COMMAND.TELEPORT_CANCELLED.DAMAGED"),
+                    )
+                }
+                Some(TimerType::Stuck) => {
+                    guard.timers.clear_pending(&uuid);
+                    Some(
+                        guard
+                            .raw
+                            .language
+                            .string("FACTIONS.STUCK_COMMAND.TELEPORT_CANCELLED.DAMAGED"),
+                    )
+                }
+                _ => None,
+            }
+        };
+        if let Some(message) = message {
+            core::send(&player, &message);
+        }
 
         if protected(&player) {
             event.cancelled = true;
