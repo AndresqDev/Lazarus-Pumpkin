@@ -22,6 +22,7 @@ pub fn register(context: &Context) -> Result<(), String> {
 
     context.register_event_handler(combat::EntityDamageByEntityListener, EventPriority::High, true)?;
     context.register_event_handler(combat::EntityDamageListener, EventPriority::High, true)?;
+    context.register_event_handler(combat::FoodLevelChangeListener, EventPriority::High, true)?;
 
     context.register_event_handler(block::BlockBreakListener, EventPriority::High, true)?;
     context.register_event_handler(block::BlockPlaceListener, EventPriority::High, true)?;

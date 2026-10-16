@@ -3,7 +3,9 @@
 //! Port of `handlers.timer.CombatTagHandler` / `PvpProtHandler` and the friendly
 //! fire checks from the faction entity listener.
 
-use pumpkin_plugin_api::events::{EntityDamageByEntityEvent, EntityDamageEvent, EventData, EventHandler};
+use pumpkin_plugin_api::events::{
+    EntityDamageByEntityEvent, EntityDamageEvent, EventData, EventHandler, FoodLevelChangeEvent,
+};
 use pumpkin_plugin_api::{Player, Server};
 
 use crate::core;
@@ -171,6 +173,18 @@ impl EventHandler<EntityDamageEvent> for EntityDamageListener {
 
         let uuid = core::uuid_of(&player);
 
+        // All damage is cancelled inside the safezone (port of `onEntityDamage`).
+        {
+            let location = core::location(&player);
+            if matches!(
+                core::territory_at(&location.world, location.block_x(), location.block_z()),
+                core::Territory::Safezone
+            ) {
+                event.cancelled = true;
+                return event;
+            }
+        }
+
         let message = {
             let mut guard = state().write().unwrap();
             match guard.timers.pending(&uuid).map(|p| p.timer_type) {
@@ -200,6 +214,36 @@ impl EventHandler<EntityDamageEvent> for EntityDamageListener {
         }
 
         if protected(&player) {
+            event.cancelled = true;
+        }
+
+        event
+    }
+}
+
+/// Freezes hunger inside the safezone (port of `PlayerEventListener#onFoodLevelChange`).
+pub struct FoodLevelChangeListener;
+
+impl EventHandler<FoodLevelChangeEvent> for FoodLevelChangeListener {
+    fn handle(
+        &self,
+        server: Server,
+        mut event: EventData<FoodLevelChangeEvent>,
+    ) -> EventData<FoodLevelChangeEvent> {
+        let Some(player) = core::player_by_entity(&server, event.entity_id) else {
+            return event;
+        };
+
+        // Regeneration (food going up) is always allowed.
+        if player.get_food_level() < event.food_level {
+            return event;
+        }
+
+        let location = core::location(&player);
+        if matches!(
+            core::territory_at(&location.world, location.block_x(), location.block_z()),
+            core::Territory::Safezone
+        ) {
             event.cancelled = true;
         }
 
