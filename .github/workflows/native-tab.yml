@@ -1,0 +1,74 @@
+name: native-tab
+
+# Builds the native tab-list companion INSIDE Pumpkin's workspace so it uses the
+# exact same Cargo.lock (dependency versions) as the server. The standalone crate
+# in native-tab/ is only a reference; here we inject it as a workspace member with
+# path dependencies.
+#
+# Download the `native_tab` artifact and put libnative_tab.so in the server's
+# plugins/ folder (renamed to native_tab.so).
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "native-tab/**"
+      - ".github/workflows/native-tab.yml"
+
+env:
+  PUMPKIN_TAG: "0.2.0+26.3-26.51"
+  RUST_MIN_STACK: "134217728"
+
+jobs:
+  build:
+    # ARM64 GitHub-hosted runner (Public repos). Builds the .so for your aarch64 VPS natively.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout plugin repo
+        uses: actions/checkout@v4
+
+      - name: Checkout Pumpkin at the matching tag
+        uses: actions/checkout@v4
+        with:
+          repository: Pumpkin-MC/Pumpkin
+          ref: ${{ env.PUMPKIN_TAG }}
+          path: Pumpkin
+
+      - name: Install the toolchain pinned by Pumpkin
+        working-directory: Pumpkin
+        run: rustup show
+
+      - name: Inject the plugin into Pumpkin's workspace
+        run: |
+          mkdir -p Pumpkin/native-tab/src
+          cp native-tab/src/lib.rs Pumpkin/native-tab/src/lib.rs
+          cat > Pumpkin/native-tab/Cargo.toml <<'EOF'
+          [package]
+          name = "native_tab"
+          version = "0.1.0"
+          edition = "2024"
+          description = "Native tab list companion for Lazarus"
+
+          [lib]
+          crate-type = ["cdylib"]
+
+          [dependencies]
+          pumpkin = { path = "../crates/pumpkin" }
+          pumpkin-api-macros = { path = "../crates/pumpkin-api-macros" }
+          tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+          tracing = "0.1"
+          EOF
+          # Register it as a workspace member (anchored to the members line only).
+          sed -i 's#^    "crates/pumpkin-world",$#    "crates/pumpkin-world",\n    "native-tab",#' Pumpkin/Cargo.toml
+          grep -n "native-tab" Pumpkin/Cargo.toml
+
+      - name: Build native plugin
+        working-directory: Pumpkin
+        run: cargo build --release -p native_tab
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native_tab
+          path: Pumpkin/target/release/libnative_tab.so
+          if-no-files-found: error
