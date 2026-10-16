@@ -1339,7 +1339,26 @@ fn show(sender: &CommandSender, server: &Server, uuid: &str, name: Option<String
             .members
             .values()
             .filter(|m| m.role == role)
-            .map(|m| format!("{}{}", guard.config.relation_colors.teammate, m.name))
+            .map(|m| {
+                // Port of `getPlayerNameFormatted`: deathbanned = red, online = green,
+                // offline = gray.
+                let deathbanned = guard
+                    .userdata
+                    .get(&m.uuid)
+                    .map(|u| u.is_deathbanned())
+                    .unwrap_or(false);
+                let online = pumpkin_plugin_api::uuid::parse(&m.uuid)
+                    .and_then(|id| server.get_player_by_uuid(id))
+                    .is_some();
+                let color = if deathbanned {
+                    "&c"
+                } else if online {
+                    "&a"
+                } else {
+                    "&7"
+                };
+                format!("{color}{}", m.name)
+            })
             .collect();
         if names.is_empty() { lang.none.clone() } else { names.join("&7, ") }
     };
@@ -1360,7 +1379,7 @@ fn show(sender: &CommandSender, server: &Server, uuid: &str, name: Option<String
     reply(sender, &sep);
     reply(sender, format!(" {display} &7[{online}/{}] &e- &eHome: &7{}", faction.members.len(), faction.home_string()));
     reply(sender, format!(" &eAnnouncement: &7{}", faction.announcement.clone().unwrap_or_else(|| lang.none.clone())));
-    reply(sender, format!(" &eAuto revive: &7{}", lang.no));
+    reply(sender, format!(" &eAuto revive: &7{}", if faction.auto_revive { lang.yes.clone() } else { lang.no.clone() }));
     reply(sender, format!(" &eFaction lives: &7{}", faction.lives));
     reply(sender, format!(" &eTotal Kills: &7{}", faction.kills));
     reply(sender, format!(" &ePoints: &7{}", faction.points));
