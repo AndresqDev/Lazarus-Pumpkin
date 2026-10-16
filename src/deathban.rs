@@ -51,6 +51,26 @@ pub fn apply_on_death(player: &Player) -> Option<(String, bool)> {
 
     let lang = guard.lang.clone();
 
+    // Ban time: the minimum of `DEATHBAN.BAN_TIMES` (permission-based times will be
+    // handled by a permission plugin later), else `DEFAULT_BAN_TIME`.
+    let ban_minutes = {
+        let mut times: Vec<u64> = guard
+            .raw
+            .config
+            .keys("DEATHBAN.BAN_TIMES")
+            .iter()
+            .filter_map(|key| key.parse::<u64>().ok())
+            .collect();
+        times.sort_unstable();
+        times.first().copied().unwrap_or_else(|| {
+            guard
+                .raw
+                .config
+                .int("DEATHBAN.DEFAULT_BAN_TIME")
+                .max(0) as u64
+        })
+    };
+
     // Faction auto-revive: consume a faction life instead of deathbanning.
     let auto_revive = guard
         .factions
@@ -80,8 +100,8 @@ pub fn apply_on_death(player: &Player) -> Option<(String, bool)> {
         ));
     }
 
-    user.deathban(config.default_ban_time);
-    let time = util::format_duration(config.default_ban_time as i64 * 60 * 1000);
+    user.deathban(ban_minutes);
+    let time = util::format_duration(ban_minutes as i64 * 60 * 1000);
     Some((
         util::replace(
             &util::replace(&lang.deathban_message, "<time>", &time),
