@@ -80,9 +80,11 @@ impl NativeTab {
 
         let server = context.server.clone();
         let log_ctx = context.clone();
-        tokio::spawn(async move {
-            run(server, config, log_ctx).await;
-        });
+        // NOTE: do NOT use `tokio::spawn`: the plugin links its own copy of tokio
+        // (separate thread-local context from the host), so spawning from the
+        // host's runtime panics and (panic=abort) kills the server. A plain OS
+        // thread is safe.
+        std::thread::spawn(move || run(server, config, log_ctx));
 
         Ok(())
     }
@@ -97,14 +99,12 @@ impl NativeTab {
 #[plugin_impl]
 pub struct NativeTab;
 
-async fn run(server: Arc<Server>, config: TabConfig, log_ctx: Arc<Context>) {
-    let mut interval = tokio::time::interval(Duration::from_secs(1));
+fn run(server: Arc<Server>, config: TabConfig, log_ctx: Arc<Context>) {
     let mut added = false;
     let mut last: Vec<String> = vec![String::new(); SLOTS];
     let mut ticks: u64 = 0;
 
     loop {
-        interval.tick().await;
         ticks += 1;
 
         let lines = build_lines(&config, &server);
@@ -137,6 +137,8 @@ async fn run(server: Arc<Server>, config: TabConfig, log_ctx: Arc<Context>) {
                 &last[..5.min(last.len())]
             ),
         );
+
+        std::thread::sleep(Duration::from_secs(1));
     }
 }
 
