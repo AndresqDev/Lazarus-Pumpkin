@@ -62,6 +62,8 @@ enum Action {
     AdminSetKills,
     AdminForcePromote,
     AdminForceDemote,
+    AdminForceJoin,
+    AdminForceRename,
     AdminSetPoints,
     AdminSetBalance,
     AdminSetLives,
@@ -109,6 +111,8 @@ pub fn register(context: &Context) -> Result<(), String> {
         "lazarus.factions.setkills",
         "lazarus.factions.forcepromote",
         "lazarus.factions.forcedemote",
+        "lazarus.factions.forcejoin",
+        "lazarus.factions.forcerename",
     ] {
         register_op_permission(context, node, "Lazarus faction admin command")?;
     }
@@ -222,7 +226,9 @@ pub fn register(context: &Context) -> Result<(), String> {
             ),
         )
         .then(CommandNode::literal("forcepromote").then(str_node("player").execute(FactionExecutor(Action::AdminForcePromote))))
-        .then(CommandNode::literal("forcedemote").then(str_node("player").execute(FactionExecutor(Action::AdminForceDemote))));
+        .then(CommandNode::literal("forcedemote").then(str_node("player").execute(FactionExecutor(Action::AdminForceDemote))))
+        .then(CommandNode::literal("forcejoin").then(str_node("faction").execute(FactionExecutor(Action::AdminForceJoin))))
+        .then(CommandNode::literal("forcerename").then(str_node("faction").then(str_node("name").execute(FactionExecutor(Action::AdminForceRename)))));
 
     context.register_command(root, "lazarus:command.faction");
     Ok(())
@@ -281,6 +287,8 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::AdminSetKills => admin_set_kills(sender, server, args),
         Action::AdminForcePromote => admin_force_role(sender, server, args, true),
         Action::AdminForceDemote => admin_force_role(sender, server, args, false),
+        Action::AdminForceJoin => admin_force_join(sender, server, args),
+        Action::AdminForceRename => admin_force_rename(sender, server, args),
         Action::AdminSetPoints => admin_set_int(sender, server, args, AdminField::Points),
         Action::AdminSetBalance => admin_set_int(sender, server, args, AdminField::Balance),
         Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
@@ -1656,6 +1664,161 @@ fn admin_force_role(sender: &CommandSender, server: &Server, args: &ConsumedArgs
         {
             core::send(&player, &message);
         }
+    }
+}
+
+fn admin_force_join(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    if !require_permission(sender, server, "lazarus.factions.forcejoin") {
+        return;
+    }
+    let Some(faction_name) = string_arg(args, "faction") else {
+        return;
+    };
+    let Some(player) = sender.as_player() else {
+        return;
+    };
+    let uuid = core::uuid_of(&player);
+    let name = core::name_of(&player);
+
+    let (prefix, missing_tpl, already_tpl, joined_tpl, already, found) = {
+        let guard = state().read().unwrap();
+        let lang = &guard.raw.language;
+        let found = guard
+            .factions
+            .by_name(&faction_name)
+            .filter(|f| f.is_player())
+            .map(|f| {
+                (
+                    f.id.clone(),
+                    f.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
+                )
+            });
+        (
+            lang.string("FACTION_PREFIX"),
+            lang.string("FACTIONS.FACTION_DOESNT_EXIST"),
+            lang.string("FACTIONS.ALREADY_IN_FACTION_SELF"),
+            lang.string("FACTIONS.FORCE_JOIN_COMMAND.JOINED"),
+            guard.factions.by_member(&uuid).is_some(),
+            found,
+        )
+    };
+
+    if already {
+        reply(sender, format!("{prefix}{already_tpl}"));
+        return;
+    }
+    let Some((id, members)) = found else {
+        let message = util::replace(&missing_tpl, "<argument>", &faction_name);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    };
+
+    {
+        let mut guard = state().write().unwrap();
+        guard
+            .factions
+            .add_member(&id, member(uuid.clone(), name.clone(), Role::Member));
+    }
+
+    let message = format!(
+        "{prefix}{}",
+        util::replace(&joined_tpl, "<player>", &name)
+    );
+    for member_uuid in members {
+        if let Some(id) = pumpkin_plugin_api::uuid::parse(&member_uuid)
+            && let Some(online) = server.get_player_by_uuid(id)
+        {
+            core::send(&online, &message);
+        }
+    }
+}
+
+fn admin_force_rename(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    let _ = server;
+    if !require_permission(sender, server, "lazarus.factions.forcerename") {
+        return;
+    }
+    let Some(old_arg) = string_arg(args, "faction") else {
+        return;
+    };
+    let Some(new_name) = string_arg(args, "name") else {
+        return;
+    };
+
+    let mut guard = state().write().unwrap();
+    let config = guard.config.clone();
+
+    let (prefix, usage, missing_tpl, same_tpl, blocked, too_short, too_big, not_alnum, exists_tpl, renamed_tpl) = {
+        let lang = &guard.raw.language;
+        (
+            lang.string("FACTION_PREFIX"),
+            lang.string("FACTIONS.FORCE_RENAME_COMMAND.USAGE"),
+            lang.string("FACTIONS.FACTION_DOESNT_EXIST"),
+            lang.string("FACTIONS.FORCE_RENAME_COMMAND.SAME_NAME"),
+            lang.string("FACTIONS.BLOCKED_FACTION_NAME"),
+            lang.string("FACTIONS.NAME_TOO_SHORT"),
+            lang.string("FACTIONS.NAME_TOO_BIG"),
+            lang.string("FACTIONS.NAME_NOT_ALPHANUMERIC"),
+            lang.string("FACTIONS.FACTION_ALREADY_EXISTS"),
+            lang.string("FACTIONS.FORCE_RENAME_COMMAND.RENAMED"),
+        )
+    };
+    let _ = usage;
+
+    let Some(id) = guard
+        .factions
+        .by_name(&old_arg)
+        .filter(|f| f.is_player())
+        .map(|f| f.id.clone())
+    else {
+        let message = util::replace(&missing_tpl, "<argument>", &old_arg);
+        reply(sender, format!("{prefix}{message}"));
+        return;
+    };
+
+    let old_name = guard.factions.get(&id).map(|f| f.name.clone()).unwrap_or_default();
+
+    if old_name.eq_ignore_ascii_case(&new_name) {
+        reply(sender, format!("{prefix}{}", util::replace(&same_tpl, "<name>", &new_name)));
+        return;
+    }
+    if config
+        .factions
+        .disallowed_names
+        .iter()
+        .any(|n| n.eq_ignore_ascii_case(&new_name))
+    {
+        reply(sender, format!("{prefix}{blocked}"));
+        return;
+    }
+    if new_name.chars().count() < config.factions.name_min_length {
+        reply(sender, format!("{prefix}{too_short}"));
+        return;
+    }
+    if new_name.chars().count() > config.factions.name_max_length {
+        reply(sender, format!("{prefix}{too_big}"));
+        return;
+    }
+    if !new_name.chars().all(|c| c.is_ascii_alphanumeric()) {
+        reply(sender, format!("{prefix}{not_alnum}"));
+        return;
+    }
+    if guard.factions.name_taken(&new_name) {
+        reply(sender, format!("{prefix}{}", util::replace(&exists_tpl, "<name>", &new_name)));
+        return;
+    }
+
+    if let Some(faction) = guard.factions.get_mut(&id) {
+        faction.name = new_name.clone();
+    }
+    drop(guard);
+
+    let message = util::replace_all(
+        &renamed_tpl,
+        &[("<name>", &old_name), ("<newName>", &new_name)],
+    );
+    for player in server.get_all_players() {
+        core::send(&player, &message);
     }
 }
 
