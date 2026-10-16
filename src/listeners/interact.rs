@@ -414,7 +414,7 @@ fn apply(server: &Server, player: &Player, messages: &[String]) {
 }
 
 /// Port of `ClaimManager#isSelectionConnected`.
-fn is_selection_connected(
+pub(crate) fn is_selection_connected(
     claims: &ClaimManager,
     faction_id: &str,
     claim: &Claim,

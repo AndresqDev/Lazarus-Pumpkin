@@ -161,6 +161,9 @@ pub struct Faction {
     pub enderpearls: bool,
     #[serde(default = "default_true")]
     pub abilities: bool,
+    /// `/f autorevive` toggle (faction-wide auto revive on deathban).
+    #[serde(default)]
+    pub auto_revive: bool,
 
     // ---- PlayerFaction fields ----
     pub dtr: f64,
@@ -195,6 +198,7 @@ impl Faction {
             safezone: false,
             enderpearls: true,
             abilities: true,
+            auto_revive: false,
             dtr: config.factions.solo_faction_dtr,
             balance: config.economy.default_faction_balance,
             lives: 0,
@@ -223,6 +227,7 @@ impl Faction {
             safezone: kind == FactionKind::Safezone,
             enderpearls: true,
             abilities: true,
+            auto_revive: false,
             dtr: 0.0,
             balance: 0,
             lives: 0,

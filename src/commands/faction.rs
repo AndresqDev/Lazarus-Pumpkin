@@ -78,6 +78,8 @@ enum Action {
     AdminTpHere,
     FriendlyFire,
     Uninvite,
+    AutoRevive,
+    ClaimChunk,
     AdminSetPoints,
     AdminSetBalance,
     AdminSetLives,
@@ -270,7 +272,9 @@ pub fn register(context: &Context) -> Result<(), String> {
         .then(CommandNode::literal("friendlyfire").execute(FactionExecutor(Action::FriendlyFire)))
         .then(CommandNode::literal("ff").execute(FactionExecutor(Action::FriendlyFire)))
         .then(CommandNode::literal("uninvite").then(str_node("player").execute(FactionExecutor(Action::Uninvite))))
-        .then(CommandNode::literal("uninv").then(str_node("player").execute(FactionExecutor(Action::Uninvite))));
+        .then(CommandNode::literal("uninv").then(str_node("player").execute(FactionExecutor(Action::Uninvite))))
+        .then(CommandNode::literal("autorevive").execute(FactionExecutor(Action::AutoRevive)))
+        .then(CommandNode::literal("claimchunk").execute(FactionExecutor(Action::ClaimChunk)));
 
     context.register_command(root, "lazarus:command.faction");
     Ok(())
@@ -345,6 +349,8 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::AdminTpHere => admin_tp_here(sender, server, args),
         Action::FriendlyFire => friendly_fire(sender, server),
         Action::Uninvite => uninvite(sender, server, args),
+        Action::AutoRevive => auto_revive(sender, server),
+        Action::ClaimChunk => claim_chunk(sender, server, &player, &uuid),
         Action::AdminSetPoints => admin_set_int(sender, server, args, AdminField::Points),
         Action::AdminSetBalance => admin_set_int(sender, server, args, AdminField::Balance),
         Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
@@ -2705,6 +2711,171 @@ fn uninvite(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         {
             core::send(&online, &message);
         }
+    }
+}
+
+fn auto_revive(sender: &CommandSender, server: &Server) {
+    let Some(player) = sender.as_player() else {
+        return;
+    };
+    let uuid = core::uuid_of(&player);
+
+    let (message, members) = {
+        let mut guard = state().write().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let not_in = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
+        let no_perm_tpl = guard.raw.language.string("FACTIONS.NO_PERMISSION");
+        let on_tpl = guard.raw.language.string("FACTIONS.AUTO_REVIVE_ENABLED");
+        let off_tpl = guard.raw.language.string("FACTIONS.AUTO_REVIVE_DISABLED");
+
+        let Some(id) = guard.factions.by_member(&uuid).map(|f| f.id.clone()) else {
+            return reply(sender, format!("{prefix}{not_in}"));
+        };
+
+        let role = guard.factions.get(&id).and_then(|f| f.member(&uuid)).map(|m| m.role);
+        if role.map(|r| r.is_at_least(Role::CoLeader)) != Some(true) {
+            let message = util::replace(&no_perm_tpl, "<role>", Role::CoLeader.name());
+            return reply(sender, format!("{prefix}{message}"));
+        }
+
+        let name = core::name_of(&player);
+        let faction = guard.factions.get_mut(&id).unwrap();
+        faction.auto_revive = !faction.auto_revive;
+        let template = if faction.auto_revive { on_tpl } else { off_tpl };
+        let members = guard
+            .factions
+            .get(&id)
+            .unwrap()
+            .members
+            .values()
+            .map(|m| m.uuid.clone())
+            .collect::<Vec<_>>();
+        (
+            format!("{prefix}{}", util::replace(&template, "<player>", &name)),
+            members,
+        )
+    };
+
+    for member_uuid in members {
+        if let Some(id) = pumpkin_plugin_api::uuid::parse(&member_uuid)
+            && let Some(online) = server.get_player_by_uuid(id)
+        {
+            core::send(&online, &message);
+        }
+    }
+}
+
+fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &str) {
+    let _ = server;
+    let messages;
+    {
+        let mut guard = state().write().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let location = core::location(player);
+
+        let Some(id) = guard.factions.by_member(uuid).map(|f| f.id.clone()) else {
+            let msg = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        };
+
+        let role = guard.factions.get(&id).and_then(|f| f.member(uuid)).map(|m| m.role);
+        if role.map(|r| r.is_at_least(Role::CoLeader)) != Some(true) {
+            let msg = util::replace(
+                &guard.raw.language.string("FACTIONS.NO_PERMISSION"),
+                "<role>",
+                Role::CoLeader.name(),
+            );
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        }
+
+        let claim_count = guard.claims.claim_count(&id);
+        let max_claims = guard.raw.config.int("FACTION_CLAIM.MAX_CLAIMS") as usize;
+        let per_player = guard.raw.config.int("FACTION_CLAIM.CLAIMS_PER_PLAYER") as usize;
+        let member_count = guard.factions.get(&id).map(|f| f.members.len()).unwrap_or(1);
+
+        if claim_count >= max_claims || claim_count >= member_count * per_player {
+            let msg = guard.raw.language.string("FACTIONS.CLAIM_MAX_CLAIMS_EXCEEDED");
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        }
+
+        if core::dimension_of(&location.world) != core::Dimension::Overworld {
+            let msg = guard.raw.language.string("FACTIONS.CLAIM_CAN_CLAIM_ONLY_IN_OVERWORLD");
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        }
+
+        let (cx, cz) = crate::util::chunk_key(location.block_x(), location.block_z());
+        let x1 = cx * 16;
+        let z1 = cz * 16;
+        let claim = Claim::new(location.world.clone(), x1, x1 + 15, z1, z1 + 15);
+
+        if !crate::listeners::interact::is_selection_connected(&guard.claims, &id, &claim, guard.raw.config.bool("FACTION_CLAIM.MUST_BE_CONNECTED")) {
+            let msg = guard.raw.language.string("FACTIONS.CLAIM_CLAIM_NOT_CONNECTED");
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        }
+
+        if guard.claims.overlaps(&claim) {
+            let msg = guard.raw.language.string("FACTIONS.CLAIM_CLAIM_OVERLAPPING");
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        }
+
+        let buffer = guard.raw.config.int("FACTION_CLAIM.CLAIM_BUFFER") as i32;
+        let ignore_roads = guard.raw.config.bool("FACTION_CLAIM.CLAIM_BUFFER_IGNORE_ROADS");
+        let ignore = if ignore_roads { guard.factions.road_ids() } else { Vec::new() };
+        if guard.claims.within_buffer(&claim, buffer, &id, &ignore) {
+            let msg = util::replace(
+                &guard.raw.language.string("FACTIONS.CLAIM_CLAIM_BUFFER"),
+                "<buffer>",
+                &buffer.to_string(),
+            );
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        }
+
+        let size = claim.size_x() * claim.size_z();
+        let price = (size as f64 * guard.raw.config.double("FACTION_CLAIM.CLAIM_PRICE_PER_BLOCK")) as i64;
+        let balance = guard.factions.get(&id).map(|f| f.balance).unwrap_or(0);
+        if balance < price {
+            let msg = guard.raw.language.string("FACTIONS.CLAIM_NOT_ENOUGH_MONEY");
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        }
+
+        guard.claims.add_claim(&id, claim.clone());
+        if let Some(faction) = guard.factions.get_mut(&id) {
+            faction.balance -= price;
+        }
+
+        let player_name = core::name_of(player);
+        let msg = util::replace_all(
+            &guard.raw.language.string("FACTIONS.CLAIM_CLAIM_CLAIMED"),
+            &[
+                ("<player>", &player_name),
+                ("<location1>", &format!("{}, {}", claim.min_x, claim.min_z)),
+                ("<location2>", &format!("{}, {}", claim.max_x, claim.max_z)),
+            ],
+        );
+        messages = format!("{prefix}{msg}");
+        let members = guard
+            .factions
+            .get(&id)
+            .map(|f| f.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>())
+            .unwrap_or_default();
+        drop(guard);
+
+        for member_uuid in members {
+            if let Some(id) = pumpkin_plugin_api::uuid::parse(&member_uuid)
+                && let Some(online) = server.get_player_by_uuid(id)
+            {
+                core::send(&online, &messages);
+            }
+        }
+        return;
     }
 }
 
