@@ -1,26 +1,33 @@
 //! Tab list driver for the WASM plugin.
 //!
-//! The artificial tab list is rendered by the native `native_tab` companion (the
-//! WASM host cannot send `CPlayerInfoUpdate`). Here we push the 80 slots from
-//! `tab.toml` and update per-player dynamic lines (e.g. live coordinates).
+//! The artificial tab is rendered by the native `native_tab` companion (the WASM
+//! host cannot send `CPlayerInfoUpdate`). We build the desired state here and write
+//! it to `tab_state.json`; the native side diffs it and only updates changed slots.
 //!
-//! The helpers live in [`crate::tab_api`]. If the native plugin is not installed
-//! the IPC calls simply fail and nothing happens.
+//! * `setup`  — fills the 80 configured slots (from `tab.toml`).
+//! * `update` — sets a per-player dynamic line (live coordinates).
+//! * `flush`  — writes the file once per tick if anything changed.
+
+use std::collections::BTreeMap;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use pumpkin_plugin_api::{Player, Server};
 
 use crate::state::{state, AppState};
-use crate::tab_api;
+use crate::tab_api::{SlotSpec, TabState};
 use crate::util;
 
 const COLUMN_HEIGHT: usize = 20;
 const SLOTS: usize = 80;
 
-/// Slot used to show a per-player dynamic line (live coordinates). It lives in an
-/// empty cell of the CENTER column so it doesn't overwrite a configured line.
+/// Slot used for the per-player dynamic line (empty cell of the CENTER column).
 const DYNAMIC_SLOT: u8 = 23;
 
 const FACES: [&str; 8] = ["S", "SW", "W", "NW", "N", "NE", "E", "SE"];
+
+static STATE: Mutex<Option<TabState>> = Mutex::new(None);
+static DIRTY: AtomicBool = AtomicBool::new(false);
 
 /// Pushes the whole artificial layout (called on join / reload).
 pub fn setup(player: &Player, server: &Server) {
@@ -32,9 +39,24 @@ pub fn setup(player: &Player, server: &Server) {
         compute_lines(&guard, player, server)
     };
 
+    let mut state = STATE.lock().unwrap();
+    let tab = state.get_or_insert_with(TabState::default);
+
+    let mut global = BTreeMap::new();
     for (slot, line) in lines.iter().enumerate() {
-        tab_api::set_slot(slot as u8, line, None, Some(slot as i32));
+        global.insert(
+            slot.to_string(),
+            SlotSpec {
+                text: line.clone(),
+                name: None,
+                order: Some(slot as i32),
+                skin: None,
+            },
+        );
     }
+    tab.global = global;
+
+    DIRTY.store(true, Ordering::Relaxed);
 }
 
 /// Per-player dynamic updates (called every tick).
@@ -47,11 +69,43 @@ pub fn update(player: &Player, _server: &Server) {
         location.block_x(),
         location.block_z()
     );
-    tab_api::set_viewer_text(&uuid, DYNAMIC_SLOT, &text);
+
+    let mut state = STATE.lock().unwrap();
+    let tab = state.get_or_insert_with(TabState::default);
+    tab.viewers
+        .entry(uuid)
+        .or_default()
+        .insert(DYNAMIC_SLOT.to_string(), SlotSpec::text(text));
+
+    DIRTY.store(true, Ordering::Relaxed);
 }
 
-/// No per-player state to clean up (the native plugin owns the slots).
-pub fn forget(_uuid: &str) {}
+/// Writes the state file once per tick if it changed.
+pub fn flush() {
+    if !DIRTY.swap(false, Ordering::Relaxed) {
+        return;
+    }
+
+    let guard = STATE.lock().unwrap();
+    let Some(state) = guard.as_ref() else {
+        return;
+    };
+    let folder = state_folder();
+    crate::tab_api::write(&folder, state);
+}
+
+/// No per-player state to clean up beyond the file.
+pub fn forget(uuid: &str) {
+    let mut state = STATE.lock().unwrap();
+    if let Some(tab) = state.as_mut() {
+        tab.viewers.remove(uuid);
+        DIRTY.store(true, Ordering::Relaxed);
+    }
+}
+
+fn state_folder() -> String {
+    crate::state::state().read().unwrap().data_folder.clone()
+}
 
 /// Builds the 80 configured lines (4 columns of 20), resolving placeholders.
 fn compute_lines(guard: &AppState, player: &Player, server: &Server) -> Vec<String> {

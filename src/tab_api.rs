@@ -1,70 +1,50 @@
-//! Client helpers for the native `native_tab` IPC API.
+//! Shared tab-state model + writer for the native `native_tab` API.
 //!
-//! The native companion plugin owns the tab list (the WASM host can't serialise
-//! `CPlayerInfoUpdate`) and exposes these JSON operations. `viewer = null` affects
-//! everyone; a UUID targets one player (per-player dynamic content).
+//! The WASM plugin writes `plugins/data/lazarus/tab_state.json`, which the native
+//! companion diffs against what it already sent and applies per-slot.
 
-use serde_json::json;
+use std::collections::BTreeMap;
 
-/// Name of the native companion plugin.
-pub const NATIVE_TAB: &str = "native_tab";
+use serde::Serialize;
 
-fn send(request: serde_json::Value) {
-    let payload = request.to_string().into_bytes();
-    let _ = pumpkin_plugin_api::ipc::send_ipc_message(NATIVE_TAB, &payload);
+#[derive(Serialize, Clone, Default, PartialEq)]
+pub struct Skin {
+    pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
 }
 
-/// Create/replace a slot for everyone, optionally with a profile name and order.
-pub fn set_slot(slot: u8, text: &str, name: Option<&str>, order: Option<i32>) {
-    send(json!({
-        "op": "set",
-        "viewer": null,
-        "slot": slot,
-        "text": text,
-        "name": name,
-        "order": order,
-    }));
+#[derive(Serialize, Clone, Default, PartialEq)]
+pub struct SlotSpec {
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skin: Option<Skin>,
 }
 
-/// Replace a slot's text for everyone (cheap; no skin/re-add).
-pub fn set_text(slot: u8, text: &str) {
-    send(json!({ "op": "text", "viewer": null, "slot": slot, "text": text }));
+impl SlotSpec {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            ..Default::default()
+        }
+    }
 }
 
-/// Replace a slot's text for a single player.
-pub fn set_viewer_text(viewer: &str, slot: u8, text: &str) {
-    send(json!({ "op": "text", "viewer": viewer, "slot": slot, "text": text }));
+#[derive(Serialize, Default)]
+pub struct TabState {
+    /// slot (as string) -> spec (shown to everyone)
+    pub global: BTreeMap<String, SlotSpec>,
+    /// player uuid -> (slot -> spec) per-player overrides
+    pub viewers: BTreeMap<String, BTreeMap<String, SlotSpec>>,
 }
 
-/// Create/replace a slot for a single player, optionally with a head/skin.
-///
-/// `skin_value`/`skin_signature` are the base64 `textures` GameProfile property
-/// (the same blob used by player heads). Passing `skin_value = None` keeps no skin.
-pub fn set_viewer_slot(
-    viewer: &str,
-    slot: u8,
-    text: &str,
-    name: Option<&str>,
-    skin_value: Option<&str>,
-    skin_signature: Option<&str>,
-) {
-    let skin = skin_value.map(|value| json!({ "value": value, "signature": skin_signature }));
-    send(json!({
-        "op": "set",
-        "viewer": viewer,
-        "slot": slot,
-        "text": text,
-        "name": name,
-        "skin": skin,
-    }));
-}
-
-/// Remove a slot for everyone.
-pub fn remove_slot(slot: u8) {
-    send(json!({ "op": "remove", "viewer": null, "slot": slot }));
-}
-
-/// Remove all artificial slots for everyone.
-pub fn clear() {
-    send(json!({ "op": "clear", "viewer": null }));
+/// Writes the state to `<data_folder>/tab_state.json`.
+pub fn write(data_folder: &str, state: &TabState) {
+    if let Ok(json) = serde_json::to_string(state) {
+        let _ = std::fs::write(format!("{data_folder}/tab_state.json"), json);
+    }
 }

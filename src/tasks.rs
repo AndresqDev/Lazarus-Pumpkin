@@ -71,6 +71,9 @@ fn tick(server: &Server) {
         scoreboard::update(&player, server);
         tab::update(&player, server);
     }
+
+    // Persist the tab state file once per tick (the native plugin diffs it).
+    tab::flush();
 }
 
 /// Faster loop that only refreshes client-side block visuals.

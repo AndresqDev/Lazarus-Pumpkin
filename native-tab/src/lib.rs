@@ -1,26 +1,33 @@
 //! Native artificial tab-list **API** for the Lazarus Pumpkin port.
 //!
-//! The WASM host cannot serialise `CPlayerInfoUpdate`, so a native companion owns
-//! the tab list and exposes an IPC API that the WASM plugin drives.
+//! The WASM host cannot serialise `CPlayerInfoUpdate`, so this native companion
+//! owns the tab list. The WASM plugin drives it by writing a JSON state file to
+//! its data folder:
 //!
-//! The API is a JSON message sent via `ipc::send_ipc_message("native_tab", bytes)`:
+//! `<data_folder>/tab_state.json` (i.e. `plugins/data/lazarus/tab_state.json`)
 //!
 //! ```jsonc
-//! // set / create one slot (with optional skin + order)
-//! { "op":"set", "viewer": null, "slot": 0, "name": "lz00",
-//!   "text": "&aMy line", "order": 0,
-//!   "skin": { "value": "<base64>", "signature": "<base64|omitted>" } }
-//! // update only the text of a slot (cheap)
-//! { "op":"text", "viewer": "uuid-or-null", "slot": 0, "text": "&7x, z" }
-//! // remove one slot / all slots
-//! { "op":"remove", "viewer": null, "slot": 0 }
-//! { "op":"clear",  "viewer": null }
+//! {
+//!   // slots shown to everyone
+//!   "global": {
+//!     "0": { "text": "&5&lFaction Info", "name": "lz00", "order": 0,
+//!            "skin": { "value": "<base64>", "signature": "<base64|omitted>" } }
+//!   },
+//!   // per-player overrides (dynamic content, e.g. live coordinates)
+//!   "viewers": {
+//!     "<player-uuid>": { "23": { "text": "&7Coords: &f12, 34" } }
+//!   }
+//! }
 //! ```
 //!
-//! `viewer: null` applies to everyone (broadcast); a UUID targets a single player
-//! (per-player dynamic content, e.g. live coordinates). Slots are 0..80 and each
-//! owns a deterministic fake UUID, so updates are per-slot without reloading the
-//! whole tab.
+//! The native plugin diffs the file against what it already sent and only sends
+//! the slots that changed (per-slot update, no full reload), broadcasting global
+//! slots and sending per-player overrides only to that player. New joiners get the
+//! full current state.
+//!
+//! A file-based API is used because Pumpkin's `#[plugin_method]` macro cannot
+//! implement `on_ipc_message` (borrowed `&str`/`&[u8]` lifetimes don't match the
+//! trait's returned `PluginFuture<'_, _>`).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -41,87 +48,69 @@ use uuid::Uuid;
 
 const COLUMN_HEIGHT: usize = 20;
 const SLOTS: usize = 80;
+const STATE_FILE: &str = "plugins/data/lazarus/tab_state.json";
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, PartialEq)]
 struct Skin {
     value: String,
     signature: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Deserialize, PartialEq)]
+#[serde(default)]
 struct SlotSpec {
-    name: String,
     text: String,
+    name: Option<String>,
+    order: Option<i32>,
     skin: Option<Skin>,
-    order: i32,
+}
+
+impl Default for SlotSpec {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            name: None,
+            order: None,
+            skin: None,
+        }
+    }
+}
+
+impl SlotSpec {
+    fn profile_name(&self, slot: u8) -> String {
+        self.name.clone().unwrap_or_else(|| entry_name(slot as usize))
+    }
+
+    fn order(&self, slot: u8) -> i32 {
+        self.order.unwrap_or(slot as i32)
+    }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct FileState {
+    /// slot (as string) -> spec
+    global: HashMap<String, SlotSpec>,
+    /// player uuid -> (slot -> spec)
+    viewers: HashMap<String, HashMap<String, SlotSpec>>,
 }
 
 #[derive(Default)]
-struct TabState {
-    /// Slots shown to everyone (unless a viewer override exists).
+struct Rendered {
     global: HashMap<u8, SlotSpec>,
-    /// Per-viewer overrides.
-    per_viewer: HashMap<Uuid, HashMap<u8, SlotSpec>>,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "op")]
-enum Request {
-    #[serde(rename = "set")]
-    Set {
-        viewer: Option<Uuid>,
-        slot: u8,
-        #[serde(default)]
-        name: Option<String>,
-        text: String,
-        #[serde(default)]
-        skin: Option<Skin>,
-        #[serde(default)]
-        order: Option<i32>,
-    },
-    #[serde(rename = "text")]
-    Text {
-        viewer: Option<Uuid>,
-        slot: u8,
-        text: String,
-    },
-    #[serde(rename = "remove")]
-    Remove { viewer: Option<Uuid>, slot: u8 },
-    #[serde(rename = "clear")]
-    Clear { viewer: Option<Uuid> },
-}
-
-pub struct NativeTab {
-    state: Arc<Mutex<TabState>>,
+    viewers: HashMap<Uuid, HashMap<u8, SlotSpec>>,
 }
 
 impl NativeTab {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(TabState::default())),
+            state: Arc::new(Mutex::new(Rendered::default())),
         }
     }
 
     #[plugin_method]
     async fn on_load(&self, context: Arc<Context>) -> Result<(), String> {
         context.log(format!("NativeTab API loaded (Pumpkin API v{PLUGIN_API_VERSION})"));
-        let _ = SERVER.set(context.server.clone());
-
-        // Seed the global slots from tab.toml (so it works even without the WASM API).
-        if let Some(config) = load_config() {
-            let mut state = self.state.lock().unwrap();
-            for (slot, text) in column_lines(&config).into_iter().enumerate() {
-                state.global.insert(
-                    slot as u8,
-                    SlotSpec {
-                        name: entry_name(slot),
-                        text,
-                        skin: None,
-                        order: slot as i32,
-                    },
-                );
-            }
-        }
 
         let server = context.server.clone();
         let state = Arc::clone(&self.state);
@@ -136,252 +125,235 @@ impl NativeTab {
         info!("NativeTab API unloaded");
         Ok(())
     }
-
-    /// IPC entry point. Receives JSON requests from the WASM plugin.
-    #[plugin_method]
-    async fn on_ipc_message(&self, _sender: &str, message: &[u8]) -> Result<Vec<u8>, String> {
-        let request: Request = serde_json::from_slice(message).map_err(|e| e.to_string())?;
-        let server = server_from_context().ok_or("no server")?;
-        apply(&server, &self.state, request).await?;
-        Ok(Vec::new())
-    }
 }
 
 #[plugin_impl]
-pub struct NativeTab;
+pub struct NativeTab {
+    state: Arc<Mutex<Rendered>>,
+}
 
 // ---------------------------------------------------------------------------
-// Rendering
+// Loop
 // ---------------------------------------------------------------------------
 
-/// Periodic loop: hides real players and re-sends global slots when the player
-/// set changes (new joiners must receive the artificial entries).
-fn run(server: Arc<Server>, state: Arc<Mutex<TabState>>, log_ctx: Arc<Context>) {
+fn run(server: Arc<Server>, state: Arc<Mutex<Rendered>>, log_ctx: Arc<Context>) {
     let mut known: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+    let mut last_signature: Option<(u64, u64)> = None;
 
     loop {
         let players = server.get_all_players();
         let current: std::collections::HashSet<Uuid> =
             players.iter().map(|p| p.gameprofile.id).collect();
+        let joined = current != known;
 
         hide_real_players(&server);
 
-        if current != known {
-            // Re-send every global slot (broadcast) so new joiners get them.
-            let globals: Vec<(u8, SlotSpec)> = {
-                let state = state.lock().unwrap();
-                state.global.iter().map(|(k, v)| (*k, v.clone())).collect()
-            };
-            for (slot, spec) in globals {
-                send_full_broadcast(&server, slot, &spec);
+        // Apply the state file when it changes.
+        if let Some(signature) = file_signature()
+            && last_signature != Some(signature)
+        {
+            last_signature = Some(signature);
+            apply_file(&server, &state, joined);
+
+            if joined {
+                let count = state.lock().unwrap().global.len();
+                log_ctx.log(format!("NativeTab: applied {count} global slots"));
             }
-            known = current;
-            log_ctx.log(format!(
-                "NativeTab: sent {} global slots to {} player(s)",
-                state.lock().unwrap().global.len(),
-                players.len()
-            ));
+        } else if joined {
+            // Re-send the current state to the newly joined player set.
+            resend_all(&server, &state);
         }
 
+        known = current;
         std::thread::sleep(Duration::from_secs(1));
     }
 }
 
-async fn apply(server: &Arc<Server>, state: &Arc<Mutex<TabState>>, request: Request) -> Result<(), String> {
-    match request {
-        Request::Set { viewer, slot, name, text, skin, order } => {
-            let spec = SlotSpec {
-                name: name.unwrap_or_else(|| entry_name(slot as usize)),
-                text,
-                skin,
-                order: order.unwrap_or(slot as i32),
-            };
-            store(state, viewer, slot, Some(spec.clone()));
-            send_full(server, viewer, slot, &spec).await;
+fn file_signature() -> Option<(u64, u64)> {
+    let meta = std::fs::metadata(STATE_FILE).ok()?;
+    let modified = meta.modified().ok()?;
+    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some((duration.as_secs(), meta.len()))
+}
+
+fn read_state() -> Option<FileState> {
+    let contents = std::fs::read_to_string(STATE_FILE).ok()?;
+    serde_json::from_str(&contents).ok()
+}
+
+/// Applies the file: diffs against what was rendered and only sends changes.
+fn apply_file(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>, _joined: bool) {
+    let Some(file) = read_state() else {
+        return;
+    };
+
+    let mut rendered = state.lock().unwrap();
+
+    // Global diff.
+    let mut desired_global: HashMap<u8, SlotSpec> = HashMap::new();
+    for (slot_key, spec) in &file.global {
+        if let Ok(slot) = slot_key.parse::<u8>()
+            && slot < SLOTS as u8
+        {
+            desired_global.insert(slot, spec.clone());
         }
-        Request::Text { viewer, slot, text } => {
-            let spec = {
-                let mut guard = state.lock().unwrap();
-                if let Some(spec) = effective_mut(&mut guard, viewer, slot) {
-                    spec.text = text;
-                    Some(spec.clone())
-                } else {
-                    None
-                }
-            };
-            if let Some(spec) = spec {
-                send_text(server, viewer, slot, &spec).await;
-            }
+    }
+
+    for (slot, spec) in &desired_global {
+        if rendered.global.get(slot) != Some(spec) {
+            send_slot_broadcast(server, *slot, spec);
         }
-        Request::Remove { viewer, slot } => {
-            store(state, viewer, slot, None);
-            send_remove(server, viewer, &[slot]).await;
+    }
+    for slot in rendered.global.keys() {
+        if !desired_global.contains_key(slot) {
+            send_remove_broadcast(server, &[*slot]);
         }
-        Request::Clear { viewer } => {
+    }
+    rendered.global = desired_global;
+
+    // Per-viewer diff.
+    let mut desired_viewers: HashMap<Uuid, HashMap<u8, SlotSpec>> = HashMap::new();
+    for (uuid_key, slots) in &file.viewers {
+        let Ok(uuid) = Uuid::parse_str(uuid_key) else {
+            continue;
+        };
+        let mut map = HashMap::new();
+        for (slot_key, spec) in slots {
+            if let Ok(slot) = slot_key.parse::<u8>()
+                && slot < SLOTS as u8
             {
-                let mut guard = state.lock().unwrap();
-                match viewer {
-                    Some(uuid) => {
-                        guard.per_viewer.remove(&uuid);
-                    }
-                    None => guard.global.clear(),
-                }
-            }
-            let slots: Vec<u8> = (0..SLOTS as u8).collect();
-            send_remove(server, viewer, &slots).await;
-        }
-    }
-    Ok(())
-}
-
-fn store(state: &Arc<Mutex<TabState>>, viewer: Option<Uuid>, slot: u8, spec: Option<SlotSpec>) {
-    let mut guard = state.lock().unwrap();
-    match viewer {
-        Some(uuid) => {
-            let map = guard.per_viewer.entry(uuid).or_default();
-            match spec {
-                Some(spec) => {
-                    map.insert(slot, spec);
-                }
-                None => {
-                    map.remove(&slot);
-                }
+                map.insert(slot, spec.clone());
             }
         }
-        None => match spec {
-            Some(spec) => {
-                guard.global.insert(slot, spec);
+        desired_viewers.insert(uuid, map);
+    }
+
+    // Removed viewer overrides.
+    for (uuid, slots) in &rendered.viewers {
+        let desired = desired_viewers.get(uuid);
+        for slot in slots.keys() {
+            if desired.map(|d| !d.contains_key(slot)).unwrap_or(true) {
+                send_remove_to(server, *uuid, &[*slot]);
             }
-            None => {
-                guard.global.remove(&slot);
+        }
+    }
+
+    for (uuid, slots) in &desired_viewers {
+        let previous = rendered.viewers.get(uuid);
+        for (slot, spec) in slots {
+            if previous.and_then(|p| p.get(slot)) != Some(spec) {
+                send_slot_to(server, Some(*uuid), *slot, spec);
             }
-        },
+        }
+    }
+
+    rendered.viewers = desired_viewers;
+}
+
+/// Re-sends all current slots (used when someone joins).
+fn resend_all(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>) {
+    let rendered = state.lock().unwrap();
+    for (slot, spec) in &rendered.global {
+        send_slot_broadcast(server, *slot, spec);
+    }
+    for uuid in rendered.viewers.keys() {
+        if let Some(player) = server.get_player_by_uuid(*uuid) {
+            let _ = player; // per-viewer content is re-sent below by the diff anyway
+        }
     }
 }
 
-fn effective_mut<'a>(state: &'a mut TabState, viewer: Option<Uuid>, slot: u8) -> Option<&'a mut SlotSpec> {
-    if let Some(uuid) = viewer
-        && let Some(map) = state.per_viewer.get_mut(&uuid)
-        && let Some(spec) = map.get_mut(&slot)
-    {
-        return Some(spec);
-    }
-    state.global.get_mut(&slot)
-}
+// ---------------------------------------------------------------------------
+// Packets
+// ---------------------------------------------------------------------------
 
-/// Recipients for a request: one player (per-viewer) or everyone (global).
-fn viewers(server: &Server, viewer: Option<Uuid>) -> Vec<Arc<ServerPlayer>> {
-    match viewer {
-        Some(uuid) => server
-            .get_player_by_uuid(uuid)
-            .map(|player| vec![player])
-            .unwrap_or_default(),
-        None => server.get_all_players(),
-    }
-}
-
-async fn send_full(server: &Arc<Server>, viewer: Option<Uuid>, slot: u8, spec: &SlotSpec) {
-    let flags = PlayerInfoFlags::ADD_PLAYER
-        | PlayerInfoFlags::UPDATE_LISTED
-        | PlayerInfoFlags::UPDATE_DISPLAY_NAME
-        | PlayerInfoFlags::UPDATE_LIST_PRIORITY;
-
+fn send_slot_broadcast(server: &Arc<Server>, slot: u8, spec: &SlotSpec) {
+    let name = spec.profile_name(slot);
     let text = TextComponent::from_legacy_string_with_code(&spec.text, '&');
-    let properties: Vec<Property> = spec
-        .skin
-        .iter()
-        .map(|skin| Property {
-            name: "textures".to_string(),
-            value: skin.value.clone(),
-            signature: skin.signature.clone(),
-        })
-        .collect();
-
+    let properties = properties(spec);
     let actions = vec![
         PlayerAction::AddPlayer {
-            name: &spec.name,
+            name: &name,
             properties: &properties,
         },
         PlayerAction::UpdateListed(true),
         PlayerAction::UpdateDisplayName(Some(&text)),
-        PlayerAction::UpdateListOrder(VarInt(spec.order)),
+        PlayerAction::UpdateListOrder(VarInt(spec.order(slot))),
     ];
     let players = [Player {
         uuid: entry_uuid(slot as usize),
         actions: &actions,
     }];
-    let packet = CPlayerInfoUpdate::new(flags.bits(), &players);
-
-    send_packet(server, viewer, &packet).await;
-}
-
-async fn send_text(server: &Arc<Server>, viewer: Option<Uuid>, slot: u8, spec: &SlotSpec) {
-    let text = TextComponent::from_legacy_string_with_code(&spec.text, '&');
-    let actions = vec![PlayerAction::UpdateDisplayName(Some(&text))];
-    let players = [Player {
-        uuid: entry_uuid(slot as usize),
-        actions: &actions,
-    }];
-    let packet = CPlayerInfoUpdate::new(PlayerInfoFlags::UPDATE_DISPLAY_NAME.bits(), &players);
-
-    send_packet(server, viewer, &packet).await;
-}
-
-async fn send_remove(server: &Arc<Server>, viewer: Option<Uuid>, slots: &[u8]) {
-    let uuids: Vec<Uuid> = slots.iter().map(|slot| entry_uuid(*slot as usize)).collect();
-    let packet = CRemovePlayerInfo { players: &uuids };
-    send_packet(server, viewer, &packet).await;
-}
-
-async fn send_packet<P: pumpkin_protocol::ClientPacket + Sync>(
-    server: &Arc<Server>,
-    viewer: Option<Uuid>,
-    packet: &P,
-) {
-    match viewer {
-        Some(_) => {
-            for player in viewers(server, viewer) {
-                player.send_client_packet(packet).await;
-            }
-        }
-        None => server.broadcast_packet_all(packet),
-    }
-}
-
-fn send_full_broadcast(server: &Arc<Server>, slot: u8, spec: &SlotSpec) {
     let flags = PlayerInfoFlags::ADD_PLAYER
         | PlayerInfoFlags::UPDATE_LISTED
         | PlayerInfoFlags::UPDATE_DISPLAY_NAME
         | PlayerInfoFlags::UPDATE_LIST_PRIORITY;
-
-    let text = TextComponent::from_legacy_string_with_code(&spec.text, '&');
-    let properties: Vec<Property> = spec
-        .skin
-        .iter()
-        .map(|skin| Property {
-            name: "textures".to_string(),
-            value: skin.value.clone(),
-            signature: skin.signature.clone(),
-        })
-        .collect();
-
-    let actions = vec![
-        PlayerAction::AddPlayer {
-            name: &spec.name,
-            properties: &properties,
-        },
-        PlayerAction::UpdateListed(true),
-        PlayerAction::UpdateDisplayName(Some(&text)),
-        PlayerAction::UpdateListOrder(VarInt(spec.order)),
-    ];
-    let players = [Player {
-        uuid: entry_uuid(slot as usize),
-        actions: &actions,
-    }];
     server.broadcast_packet_all(&CPlayerInfoUpdate::new(flags.bits(), &players));
 }
 
-/// Hides every real player from the tab list (`UpdateListed(false)`).
+fn send_slot_to(server: &Arc<Server>, viewer: Option<Uuid>, slot: u8, spec: &SlotSpec) {
+    let Some(uuid) = viewer else {
+        send_slot_broadcast(server, slot, spec);
+        return;
+    };
+    let Some(player) = server.get_player_by_uuid(uuid) else {
+        return;
+    };
+
+    let name = spec.profile_name(slot);
+    let text = TextComponent::from_legacy_string_with_code(&spec.text, '&');
+    let properties = properties(spec);
+    let actions = vec![
+        PlayerAction::AddPlayer {
+            name: &name,
+            properties: &properties,
+        },
+        PlayerAction::UpdateListed(true),
+        PlayerAction::UpdateDisplayName(Some(&text)),
+        PlayerAction::UpdateListOrder(VarInt(spec.order(slot))),
+    ];
+    let players = [Player {
+        uuid: entry_uuid(slot as usize),
+        actions: &actions,
+    }];
+    let flags = PlayerInfoFlags::ADD_PLAYER
+        | PlayerInfoFlags::UPDATE_LISTED
+        | PlayerInfoFlags::UPDATE_DISPLAY_NAME
+        | PlayerInfoFlags::UPDATE_LIST_PRIORITY;
+    let packet = CPlayerInfoUpdate::new(flags.bits(), &players);
+
+    let _ = crate::GLOBAL_RUNTIME.block_on(async move {
+        player.send_client_packet(&packet).await;
+    });
+}
+
+fn send_remove_broadcast(server: &Arc<Server>, slots: &[u8]) {
+    let uuids: Vec<Uuid> = slots.iter().map(|slot| entry_uuid(*slot as usize)).collect();
+    server.broadcast_packet_all(&CRemovePlayerInfo { players: &uuids });
+}
+
+fn send_remove_to(server: &Arc<Server>, viewer: Uuid, slots: &[u8]) {
+    let Some(player) = server.get_player_by_uuid(viewer) else {
+        return;
+    };
+    let uuids: Vec<Uuid> = slots.iter().map(|slot| entry_uuid(*slot as usize)).collect();
+    let packet = CRemovePlayerInfo { players: &uuids };
+    let _ = crate::GLOBAL_RUNTIME.block_on(async move {
+        player.send_client_packet(&packet).await;
+    });
+}
+
+fn properties(spec: &SlotSpec) -> Vec<Property> {
+    spec.skin
+        .iter()
+        .map(|skin| Property {
+            name: "textures".into(),
+            value: skin.value.clone().into(),
+            signature: skin.signature.clone().map(Into::into),
+        })
+        .collect()
+}
+
 fn hide_real_players(server: &Arc<Server>) {
     let real = server.get_all_players();
     if real.is_empty() {
@@ -420,24 +392,8 @@ fn entry_name(index: usize) -> String {
     format!("lz{index:02}")
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct TabConfig {
-    enabled: bool,
-    left: Vec<String>,
-    center: Vec<String>,
-    right: Vec<String>,
-    far_right: Vec<String>,
-}
-
-fn load_config() -> Option<TabConfig> {
-    let path = std::path::Path::new("plugins")
-        .join("data")
-        .join("lazarus")
-        .join("tab.toml");
-    toml::from_str(&std::fs::read_to_string(path).ok()?).ok()
-}
-
+/// Seeds the global slots from `tab.toml` when no state file exists yet.
+#[allow(dead_code)]
 fn column_lines(config: &TabConfig) -> Vec<String> {
     let mut flat: Vec<String> = Vec::with_capacity(SLOTS);
     for column in [&config.left, &config.center, &config.right, &config.far_right] {
@@ -448,14 +404,13 @@ fn column_lines(config: &TabConfig) -> Vec<String> {
     flat
 }
 
-/// The IPC context is not available inside `on_ipc_message`, so we stash the
-/// `Server` handle in a global when `on_load` runs.
-static SERVER: std::sync::OnceLock<Arc<Server>> = std::sync::OnceLock::new();
-
-fn server_from_context() -> Option<Arc<Server>> {
-    SERVER.get().cloned()
-}
-
-pub fn set_server(server: Arc<Server>) {
-    let _ = SERVER.set(server);
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+#[allow(dead_code)]
+struct TabConfig {
+    enabled: bool,
+    left: Vec<String>,
+    center: Vec<String>,
+    right: Vec<String>,
+    far_right: Vec<String>,
 }
