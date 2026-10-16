@@ -167,6 +167,20 @@ pub struct BardHoldable {
     pub duration: u32,
 }
 
+/// Bard clickable item: right-click applies `effect` (to allies or enemies).
+#[derive(Debug, Clone)]
+pub struct BardClickable {
+    pub material: String,
+    pub energy_needed: f64,
+    pub distance_sq: f64,
+    pub cooldown_ms: i64,
+    pub can_bard_himself: bool,
+    pub apply_to_enemy: bool,
+    pub chat_color: String,
+    pub effect: PassiveEffect,
+    pub duration: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct PassiveEffect {
     pub effect: StatusEffectType,
@@ -197,6 +211,10 @@ pub struct PvpClassManager {
     pub bard_holdables: Vec<BardHoldable>,
     /// Bard energy: uuid -> current (0..MAX_ENERGY).
     pub bard_energy: BTreeMap<String, f64>,
+    /// Bard clickable items.
+    pub bard_clickables: Vec<BardClickable>,
+    /// (uuid, material) -> cooldown expiry millis.
+    pub bard_cooldowns: BTreeMap<(String, String), i64>,
 }
 
 impl PvpClassManager {
@@ -235,6 +253,29 @@ impl PvpClassManager {
 
             if kind == ClassKind::Bard {
                 self.bard_holdables.clear();
+                for potion in raw.keys("BARD_CLASS.CLICKABLE_ITEMS") {
+                    let base = format!("BARD_CLASS.CLICKABLE_ITEMS.{potion}");
+                    let Some(effect) = effect_from_name(&potion) else { continue };
+                    let material = legacy_material(&raw.string(&format!("{base}.MATERIAL_ID")))
+                        .unwrap_or_default()
+                        .to_string();
+                    let distance = raw.int(&format!("{base}.DISTANCE")).max(0) as f64;
+                    self.bard_clickables.push(BardClickable {
+                        material,
+                        energy_needed: raw.int(&format!("{base}.ENERGY_NEEDED")).max(0) as f64,
+                        distance_sq: distance * distance,
+                        cooldown_ms: raw.int(&format!("{base}.COOLDOWN")).max(0) * 1000,
+                        can_bard_himself: raw.bool(&format!("{base}.CAN_BARD_HIMSELF")),
+                        apply_to_enemy: raw.bool(&format!("{base}.APPLY_TO_ENEMY")),
+                        chat_color: raw.string(&format!("{base}.CHAT_COLOR")),
+                        effect: PassiveEffect {
+                            effect,
+                            amplifier: (raw.int(&format!("{base}.LEVEL")).max(1) - 1) as u8,
+                        },
+                        duration: (raw.int(&format!("{base}.DURATION")).max(1) as u32) * 20,
+                    });
+                }
+
                 for potion in raw.keys("BARD_CLASS.HOLDABLE_ITEMS") {
                     let base = format!("BARD_CLASS.HOLDABLE_ITEMS.{potion}");
                     let Some(effect) = effect_from_name(&potion) else { continue };
@@ -292,9 +333,17 @@ impl PvpClassManager {
         server: &Server,
         factions: &crate::factions::FactionsManager,
         raw_config: &crate::yaml::ConfigFile,
+        pvp_protected: bool,
+        in_safezone: bool,
     ) {
         let uuid = crate::core::uuid_of(player);
         if self.active.get(&uuid) != Some(&ClassKind::Bard) {
+            return;
+        }
+
+        // `canBard` for holdables: not under pvp protection, not in the safezone.
+        // NOTE: combat tag is intentionally allowed.
+        if pvp_protected || in_safezone {
             return;
         }
 
@@ -654,4 +703,138 @@ pub fn miner_diamond(player: &Player, server: &Server) {
             crate::core::send(&online, &message);
         }
     }
+}
+
+/// Handles a Bard clickable (right-click with the configured item). Acquires the
+/// state lock itself (called from the interact listener, which holds no lock).
+pub fn bard_click(server: &Server, player: &Player) {
+    let uuid = crate::core::uuid_of(player);
+    let location = crate::core::location(player);
+
+    // Active Bard, and `canBard` (staff/pvp-prot/safezone) — combat tag IS allowed.
+    {
+        let guard = state().read().unwrap();
+        if guard.classes.active.get(&uuid) != Some(&ClassKind::Bard) {
+            return;
+        }
+        if guard
+            .timers
+            .is_active(&uuid, crate::timers::TimerType::PvpProtection)
+        {
+            return;
+        }
+        if matches!(
+            crate::core::territory_at_guard(&guard, &location.world, location.block_x(), location.block_z()),
+            crate::core::Territory::Safezone
+        ) {
+            return;
+        }
+    }
+
+    let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
+        return;
+    };
+    let key = item
+        .get_registry_key()
+        .trim_start_matches("minecraft:")
+        .to_string();
+
+    let (clickable, faction_members, energy, now) = {
+        let guard = state().read().unwrap();
+        let Some(clickable) = guard
+            .classes
+            .bard_clickables
+            .iter()
+            .find(|c| c.material.trim_start_matches("minecraft:") == key)
+            .cloned()
+        else {
+            return;
+        };
+        let faction_members: std::collections::BTreeSet<String> = guard
+            .factions
+            .by_member(&uuid)
+            .map(|f| f.members.keys().cloned().collect())
+            .unwrap_or_default();
+        let energy = guard.classes.bard_energy.get(&uuid).copied().unwrap_or(0.0);
+        (clickable, faction_members, energy, util::now_millis())
+    };
+
+    if energy < clickable.energy_needed {
+        return;
+    }
+    {
+        let guard = state().read().unwrap();
+        if guard
+            .classes
+            .bard_cooldowns
+            .get(&(uuid.clone(), clickable.material.clone()))
+            .is_some_and(|expiry| *expiry > now)
+        {
+            return;
+        }
+    }
+
+    for online in server.get_all_players() {
+        let member_uuid = crate::core::uuid_of(&online);
+        let is_self = member_uuid == uuid;
+        let same_faction = faction_members.contains(&member_uuid);
+
+        let enabled = if clickable.apply_to_enemy {
+            !is_self && !same_faction
+        } else {
+            same_faction || (is_self && clickable.can_bard_himself)
+        };
+        if !enabled {
+            continue;
+        }
+
+        let target = crate::core::location(&online);
+        if target.world != location.world {
+            continue;
+        }
+        let dx = target.x - location.x;
+        let dy = target.y - location.y;
+        let dz = target.z - location.z;
+        if dx * dx + dy * dy + dz * dz > clickable.distance_sq {
+            continue;
+        }
+
+        online.add_effect(StatusEffectInstance {
+            effect_type: clickable.effect.effect,
+            duration: clickable.duration,
+            amplifier: clickable.effect.amplifier,
+            ambient: false,
+            show_particles: true,
+            show_icon: true,
+        });
+
+        if clickable.apply_to_enemy && !is_self {
+            core::send(
+                &online,
+                &format!(
+                    "{}{}",
+                    language_prefix(),
+                    util::replace(
+                        &state().read().unwrap().raw.language.string("BARD_CLICKABLE_MESSAGE_OTHERS"),
+                        "<effect>",
+                        &format!("{}{}", clickable.chat_color, clickable.material),
+                    )
+                ),
+            );
+        }
+    }
+
+    // Pay the cost and start the cooldown.
+    let mut guard = state().write().unwrap();
+    if let Some(current) = guard.classes.bard_energy.get_mut(&uuid) {
+        *current = (*current - clickable.energy_needed).max(0.0);
+    }
+    guard
+        .classes
+        .bard_cooldowns
+        .insert((uuid, clickable.material.clone()), now + clickable.cooldown_ms);
+}
+
+fn language_prefix() -> String {
+    state().read().unwrap().raw.language.string("PREFIX")
 }

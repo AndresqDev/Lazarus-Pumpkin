@@ -48,6 +48,15 @@ impl EventHandler<PlayerInteractEvent> for InteractListener {
         let action = event.action;
         let clicked = event.clicked_pos.clone();
 
+        // Bard clickables (right click), before the selection early-return.
+        if matches!(
+            action,
+            InteractAction::RightClickBlock | InteractAction::RightClickAir
+        ) && !is_duplicate(&format!("bard:{uuid}:{clicked:?}"))
+        {
+            crate::classes::bard_click(&server, &event.player);
+        }
+
         let (has_selection, holds_wand) = {
             let guard = state().read().unwrap();
             (

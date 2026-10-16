@@ -98,19 +98,49 @@ fn tick(server: &Server) {
         tab::update(&player, server);
     }
 
-    // PvP classes: per-tick armour check + finish warmups.
+    // PvP classes: per-tick armour check + Bard holdables/clickable energy.
     {
         let mut guard = state().write().unwrap();
+        let players = server.get_all_players();
+
+        // Precompute the per-player flags (avoids borrowing fields twice).
+        let flags: Vec<(bool, bool)> = players
+            .iter()
+            .map(|player| {
+                let uuid = crate::core::uuid_of(player);
+                let location = crate::core::location(player);
+                (
+                    guard
+                        .timers
+                        .is_active(&uuid, crate::timers::TimerType::PvpProtection),
+                    matches!(
+                        crate::core::territory_at_guard(
+                            &guard,
+                            &location.world,
+                            location.block_x(),
+                            location.block_z()
+                        ),
+                        crate::core::Territory::Safezone
+                    ),
+                )
+            })
+            .collect();
+
         let crate::state::AppState { classes, raw, factions, .. } = &mut *guard;
-        for player in server.get_all_players() {
-            let uuid = crate::core::uuid_of(&player);
+        for (player, (pvp_protected, in_safezone)) in players.iter().zip(flags) {
+            let uuid = crate::core::uuid_of(player);
             let faction_id = factions.by_member(&uuid).map(|f| f.id.clone());
-            classes.tick_player(&player, &server, &raw.language, &raw.config, faction_id.as_deref());
+            classes.tick_player(player, &server, &raw.language, &raw.config, faction_id.as_deref());
+            classes.bard_tick(
+                player,
+                &server,
+                factions,
+                &raw.config,
+                pvp_protected,
+                in_safezone,
+            );
         }
         classes.tick_warmups(&server, &raw.language, &raw.config, factions);
-        for player in server.get_all_players() {
-            classes.bard_tick(&player, &server, factions, &raw.config);
-        }
     }
 
     // Persist the tab state file once per tick (the native plugin diffs it).
