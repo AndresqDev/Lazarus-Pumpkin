@@ -63,3 +63,21 @@ pub fn apply_on_death(player: &Player) -> Option<String> {
     let time = util::format_duration(config.default_ban_time as i64 * 60 * 1000);
     Some(util::replace(&lang.deathban_message, "<time>", &time))
 }
+
+/// Whether the player's deathban is still active.
+pub fn is_death_banned(uuid: &str) -> bool {
+    state()
+        .read()
+        .unwrap()
+        .userdata
+        .get(uuid)
+        .map(|user| user.is_deathbanned())
+        .unwrap_or(false)
+}
+
+/// Clears a player's deathban (`/f livesrevive`).
+pub fn revive_player(uuid: &str) {
+    if let Some(user) = state().write().unwrap().userdata.get_mut(uuid) {
+        user.revive();
+    }
+}

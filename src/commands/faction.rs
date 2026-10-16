@@ -84,6 +84,10 @@ enum Action {
     RemoveRally,
     Focus,
     Unfocus,
+    Lives,
+    LivesDeposit,
+    LivesWithdraw,
+    LivesRevive,
     AdminSetPoints,
     AdminSetBalance,
     AdminSetLives,
@@ -283,7 +287,15 @@ pub fn register(context: &Context) -> Result<(), String> {
         .then(CommandNode::literal("setrally").execute(FactionExecutor(Action::Rally)))
         .then(CommandNode::literal("removerally").execute(FactionExecutor(Action::RemoveRally)))
         .then(CommandNode::literal("focus").then(str_node("faction").execute(FactionExecutor(Action::Focus))))
-        .then(CommandNode::literal("unfocus").execute(FactionExecutor(Action::Unfocus)));
+        .then(CommandNode::literal("unfocus").execute(FactionExecutor(Action::Unfocus)))
+        .then(CommandNode::literal("lives").then(str_node("faction").execute(FactionExecutor(Action::Lives))))
+        .then(CommandNode::literal("lives").execute(FactionExecutor(Action::Lives)))
+        .then(CommandNode::literal("livesdeposit").then(str_node("amount").execute(FactionExecutor(Action::LivesDeposit))))
+        .then(CommandNode::literal("depositlives").then(str_node("amount").execute(FactionExecutor(Action::LivesDeposit))))
+        .then(CommandNode::literal("liveswithdraw").then(str_node("amount").execute(FactionExecutor(Action::LivesWithdraw))))
+        .then(CommandNode::literal("withdrawlives").then(str_node("amount").execute(FactionExecutor(Action::LivesWithdraw))))
+        .then(CommandNode::literal("livesrevive").then(str_node("player").execute(FactionExecutor(Action::LivesRevive))))
+        .then(CommandNode::literal("revive").then(str_node("player").execute(FactionExecutor(Action::LivesRevive))));
 
     context.register_command(root, "lazarus:command.faction");
     Ok(())
@@ -364,6 +376,10 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::RemoveRally => remove_rally(sender, server, &player, &uuid),
         Action::Focus => focus(sender, server, &uuid, args),
         Action::Unfocus => unfocus(sender, server, &uuid),
+        Action::Lives => lives(sender, args),
+        Action::LivesDeposit => lives_transfer(sender, server, &uuid, args, true),
+        Action::LivesWithdraw => lives_transfer(sender, server, &uuid, args, false),
+        Action::LivesRevive => lives_revive(sender, server, &uuid, args),
         Action::AdminSetPoints => admin_set_int(sender, server, args, AdminField::Points),
         Action::AdminSetBalance => admin_set_int(sender, server, args, AdminField::Balance),
         Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
@@ -2890,6 +2906,232 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
         }
         return;
     }
+}
+
+fn lives(sender: &CommandSender, args: &ConsumedArgs) {
+    let guard = state().read().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+
+    match string_arg(args, "faction") {
+        None => {
+            let Some(player) = sender.as_player() else {
+                return;
+            };
+            let uuid = core::uuid_of(&player);
+            let Some(id) = guard.factions.by_member(&uuid).map(|f| f.id.clone()) else {
+                let msg = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
+                drop(guard);
+                return reply(sender, format!("{prefix}{msg}"));
+            };
+            let amount = guard.factions.get(&id).map(|f| f.lives).unwrap_or(0);
+            let msg = util::replace(
+                &guard.raw.language.string("FACTIONS.LIVES_COMMAND.LIVES_SELF"),
+                "<amount>",
+                &amount.to_string(),
+            );
+            drop(guard);
+            reply(sender, format!("{prefix}{msg}"));
+        }
+        Some(name) => {
+            let Some(faction) = guard.factions.by_name(&name).filter(|f| f.is_player()) else {
+                let msg = util::replace(
+                    &guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST"),
+                    "<argument>",
+                    &name,
+                );
+                drop(guard);
+                return reply(sender, format!("{prefix}{msg}"));
+            };
+            let display = format!("{}{}", faction.color, faction.name);
+            let msg = util::replace_all(
+                &guard.raw.language.string("FACTIONS.LIVES_COMMAND.LIVES_OTHERS"),
+                &[("<faction>", &display), ("<amount>", &faction.lives.to_string())],
+            );
+            drop(guard);
+            reply(sender, format!("{prefix}{msg}"));
+        }
+    }
+}
+
+fn lives_transfer(
+    sender: &CommandSender,
+    server: &Server,
+    uuid: &str,
+    args: &ConsumedArgs,
+    deposit: bool,
+) {
+    let _ = server;
+    let Some(player) = sender.as_player() else {
+        return;
+    };
+
+    let mut guard = state().write().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+    let not_in = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
+    let no_perm_tpl = guard.raw.language.string("FACTIONS.NO_PERMISSION");
+
+    let (usage_key, not_enough_key, template_key) = if deposit {
+        (
+            "FACTIONS.LIVES_DEPOSIT_COMMAND.USAGE",
+            "FACTIONS.LIVES_DEPOSIT_COMMAND.NOT_ENOUGH_LIVES",
+            "FACTIONS.LIVES_DEPOSIT_COMMAND.DEPOSITED",
+        )
+    } else {
+        (
+            "FACTIONS.LIVES_WITHDRAW_COMMAND.USAGE",
+            "FACTIONS.LIVES_WITHDRAW_COMMAND.NOT_ENOUGH_LIVES",
+            "FACTIONS.LIVES_WITHDRAW_COMMAND.WITHDRAWN",
+        )
+    };
+
+    let Some(amount) = string_arg(args, "amount").and_then(|a| a.trim().parse::<i64>().ok()) else {
+        let usage = guard.raw.language.string(usage_key);
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
+    };
+    let amount = amount.abs() as i32;
+
+    let Some(id) = guard.factions.by_member(uuid).map(|f| f.id.clone()) else {
+        drop(guard);
+        return reply(sender, format!("{prefix}{not_in}"));
+    };
+
+    if !deposit {
+        let role = guard.factions.get(&id).and_then(|f| f.member(uuid)).map(|m| m.role);
+        if role.map(|r| r.is_at_least(Role::Captain)) != Some(true) {
+            let msg = util::replace(&no_perm_tpl, "<role>", Role::Captain.name());
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        }
+    }
+
+    let user_lives = guard.userdata.get(uuid).map(|u| u.lives).unwrap_or(0);
+    let faction_lives = guard.factions.get(&id).map(|f| f.lives).unwrap_or(0);
+
+    if deposit && user_lives < amount {
+        let msg = util::replace(
+            &guard.raw.language.string(not_enough_key),
+            "<amount>",
+            &user_lives.to_string(),
+        );
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    }
+    if !deposit && faction_lives < amount {
+        let msg = guard.raw.language.string(not_enough_key);
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    }
+
+    if deposit {
+        if let Some(user) = guard.userdata.get_mut(uuid) {
+            user.lives -= amount;
+        }
+        if let Some(faction) = guard.factions.get_mut(&id) {
+            faction.lives += amount;
+        }
+    } else {
+        if let Some(faction) = guard.factions.get_mut(&id) {
+            faction.lives -= amount;
+        }
+        if let Some(user) = guard.userdata.get_mut(uuid) {
+            user.lives += amount;
+        }
+    }
+
+    let name = core::name_of(&player);
+    let message = format!(
+        "{prefix}{}",
+        util::replace_all(
+            &guard.raw.language.string(template_key),
+            &[("<player>", &name), ("<amount>", &amount.to_string())],
+        )
+    );
+    broadcast_to_faction(server, &guard, &id, &message);
+    drop(guard);
+}
+
+fn lives_revive(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs) {
+    let Some(player) = sender.as_player() else {
+        return;
+    };
+
+    let mut guard = state().write().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+    let not_in = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
+    let no_perm_tpl = guard.raw.language.string("FACTIONS.NO_PERMISSION");
+
+    let Some(target_name) = string_arg(args, "player") else {
+        let usage = guard
+            .raw
+            .language
+            .string("FACTIONS.LIVES_REVIVE_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
+    };
+
+    let Some(id) = guard.factions.by_member(uuid).map(|f| f.id.clone()) else {
+        drop(guard);
+        return reply(sender, format!("{prefix}{not_in}"));
+    };
+    let role = guard.factions.get(&id).and_then(|f| f.member(uuid)).map(|m| m.role);
+    if role.map(|r| r.is_at_least(Role::Captain)) != Some(true) {
+        let msg = util::replace(&no_perm_tpl, "<role>", Role::Captain.name());
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    }
+
+    let Some(target_uuid) = guard.factions.get(&id).and_then(|f| {
+        f.members
+            .values()
+            .find(|m| m.name.eq_ignore_ascii_case(&target_name))
+            .map(|m| m.uuid.clone())
+    }) else {
+        let msg = util::replace(
+            &guard.raw.language.string("FACTIONS.NOT_IN_FACTION_OTHERS"),
+            "<player>",
+            &target_name,
+        );
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    };
+
+    if !crate::deathban::is_death_banned(&target_uuid) {
+        let msg = util::replace(
+            &guard
+                .raw
+                .language
+                .string("FACTIONS.LIVES_REVIVE_COMMAND.NOT_DEATHBANNED"),
+            "<target>",
+            &target_name,
+        );
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    }
+
+    if guard.factions.get(&id).map(|f| f.lives).unwrap_or(0) <= 0 {
+        let msg = guard
+            .raw
+            .language
+            .string("FACTIONS.LIVES_REVIVE_COMMAND.NOT_ENOUGH_LIVES");
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    }
+
+    if let Some(faction) = guard.factions.get_mut(&id) {
+        faction.lives -= 1;
+    }
+    crate::deathban::revive_player(&target_uuid);
+
+    let message = format!(
+        "{prefix}{}",
+        util::replace_all(
+            &guard.raw.language.string("FACTIONS.LIVES_REVIVE_COMMAND.REVIVED"),
+            &[("<player>", &core::name_of(&player)), ("<target>", &target_name)],
+        )
+    );
+    broadcast_to_faction(server, &guard, &id, &message);
+    drop(guard);
 }
 
 fn broadcast_to_faction(server: &Server, guard: &crate::state::AppState, id: &str, message: &str) {
