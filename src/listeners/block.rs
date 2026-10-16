@@ -7,6 +7,7 @@
 //! * safezones deny everyone.
 
 use pumpkin_plugin_api::events::{BlockBreakEvent, BlockPlaceEvent, EventData, EventHandler};
+use pumpkin_plugin_api::common::BlockPos;
 use pumpkin_plugin_api::{Player, Server};
 
 use crate::core::{self, Territory};
@@ -231,56 +232,58 @@ impl EventHandler<pumpkin_plugin_api::events::BlockFromToEvent> for BlockFromToL
         server: Server,
         mut event: EventData<pumpkin_plugin_api::events::BlockFromToEvent>,
     ) -> EventData<pumpkin_plugin_api::events::BlockFromToEvent> {
-        if state()
-            .read()
-            .unwrap()
-            .raw
-            .config
-            .bool("FACTION_CLAIM.LIQUID_FLOW_FROM_WILDERNESS_TO_CLAIMS")
-        {
-            // Config allows wilderness/warzone -> claim, but flowing *out of* a
-            // claim (or from one claim into another) is still blocked below.
-        }
+        // Pumpkin fires this event with `from_pos == to_pos == destination` and no
+        // world, so we use the destination and infer the source from a liquid
+        // neighbour (and the world from that neighbour).
+        let pos = event.to_pos;
+        let neighbours = [
+            (pos.x + 1, pos.y, pos.z),
+            (pos.x - 1, pos.y, pos.z),
+            (pos.x, pos.y, pos.z + 1),
+            (pos.x, pos.y, pos.z - 1),
+            (pos.x, pos.y + 1, pos.z),
+            (pos.x, pos.y - 1, pos.z),
+        ];
 
-        let from_pos = event.from_pos;
-        let to_pos = event.to_pos;
-
-        let Some(world) = server
-            .get_all_worlds()
-            .into_iter()
-            .find(|world| world.get_block_state(from_pos).is_liquid)
-        else {
+        let Some(world) = server.get_all_worlds().into_iter().find(|world| {
+            neighbours.iter().any(|(x, y, z)| {
+                world
+                    .get_block_state(BlockPos { x: *x, y: *y, z: *z })
+                    .is_liquid
+            })
+        }) else {
             return event;
         };
 
         let world_name = world.get_name();
         let blocked = {
             let guard = state().read().unwrap();
-            let allow_wild_to_claim = guard
+            let allow = guard
                 .raw
                 .config
                 .bool("FACTION_CLAIM.LIQUID_FLOW_FROM_WILDERNESS_TO_CLAIMS");
-
-            let from = core::territory_at_guard(&guard, &world_name, from_pos.x, from_pos.z);
-            let to = core::territory_at_guard(&guard, &world_name, to_pos.x, to_pos.z);
-
             let is_claim = |t: &core::Territory| {
                 matches!(t, core::Territory::Faction(_) | core::Territory::Safezone)
             };
-            let is_wild = |t: &core::Territory| {
-                matches!(t, core::Territory::Wilderness | core::Territory::Warzone)
-            };
 
-            if from == to {
-                // Same territory (same claim, or wilderness->wilderness, …).
-                false
-            } else if is_claim(&from) || is_claim(&to) {
-                // Crossing a claim boundary in either direction is blocked, except
-                // wilderness/warzone -> claim when the config explicitly allows it.
-                !(allow_wild_to_claim && is_wild(&from) && is_claim(&to))
-            } else {
-                // wilderness <-> warzone: allowed (no claim involved).
-                false
+            let destination = core::territory_at_guard(&guard, &world_name, pos.x, pos.z);
+
+            let mut source = None;
+            for (x, y, z) in neighbours {
+                if world.get_block_state(BlockPos { x, y, z }).is_liquid {
+                    source = Some(core::territory_at_guard(&guard, &world_name, x, z));
+                    break;
+                }
+            }
+
+            match source {
+                Some(source) if source != destination => {
+                    let enters = is_claim(&destination) && !is_claim(&source);
+                    let leaves = is_claim(&source) && !is_claim(&destination);
+                    let between = is_claim(&source) && is_claim(&destination);
+                    (enters && !allow) || leaves || between
+                }
+                _ => false,
             }
         };
 
