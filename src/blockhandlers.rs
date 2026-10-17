@@ -2,25 +2,26 @@
 //!
 //! Covered here: auto smelt (`AutoSmeltHandler`), the cobweb remover
 //! (`CobwebRemoveHandler`), disabled block placement (`DisabledBlocksHandler`),
-//! the found-ore announcements (`FoundOreHandler`) and subclaims
-//! (`SubclaimHandler`). The crowbar (`CrowbarHandler`) belongs to the same
-//! original package and follows in this module.
+//! the found-ore announcements (`FoundOreHandler`), subclaims
+//! (`SubclaimHandler`) and the crowbar (`CrowbarHandler`).
 
 use std::collections::BTreeSet;
 
 use pumpkin_plugin_api::block_entity::BlockEntityType;
 use pumpkin_plugin_api::common::{BlockPos, GameMode, Hand};
+use pumpkin_plugin_api::data_components::DataComponent;
 use pumpkin_plugin_api::enchantments_wit::Enchantment;
 use pumpkin_plugin_api::events::{
     BlockBreakEvent, BlockDropItemEvent, BlockPlaceEvent, EventData, EventHandler,
     HopperInventorySearchEvent, InteractAction, PlayerInteractEvent, SignChangeEvent,
 };
 use pumpkin_plugin_api::permission::PermissionLevel;
+use pumpkin_plugin_api::wit::pumpkin::plugin::sounds::SoundCategory;
 use pumpkin_plugin_api::world::BlockFlags;
 use pumpkin_plugin_api::{ItemStack, Player, Server, World};
 
 use crate::core::{self, Territory};
-use crate::factions::types::Role;
+use crate::factions::types::{FactionKind, Role};
 use crate::state::state;
 use crate::util;
 
@@ -98,6 +99,41 @@ fn give_to_inventory(player: &Player, key: &str) -> bool {
             .map_or(true, |item| item.get_count() == 0);
         if empty {
             player.set_inventory_item(slot, Some(ItemStack::new(key, 1)));
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Like [`give_to_inventory`], but for an item that already carries metadata (a
+/// crowbar, an extracted spawner): the free-slot scan comes first so two
+/// differently named spawners never merge into one stack; a same-key stack is
+/// only used when the inventory is full, to avoid destroying the item.
+pub(crate) fn give_stack_to_inventory(player: &Player, stack: ItemStack) -> bool {
+    let key = stack.get_registry_key();
+    let mut stack = Some(stack);
+
+    for slot in 0..=35u8 {
+        let empty = player
+            .get_inventory_item(slot)
+            .map_or(true, |item| item.get_count() == 0);
+        if empty {
+            player.set_inventory_item(slot, stack.take());
+            return true;
+        }
+    }
+
+    let Some(stack) = stack else {
+        return false;
+    };
+
+    for slot in 0..=35u8 {
+        if let Some(item) = player.get_inventory_item(slot)
+            && item.get_registry_key() == key
+        {
+            item.set_count(item.get_count() + stack.get_count());
+            player.set_inventory_item(slot, Some(item));
             return true;
         }
     }
@@ -1175,3 +1211,491 @@ impl EventHandler<HopperInventorySearchEvent> for SubclaimHopperListener {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Crowbar (`CrowbarHandler`).
+// ---------------------------------------------------------------------------
+
+/// `Config.CROWBAR_MATERIAL_ID` (`"294:0"` → golden hoe). Registry keys pass
+/// through; unresolvable entries fall back to the default crowbar material.
+fn crowbar_item_key() -> String {
+    let entry = state()
+        .read()
+        .unwrap()
+        .raw
+        .config
+        .string("CROWBAR.MATERIAL_ID");
+
+    resolve_item_key(&entry).unwrap_or_else(|| "minecraft:golden_hoe".to_string())
+}
+
+/// Minimal 1.8 item-id table for `CROWBAR.MATERIAL_ID`-style configs; see
+/// [`legacy_block_key`] for the rationale.
+fn legacy_item_key(id: u32) -> Option<&'static str> {
+    Some(match id {
+        280 => "minecraft:stick",
+        294 => "minecraft:golden_hoe",
+        339 => "minecraft:paper",
+        346 => "minecraft:fishing_rod",
+        352 => "minecraft:bone",
+        369 => "minecraft:blaze_rod",
+        _ => return None,
+    })
+}
+
+/// Legacy 1.8 `id:meta` to a modern registry key (`resolve_block_key` for
+/// items).
+fn resolve_item_key(entry: &str) -> Option<String> {
+    let entry = entry.trim();
+    if entry.is_empty() {
+        return None;
+    }
+
+    if let Some((id, _)) = entry.split_once(':')
+        && let Ok(id) = id.parse::<u32>()
+    {
+        return legacy_item_key(id).map(str::to_string);
+    }
+
+    if entry.contains(':') {
+        Some(entry.to_string())
+    } else {
+        Some(format!("minecraft:{entry}"))
+    }
+}
+
+/// `Config.CROWBAR_NAME`.
+fn crowbar_name() -> String {
+    let name = state().read().unwrap().raw.config.string("CROWBAR.NAME");
+
+    if name.is_empty() {
+        "&3&lCrowbar".to_string()
+    } else {
+        name
+    }
+}
+
+/// `Config.CROWBAR_LORE` (the defaults are the original config's lines).
+fn crowbar_lore() -> Vec<String> {
+    let lore = state()
+        .read()
+        .unwrap()
+        .raw
+        .config
+        .string_list("CROWBAR.LORE");
+
+    if lore.is_empty() {
+        vec![
+            "&5Spawners: &a{&c<scount>&a}".to_string(),
+            "&5Portals: &a{&c<pcount>&a}".to_string(),
+        ]
+    } else {
+        lore
+    }
+}
+
+/// `Config.CROWBAR_SPAWNER_USES` / `Config.CROWBAR_PORTAL_USES`.
+fn crowbar_use_defaults() -> (i64, i64) {
+    let guard = state().read().unwrap();
+
+    (
+        guard.raw.config.int("CROWBAR.SPAWNER_USES").max(0),
+        guard.raw.config.int("CROWBAR.PORTAL_USES").max(0),
+    )
+}
+
+/// `Config.CROWBAR_SPAWNER_NAME_COLOR`.
+fn crowbar_spawner_name_color() -> String {
+    state()
+        .read()
+        .unwrap()
+        .raw
+        .config
+        .string("CROWBAR.SPAWNER_NAME_COLOR")
+}
+
+/// `Config.CROWBAR_DISABLE_IN_WARZONE`.
+fn crowbar_disable_in_warzone() -> bool {
+    state()
+        .read()
+        .unwrap()
+        .raw
+        .config
+        .bool("CROWBAR.DISABLE_IN_WARZONE")
+}
+
+/// `CrowbarHandler#getNewCrowbar`.
+pub(crate) fn new_crowbar() -> ItemStack {
+    let item = ItemStack::new(&crowbar_item_key(), 1);
+    let (spawner_uses, portal_uses) = crowbar_use_defaults();
+    crowbar_update_meta(&item, spawner_uses, portal_uses);
+    item
+}
+
+/// `CrowbarHandler#updateCrowbarMeta`.
+fn crowbar_update_meta(item: &ItemStack, spawner_uses: i64, portal_uses: i64) {
+    item.set_custom_name(Some(util::text(crowbar_name())));
+
+    let lore = crowbar_lore()
+        .iter()
+        .map(|line| {
+            let line = util::replace(line, "<scount>", &spawner_uses.to_string());
+            util::text(util::replace(&line, "<pcount>", &portal_uses.to_string()))
+        })
+        .collect();
+
+    item.set_lore(lore);
+}
+
+/// `CrowbarHandler#isCrowbar`. The original compared the fully colored legacy
+/// display name (`"§3§lCrowbar"`); comparing component JSON keeps the same
+/// property (a plainly renamed hoe is not a crowbar) without building the
+/// legacy string.
+fn is_crowbar(item: &ItemStack) -> bool {
+    if item.get_registry_key() != crowbar_item_key() {
+        return false;
+    }
+
+    let expected = util::text(crowbar_name());
+    item.get_custom_name()
+        .is_some_and(|name| name.to_json() == expected.to_json())
+}
+
+/// `CrowbarHandler#getUses`: the last number of the given lore line.
+fn crowbar_uses(item: &ItemStack) -> (i64, i64) {
+    let lore = item.get_lore();
+    let uses = |index: usize| {
+        lore.get(index)
+            .map_or(0, |line| last_number(&component_text(&line.to_json())))
+    };
+
+    (uses(0), uses(1))
+}
+
+/// The last decimal run of `text` (the original matcher loop), 0 when absent.
+fn last_number(text: &str) -> i64 {
+    let mut current: Option<i64> = None;
+    let mut last = 0i64;
+
+    for character in text.chars() {
+        if let Some(digit) = character.to_digit(10) {
+            current = Some(
+                current
+                    .unwrap_or(0)
+                    .saturating_mul(10)
+                    .saturating_add(digit as i64),
+            );
+        } else if let Some(value) = current.take() {
+            last = value;
+        }
+    }
+
+    current.unwrap_or(last)
+}
+
+/// `Language.PREFIX + Language.CROWBAR_*`.
+fn crowbar_send(player: &Player, key: &str) {
+    let message = {
+        let guard = state().read().unwrap();
+        format!(
+            "{}{}",
+            guard.raw.language.string("PREFIX"),
+            guard.raw.language.string(key)
+        )
+    };
+
+    core::send(player, message);
+}
+
+/// `factionAt instanceof SystemFaction` mapped to the port's faction kinds:
+/// safezones (`SpawnFaction`), roads and the generic admin factions.
+fn is_system_territory(territory: &Territory) -> bool {
+    match territory {
+        Territory::Safezone => true,
+        Territory::Faction(owner_id) => {
+            let guard = state().read().unwrap();
+            guard.factions.get(owner_id).is_some_and(|faction| {
+                matches!(faction.kind, FactionKind::Road | FactionKind::System)
+            })
+        }
+        _ => false,
+    }
+}
+
+/// `factionAt instanceof PlayerFaction && factionAt != playerFaction &&
+/// !factionAt.isRaidable()`.
+fn is_foreign_claim(territory: &Territory, player: &Player) -> bool {
+    let Territory::Faction(owner_id) = territory else {
+        return false;
+    };
+
+    if core::faction_id_of(&core::uuid_of(player)).as_deref() == Some(owner_id.as_str()) {
+        return false;
+    }
+
+    let guard = state().read().unwrap();
+    match guard.factions.get(owner_id) {
+        Some(faction) => !faction.is_raidable(),
+        None => false,
+    }
+}
+
+/// 1.8 `EntityType#name()` (`"PIG"`) from the modern id (`"minecraft:pig"`).
+fn mob_display(mob: &str) -> String {
+    mob.strip_prefix("minecraft:")
+        .unwrap_or(mob)
+        .to_ascii_uppercase()
+}
+
+/// `Effect.STEP_SOUND`: the block break sound. The 1.8 particle burst is
+/// skipped: the host's particle API carries no block state to feed it.
+fn crowbar_break_effect(world: &World, pos: BlockPos) {
+    world.play_custom_sound(
+        "minecraft:block.stone.break",
+        SoundCategory::Blocks,
+        (
+            pos.x as f64 + 0.5,
+            pos.y as f64 + 0.5,
+            pos.z as f64 + 0.5,
+        ),
+        1.0,
+        1.0,
+    );
+}
+
+/// Port of `CrowbarHandler#onPlayerInteract`. Registered after the territory
+/// listener (`ignoreCancelled = true` in the original: a denied use wins).
+pub struct CrowbarInteractListener;
+
+impl EventHandler<PlayerInteractEvent> for CrowbarInteractListener {
+    fn handle(
+        &self,
+        _server: Server,
+        mut event: EventData<PlayerInteractEvent>,
+    ) -> EventData<PlayerInteractEvent> {
+        if event.cancelled
+            || !matches!(
+                event.action,
+                InteractAction::LeftClickBlock | InteractAction::RightClickBlock
+            )
+        {
+            return event;
+        }
+
+        let Some(pos) = event.clicked_pos.clone() else {
+            return event;
+        };
+
+        let player = &event.player;
+        let Some(item) = player.get_item_in_hand(Hand::Right) else {
+            return event;
+        };
+
+        if !is_crowbar(&item) {
+            return event;
+        }
+
+        if event.block != "minecraft:spawner" && event.block != "minecraft:end_portal_frame" {
+            // `GRASS`/`DIRT`: cancel so the hoe never tills the ground.
+            if event.block == "minecraft:grass_block" || event.block == "minecraft:dirt" {
+                event.cancelled = true;
+            }
+
+            return event;
+        }
+
+        event.cancelled = true;
+
+        let world = player.get_world();
+        let world_name = world.get_name();
+
+        match core::dimension_of(&world_name) {
+            core::Dimension::Nether => {
+                crowbar_send(player, "CROWBAR.DENY_USAGE_NETHER");
+                return event;
+            }
+            core::Dimension::End => {
+                crowbar_send(player, "CROWBAR.DENY_USAGE_END");
+                return event;
+            }
+            core::Dimension::Overworld => {}
+        }
+
+        let territory = core::territory_at(&world_name, pos.x, pos.z);
+
+        if crowbar_disable_in_warzone() && matches!(territory, Territory::Warzone) {
+            crowbar_send(player, "CROWBAR.DENY_USAGE_WARZONE");
+            return event;
+        }
+
+        // System factions and foreign non-raidable claims share the block
+        // protection message (`FACTION_PREFIX + deny interact`).
+        if is_system_territory(&territory) || is_foreign_claim(&territory, player) {
+            let prefix = state()
+                .read()
+                .unwrap()
+                .raw
+                .language
+                .string("FACTION_PREFIX");
+            let message =
+                crate::listeners::block::deny_message(player, &world_name, pos.x, pos.z, true);
+            core::send(player, format!("{prefix}{message}"));
+            return event;
+        }
+
+        if event.block == "minecraft:spawner" {
+            crowbar_break_spawner(player, &world, pos, item);
+        } else {
+            crowbar_break_portal_frame(player, &world, pos, item);
+        }
+
+        event
+    }
+}
+
+/// Port of the mob spawner branch of `CrowbarHandler#onPlayerInteract`.
+fn crowbar_break_spawner(player: &Player, world: &World, pos: BlockPos, item: ItemStack) {
+    let (spawner_uses, portal_uses) = crowbar_uses(&item);
+
+    if spawner_uses <= 0 {
+        crowbar_send(player, "CROWBAR.ZERO_USAGES_SPAWNERS");
+        return;
+    }
+
+    // `creatureSpawner.getSpawnedType()`: the WIT has no spawner accessor, so
+    // the mob is read from the block-entity NBT. An empty spawner is a pig,
+    // like vanilla.
+    let mob = world
+        .get_block_entity_nbt(pos)
+        .and_then(|nbt| {
+            crate::nbt::find_string(&nbt, &["SpawnData", "entity", "id"])
+                .or_else(|| crate::nbt::find_string(&nbt, &["SpawnData", "id"]))
+        })
+        .unwrap_or_else(|| "minecraft:pig".to_string());
+
+    let name = format!(
+        "{}{} Spawner",
+        crowbar_spawner_name_color(),
+        mob_display(&mob)
+    );
+    let spawner_item = ItemStack::new("minecraft:spawner", 1);
+    spawner_item.set_custom_name(Some(util::text(&name)));
+
+    // `block_entity_data`: the tag id VarInt (`0`, compound) followed by the
+    // unnamed NBT.
+    let mut data = vec![0u8];
+    data.extend(crate::nbt::write_spawner_item_data(&mob));
+    spawner_item.set_component(DataComponent::BlockEntityData, &data);
+
+    // `block.setType(AIR)` + `Effect.STEP_SOUND`.
+    let _ = world.set_block_by_name(pos, "minecraft:air", air_flags());
+    crowbar_break_effect(world, pos);
+
+    // `world.dropItemNaturally(...)`: the port has no item spawn API, the item
+    // goes straight to the inventory instead.
+    give_stack_to_inventory(player, spawner_item);
+
+    let remaining = spawner_uses - 1;
+    if remaining <= 0 && portal_uses <= 0 {
+        player.set_item_in_hand(Hand::Right, None);
+    } else {
+        crowbar_update_meta(&item, remaining, portal_uses);
+        player.set_item_in_hand(Hand::Right, Some(item));
+    }
+}
+
+/// Port of the end portal frame branch of `CrowbarHandler#onPlayerInteract`.
+fn crowbar_break_portal_frame(player: &Player, world: &World, pos: BlockPos, item: ItemStack) {
+    let (spawner_uses, portal_uses) = crowbar_uses(&item);
+
+    if portal_uses <= 0 {
+        crowbar_send(player, "CROWBAR.ZERO_USAGES_PORTALS");
+        return;
+    }
+
+    let _ = world.set_block_by_name(pos, "minecraft:air", air_flags());
+    crowbar_break_effect(world, pos);
+
+    give_stack_to_inventory(player, ItemStack::new("minecraft:end_portal_frame", 1));
+
+    let remaining = portal_uses - 1;
+    if spawner_uses <= 0 && remaining <= 0 {
+        player.set_item_in_hand(Hand::Right, None);
+    } else {
+        crowbar_update_meta(&item, spawner_uses, remaining);
+        player.set_item_in_hand(Hand::Right, Some(item));
+    }
+}
+
+/// The first bytes of a serialized component are its tag id as a VarInt (`0` =
+/// compound); `set_block_entity_nbt` wants the bare unnamed NBT behind it.
+fn skip_varint(bytes: &[u8]) -> Option<&[u8]> {
+    for (index, byte) in bytes.iter().enumerate() {
+        if byte & 0x80 == 0 {
+            return bytes.get(index + 1..);
+        }
+    }
+
+    None
+}
+
+/// The host never applies an item's `block_entity_data` to the placed block
+/// entity (its `apply_item_components` is a spawner no-op), so an extracted
+/// spawner would come back empty. The place event fires before the block
+/// lands: queueing the spawner NBT for that position makes the host's
+/// `on_placed` load the block entity from it. The client keeps its predicted
+/// (empty) spawner until the chunk is reloaded.
+pub struct CrowbarSpawnerPlaceListener;
+
+impl EventHandler<BlockPlaceEvent> for CrowbarSpawnerPlaceListener {
+    fn handle(
+        &self,
+        server: Server,
+        event: EventData<BlockPlaceEvent>,
+    ) -> EventData<BlockPlaceEvent> {
+        if event.cancelled || event.block_placed != "minecraft:spawner" {
+            return event;
+        }
+
+        let item = [Hand::Right, Hand::Left].into_iter().find_map(|hand| {
+            event
+                .player
+                .get_item_in_hand(hand)
+                .filter(|item| item.get_registry_key() == "minecraft:spawner")
+        });
+        let Some(item) = item else {
+            return event;
+        };
+
+        let Some(component) = item
+            .get_components()
+            .into_iter()
+            .find(|entry| entry.component == DataComponent::BlockEntityData)
+        else {
+            return event;
+        };
+
+        let Some(nbt) = skip_varint(&component.value) else {
+            return event;
+        };
+
+        let Some(mob) = crate::nbt::find_string(nbt, &["SpawnData", "entity", "id"])
+            .or_else(|| crate::nbt::find_string(nbt, &["SpawnData", "id"]))
+        else {
+            return event;
+        };
+
+        let position = BlockPos {
+            x: event.block_pos.x,
+            y: event.block_pos.y,
+            z: event.block_pos.z,
+        };
+        let pending = crate::nbt::write_spawner_pending(&mob, position.x, position.y, position.z);
+
+        let world_name = core::world_name(&event.player);
+        if let Some(world) = server.get_world_by_name(&world_name) {
+            let _ = world.set_block_entity_nbt(position, &pending);
+        }
+
+        event
+    }
+}

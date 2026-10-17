@@ -26,6 +26,7 @@ mod hologram;
 mod kits;
 mod lang;
 mod listeners;
+mod nbt;
 mod potion_components;
 mod scoreboard;
 mod selection;

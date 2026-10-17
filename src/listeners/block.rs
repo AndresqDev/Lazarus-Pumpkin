@@ -83,8 +83,9 @@ fn check_player_build(
 }
 
 /// Port of the `message.replace("<faction>", factionAt.getDisplayName(player))`
-/// line, using the original `language.yml` text.
-fn deny_message(player: &Player, world: &str, x: i32, z: i32, interact: bool) -> String {
+/// line, using the original `language.yml` text. Shared with the crowbar's
+/// territory denial.
+pub(crate) fn deny_message(player: &Player, world: &str, x: i32, z: i32, interact: bool) -> String {
     let territory = core::territory_at(world, x, z);
     let viewer = core::faction_id_of(&core::uuid_of(player));
     let name = core::territory_display(&territory, viewer.as_deref());

@@ -47,6 +47,10 @@ pub fn register(context: &Context) -> Result<(), String> {
     // (`ignoreCancelled`) and the player only sees this message.
     context.register_event_handler(blockhandlers::DisabledPlacementListener, EventPriority::Normal, true)?;
     context.register_event_handler(block::BlockPlaceListener, EventPriority::High, true)?;
+    // Crowbar spawner restores: the extracted spawner's `block_entity_data`
+    // must be queued before the block lands (see `CrowbarSpawnerPlaceListener`)
+    // and only for placements the territory listener allows.
+    context.register_event_handler(blockhandlers::CrowbarSpawnerPlaceListener, EventPriority::High, true)?;
     // Block gameplay handlers (`handlers.block.*`), all `ignoreCancelled` in the
     // original: they run after the territory listeners and skip denied actions.
     context.register_event_handler(blockhandlers::AutoSmeltBreakListener, EventPriority::Normal, true)?;
@@ -63,6 +67,9 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(blockhandlers::SubclaimHopperListener, EventPriority::Normal, true)?;
     // Use protection must run before the wand listener (see `BlockInteractListener`).
     context.register_event_handler(block::BlockInteractListener, EventPriority::High, true)?;
+    // Crowbar (`CrowbarHandler#onPlayerInteract`, `ignoreCancelled`): after the
+    // territory listener, denied uses must not reach it.
+    context.register_event_handler(blockhandlers::CrowbarInteractListener, EventPriority::High, true)?;
     context.register_event_handler(block::BucketEmptyListener, EventPriority::High, true)?;
     context.register_event_handler(block::BucketFillListener, EventPriority::High, true)?;
     context.register_event_handler(block::EntityExplodeListener, EventPriority::High, true)?;
