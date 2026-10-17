@@ -7,7 +7,7 @@ use pumpkin_plugin_api::events::{
     EntityDamageByEntityEvent, EntityDamageEvent, EntityShootBowEvent, EventData, EventHandler,
     FoodLevelChangeEvent, PlayerItemConsumeEvent, ProjectileHitEvent, ProjectileLaunchEvent,
 };
-use pumpkin_plugin_api::{Player, Server};
+use pumpkin_plugin_api::{DamageType, Player, Server};
 
 use crate::core;
 use crate::factions::Relation;
@@ -86,7 +86,18 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
         let victim_uuid = core::uuid_of(&victim);
         let damager_uuid = core::uuid_of(&damager);
 
-        let (relation, victim_protected, victim_combat, damager_combat, tag_seconds, allow_own) = {
+        let (
+            relation,
+            victim_protected,
+            damager_protected,
+            victim_combat,
+            damager_combat,
+            tag_seconds,
+            allow_own,
+            sotw_active,
+            sotw_victim_enabled,
+            sotw_damager_enabled,
+        ) = {
             let guard = state().read().unwrap();
             let relation = match (
                 guard.factions.by_member(&victim_uuid),
@@ -99,14 +110,20 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
             (
                 relation,
                 guard.timers.is_active(&victim_uuid, TimerType::PvpProtection),
+                guard.timers.is_active(&damager_uuid, TimerType::PvpProtection),
                 guard.timers.is_active(&victim_uuid, TimerType::CombatTag),
                 guard.timers.is_active(&damager_uuid, TimerType::CombatTag),
                 guard.config.timers.combat_tag_seconds,
                 guard.config.factions.players_take_own_damage,
+                guard.timers.sotw_active(),
+                guard.sotw.enabled_players.contains(&victim_uuid),
+                guard.sotw.enabled_players.contains(&damager_uuid),
             )
         };
 
-        if victim_uuid == damager_uuid && !allow_own {
+        // Self damage is always denied while protected (`PvpProtHandler` cancels it
+        // silently), plus the `PLAYERS_TAKE_OWN_DAMAGE` rule.
+        if victim_uuid == damager_uuid && (damager_protected || !allow_own) {
             event.cancelled = true;
             return event;
         }
@@ -151,6 +168,14 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
             return event;
         }
 
+        // SOTW: player-vs-player damage is only allowed between two players that
+        // both opted out with `/sotw enable` (port of
+        // `SotwHandler#onEntityDamageByEntity`, cancelled silently).
+        if sotw_active && !(sotw_victim_enabled && sotw_damager_enabled) {
+            event.cancelled = true;
+            return event;
+        }
+
         // Same faction (always) or ally (unless ally friendly fire is enabled) -> cancel.
         let (ally_ff, max_allies, ally_color) = {
             let guard = state().read().unwrap();
@@ -185,9 +210,32 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
             return event;
         }
 
+        // PvP protection (port of `PvpProtHandler#onEntityDamageByEntity`, which
+        // checks the attacker first and then the victim, with the original texts).
+        if damager_protected {
+            event.cancelled = true;
+            let (prefix, message) = {
+                let guard = state().read().unwrap();
+                (
+                    guard.raw.language.string("PREFIX"),
+                    guard.lang.pvp_protection_deny_victim.clone(),
+                )
+            };
+            core::send(&damager, &format!("{prefix}{message}"));
+            return event;
+        }
+
         if victim_protected {
             event.cancelled = true;
-            core::send(&damager, "&cThat player has PvP protection.");
+            let (prefix, template) = {
+                let guard = state().read().unwrap();
+                (
+                    guard.raw.language.string("PREFIX"),
+                    guard.lang.pvp_protection_deny_attacker.clone(),
+                )
+            };
+            let message = util::replace(&template, "<name>", &core::name_of(&victim));
+            core::send(&damager, &format!("{prefix}{message}"));
             return event;
         }
 
@@ -395,8 +443,9 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
     }
 }
 
-/// Blocks all damage (e.g. fall damage) while a player has PvP protection, and
-/// cancels warmup teleports when damaged (port of `cancelHomeAndStuckTimersOnDamage`).
+/// Blocks the damage causes the original PvP protection denied and cancels
+/// warmup teleports when damaged (port of `PvpProtHandler#onEntityDamage` and
+/// `cancelHomeAndStuckTimersOnDamage`). SOTW immunity is handled here too.
 pub struct EntityDamageListener;
 
 impl EventHandler<EntityDamageEvent> for EntityDamageListener {
@@ -418,6 +467,35 @@ impl EventHandler<EntityDamageEvent> for EntityDamageListener {
         };
         if archer_multiplier != 1.0 {
             event.damage *= archer_multiplier;
+        }
+
+        // SOTW: players are damage-immune unless they opted out; falling into the
+        // void teleports back to the world spawn first (port of
+        // `SotwHandler#onPlayerDamage`, which cancels every cause).
+        if crate::sotw::is_under_protection(&uuid) {
+            if event.damage_type == DamageType::OutOfWorld {
+                let world_name = core::world_name(&player);
+                let (x, z) = state()
+                    .read()
+                    .unwrap()
+                    .spawn_centers
+                    .get(&world_name)
+                    .copied()
+                    .unwrap_or((0, 0));
+                if let Some(world) = server.get_world_by_name(&world_name) {
+                    player.teleport((x as f64 + 0.5, 100.0, z as f64 + 0.5), None, None, world);
+                }
+                let (prefix, message) = {
+                    let guard = state().read().unwrap();
+                    (
+                        guard.raw.language.string("PREFIX"),
+                        guard.lang.sotw_void_fix.clone(),
+                    )
+                };
+                core::send(&player, &format!("{prefix}{message}"));
+            }
+            event.cancelled = true;
+            return event;
         }
 
         // All damage is cancelled inside the safezone (port of `onEntityDamage`).
@@ -460,7 +538,20 @@ impl EventHandler<EntityDamageEvent> for EntityDamageListener {
             core::send(&player, &message);
         }
 
-        if protected(&player) {
+        // PvP protection (port of the `disabledDamageCauses` EnumSet in
+        // `PvpProtHandler#onEntityDamage`): only drowning, suffocation, poison
+        // and fire damage are blocked — fall damage, mobs and explosions still
+        // hurt protected players, exactly like the original.
+        if protected(&player)
+            && matches!(
+                event.damage_type,
+                DamageType::Drown
+                    | DamageType::InWall
+                    | DamageType::Magic
+                    | DamageType::InFire
+                    | DamageType::OnFire
+            )
+        {
             event.cancelled = true;
         }
 
@@ -480,6 +571,15 @@ impl EventHandler<FoodLevelChangeEvent> for FoodLevelChangeListener {
         let Some(player) = core::player_by_entity(&server, event.entity_id) else {
             return event;
         };
+
+        // PvP protection keeps hunger and saturation full (port of
+        // `PvpProtHandler#onFoodLevelChange`).
+        if protected(&player) {
+            event.cancelled = true;
+            player.set_food_level(20);
+            player.set_saturation(20.0);
+            return event;
+        }
 
         // Regeneration (food going up) is always allowed.
         if player.get_food_level() < event.food_level {

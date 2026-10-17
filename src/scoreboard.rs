@@ -285,6 +285,19 @@ fn build_lines(guard: &AppState, player: &Player, server: &Server, uuid: &str) -
             b.add(placeholder, &util::format_duration(remaining));
         }
     }
+
+    // ---- SOTW timer (port of `SotwTimer`): while the global timer runs the line
+    // shows the dynamic time left, using the struck-through placeholder for
+    // players that opted out with `/sotw enable`.
+    let sotw_remaining = guard.timers.sotw_remaining();
+    if sotw_remaining > 0 {
+        let placeholder = if guard.sotw.enabled_players.contains(uuid) {
+            &s.sotw_enabled
+        } else {
+            &s.sotw
+        };
+        b.add(placeholder, &util::format_clock(sotw_remaining));
+    }
     b.add_line("&3");
 
     b.finish()

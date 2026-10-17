@@ -4,7 +4,8 @@
 //!   (`onEntityTarget`, random/closest-player targeting);
 //! * arrows that land inside the safezone are removed (`onProjectileHit`);
 //! * monsters must not spawn in the warzone / system factions unless
-//!   `SPAWN_MOBS_IN_WARZONE` is enabled (`onCreatureSpawn`).
+//!   `SPAWN_MOBS_IN_WARZONE` is enabled (`onCreatureSpawn`);
+//! * during SOTW only spawner-style reasons may spawn mobs (`SotwHandler#onCreatureSpawn`).
 
 use pumpkin_plugin_api::events::{
     CreatureSpawnEvent, EntityTargetEvent, EventData, EventHandler, PotionSplashEvent,
@@ -99,6 +100,25 @@ impl EventHandler<CreatureSpawnEvent> for CreatureSpawnListener {
         _server: Server,
         mut event: EventData<CreatureSpawnEvent>,
     ) -> EventData<CreatureSpawnEvent> {
+        // SOTW: while the timer runs only spawner-style reasons may spawn mobs
+        // (port of `SotwHandler#onCreatureSpawn` +
+        // `ServerUtils.ALLOWED_SPAWN_REASONS`). NOTE: the host does not fire this
+        // event for every spawn path, so the gate is best-effort.
+        let sotw_spawner_only = {
+            let guard = state().read().unwrap();
+            guard.timers.sotw_active() && guard.config.sotw.spawn_mobs_from_spawners_only
+        };
+        if sotw_spawner_only {
+            let reason = event.spawn_reason.to_ascii_lowercase();
+            let allowed = ["spawner", "egg", "breeding", "custom", "slime"]
+                .iter()
+                .any(|allowed| reason.contains(allowed));
+            if !allowed {
+                event.cancelled = true;
+                return event;
+            }
+        }
+
         // Mobs have their AI disabled (no lag machines / unpredictable behaviour).
         for entity in event.target_world.get_entities() {
             if entity.get_id() as i32 == event.entity_id {

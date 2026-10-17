@@ -27,6 +27,7 @@ pub struct Config {
     pub spawn: SpawnConfig,
     pub economy: EconomyConfig,
     pub timers: TimersConfig,
+    pub sotw: SotwConfig,
     pub system_faction_names: SystemFactionNames,
     pub disabled_lazarus_commands: Vec<String>,
     pub blocked_commands: Vec<String>,
@@ -51,6 +52,7 @@ impl Default for Config {
             spawn: SpawnConfig::default(),
             economy: EconomyConfig::default(),
             timers: TimersConfig::default(),
+            sotw: SotwConfig::default(),
             system_faction_names: SystemFactionNames::default(),
             disabled_lazarus_commands: vec!["cmd1".into(), "cmd2".into()],
             blocked_commands: vec![
@@ -289,6 +291,24 @@ impl Default for TimersConfig {
     }
 }
 
+/// Port of the `SOTW_TIMER` section of `config.yml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SotwConfig {
+    /// Default `/sotw start` duration, in minutes.
+    pub default_time_minutes: u64,
+    /// Cancel every creature spawn that is not spawner-driven while SOTW runs.
+    pub spawn_mobs_from_spawners_only: bool,
+    /// Hide players that are inside the safezone while SOTW runs.
+    pub hide_players: bool,
+}
+
+impl Default for SotwConfig {
+    fn default() -> Self {
+        Self { default_time_minutes: 120, spawn_mobs_from_spawners_only: true, hide_players: true }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SystemFactionNames {
@@ -393,6 +413,12 @@ pub struct SidebarConfig {
     pub apple: String,
     pub gapple: String,
 
+    // SOTW section (port of scoreboard.yml `SOTW_PLACEHOLDER` /
+    // `SOTW_ENABLE_PLACEHOLDER`; the second one is used when the viewing player
+    // opted out of the damage protection).
+    pub sotw: String,
+    pub sotw_enabled: String,
+
     // Staff / vanish section.
     pub staffmode: String,
     pub vanish: String,
@@ -428,6 +454,8 @@ impl Default for SidebarConfig {
             logout: "&b&lLogout&7: &c".into(),
             apple: "&e&lApple&7: &c".into(),
             gapple: "&6&lGApple&7: &c".into(),
+            sotw: "&a&lSOTW&7: &c".into(),
+            sotw_enabled: "&c&l&mSOTW&7: &c".into(),
             staffmode: "&e&lStaff Mode".into(),
             vanish: "&e&lVanish Mode".into(),
             visibility: " &6* &9Visibility&7: ".into(),

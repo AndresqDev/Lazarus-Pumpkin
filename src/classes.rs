@@ -457,6 +457,7 @@ impl PvpClassManager {
         factions: &crate::factions::FactionsManager,
         raw_config: &crate::yaml::ConfigFile,
         pvp_protected: bool,
+        sotw_protected: bool,
         in_safezone: bool,
     ) {
         let uuid = crate::core::uuid_of(player);
@@ -474,9 +475,14 @@ impl PvpClassManager {
         let energy = self.bard_energy.entry(uuid.clone()).or_insert(0.0);
         *energy = (*energy + POWER_GAIN).min(max);
 
-        // `canBard` for holdables: not under pvp protection, not in the safezone.
-        // NOTE: combat tag is intentionally allowed.
-        if pvp_protected || in_safezone {
+        // `canBard` for holdables: not under pvp protection, not under SOTW
+        // protection, not in the safezone. NOTE: combat tag is intentionally
+        // allowed. The original runs this same check from `onPlayerItemHeld` and
+        // from its 1s holdable task, warning with `Bard#sendDelayedMessage`
+        // (throttled to one message per 4s). The port has no item-held hook and
+        // the tick path stays silent — the `BARD_CLASS` warnings are sent by the
+        // click handler (`bard_click`).
+        if pvp_protected || sotw_protected || in_safezone {
             return;
         }
 
@@ -957,32 +963,21 @@ pub fn bard_click(server: &Server, player: &Player) {
     let uuid = crate::core::uuid_of(player);
     let location = crate::core::location(player);
 
-    // Active Bard, and `canBard` (staff/pvp-prot/safezone) — combat tag IS allowed.
-    {
+    // Active Bard + clickable item resolution. The original resolves the
+    // clickable *before* `canBard` (`Bard#onPlayerInteract`), so right-clicks
+    // with any other item return silently and never warn.
+    let (clickable, faction_members, energy, now) = {
         let guard = state().read().unwrap();
         if guard.classes.active.get(&uuid) != Some(&ClassKind::Bard) {
             return;
         }
-        if matches!(
-            crate::core::territory_at_guard(&guard, &location.world, location.block_x(), location.block_z()),
-            crate::core::Territory::Safezone
-        ) {
-            drop(guard);
-            warn(player, "BARD_CLASS.CAN_NOT_BARD_IN_SAFEZONE");
+        let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
             return;
-        }
-    }
-
-    let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
-        return;
-    };
-    let key = item
-        .get_registry_key()
-        .trim_start_matches("minecraft:")
-        .to_string();
-
-    let (clickable, faction_members, energy, now) = {
-        let guard = state().read().unwrap();
+        };
+        let key = item
+            .get_registry_key()
+            .trim_start_matches("minecraft:")
+            .to_string();
         let Some(clickable) = guard
             .classes
             .bard_clickables
@@ -1001,14 +996,39 @@ pub fn bard_click(server: &Server, player: &Player) {
         (clickable, faction_members, energy, util::now_millis())
     };
 
-    // Clickables work under pvp protection, except poison ones.
-    if clickable.effect_name.to_ascii_uppercase().contains("POISON")
-        && state()
-            .read()
-            .unwrap()
-            .timers
-            .is_active(&uuid, crate::timers::TimerType::PvpProtection)
-    {
+    // `Bard#canBard` in the original order: staffmode/vanish -> pvp protection
+    // -> safezone -> SOTW. Combat tag IS allowed. The flags are computed while
+    // the guard is held, but the guard is dropped before any message is sent.
+    let (staff_or_vanished, pvp_protected, in_safezone, sotw_protected) = {
+        let guard = state().read().unwrap();
+        (
+            // `StaffModeManager#isInStaffModeOrVanished`.
+            guard.staff.is_vanished(&uuid) || guard.staff.is_staff(&uuid),
+            // `PvpProtTimer#isActive`.
+            guard.timers.pvp_active(&uuid),
+            matches!(
+                crate::core::territory_at_guard(&guard, &location.world, location.block_x(), location.block_z()),
+                crate::core::Territory::Safezone
+            ),
+            // `SotwHandler#isUnderSotwProtection` (inlined: the helper re-locks).
+            guard.timers.sotw_active() && !guard.sotw.enabled_players.contains(&uuid),
+        )
+    };
+
+    if staff_or_vanished {
+        warn(player, "BARD_CLASS.VANISHED_OR_IN_STAFFMODE");
+        return;
+    }
+    if pvp_protected {
+        warn(player, "BARD_CLASS.CAN_NOT_BARD_WITH_PVP_TIMER");
+        return;
+    }
+    if in_safezone {
+        warn(player, "BARD_CLASS.CAN_NOT_BARD_IN_SAFEZONE");
+        return;
+    }
+    if sotw_protected {
+        warn(player, "BARD_CLASS.CAN_NOT_BARD_WHEN_SOTW_NOT_ENABLED");
         return;
     }
 
@@ -1058,6 +1078,26 @@ pub fn bard_click(server: &Server, player: &Player) {
         return;
     }
 
+    // `Bard#applyClickableEffect`: enemy clickables apply their effect to the
+    // caster too (unconditionally), while friendly ones only include the caster
+    // when the item allows it (`APPLY_TO_HIMSELF`).
+    let apply = |target: &Player| {
+        apply_if_stronger(
+            target,
+            StatusEffectInstance {
+                effect_type: clickable.effect.effect,
+                duration: clickable.duration,
+                amplifier: clickable.effect.amplifier,
+                ambient: false,
+                show_particles: true,
+                show_icon: true,
+            },
+        );
+    };
+    if clickable.apply_to_enemy {
+        apply(player);
+    }
+
     let mut affected = 0usize;
     for online in server.get_all_players() {
         let member_uuid = crate::core::uuid_of(&online);
@@ -1066,8 +1106,10 @@ pub fn bard_click(server: &Server, player: &Player) {
 
         let enabled = if clickable.apply_to_enemy {
             !is_self && !same_faction
+        } else if is_self {
+            clickable.can_bard_himself
         } else {
-            same_faction || (is_self && clickable.can_bard_himself)
+            same_faction
         };
         if !enabled {
             continue;
@@ -1084,59 +1126,87 @@ pub fn bard_click(server: &Server, player: &Player) {
             continue;
         }
 
-        apply_if_stronger(
-            &online,
-            StatusEffectInstance {
-                effect_type: clickable.effect.effect,
-                duration: clickable.duration,
-                amplifier: clickable.effect.amplifier,
-                ambient: false,
-                show_particles: true,
-                show_icon: true,
-            },
-        );
+        // Enemy targets: skip faction allies (the original checks
+        // `faction.isAlly(enemyFaction)`), staff/vanished, safezone and
+        // pvp-protected players (`Bard#applyClickableEffect` enemy branch). SOTW
+        // is checked on the caster only — the original has no per-target SOTW
+        // check.
+        if clickable.apply_to_enemy {
+            let (target_ally, target_staff_or_vanished, target_in_safezone, target_pvp_protected) = {
+                let guard = state().read().unwrap();
+                let target_ally = guard
+                    .factions
+                    .by_member(&uuid)
+                    .zip(guard.factions.by_member(&member_uuid))
+                    .map(|(caster, target_faction)| {
+                        caster.relation_to(target_faction) == crate::factions::Relation::Ally
+                    })
+                    .unwrap_or(false);
+                (
+                    target_ally,
+                    guard.staff.is_vanished(&member_uuid) || guard.staff.is_staff(&member_uuid),
+                    matches!(
+                        crate::core::territory_at_guard(&guard, &target.world, target.block_x(), target.block_z()),
+                        crate::core::Territory::Safezone
+                    ),
+                    guard.timers.pvp_active(&member_uuid),
+                )
+            };
+            if target_ally || target_staff_or_vanished || target_in_safezone || target_pvp_protected {
+                continue;
+            }
+        }
+
+        apply(&online);
         if !is_self {
             affected += 1;
         }
 
         if clickable.apply_to_enemy && !is_self {
-            core::send(
-                &online,
-                &format!(
-                    "{}{}",
-                    language_prefix(),
-                    util::replace(
-                        &state().read().unwrap().raw.language.string("BARD_CLASS.CLICKABLE_ITEM.MESSAGE_OTHERS"),
-                        "<effect>",
-                        &format!("{}{}", clickable.chat_color, clickable.material),
-                    )
-                ),
+            let template = {
+                let guard = state().read().unwrap();
+                guard
+                    .raw
+                    .language
+                    .string("BARD_CLASS.CLICKABLE_ITEM.MESSAGE_OTHERS")
+            };
+            let message = format!(
+                "{}{}",
+                language_prefix(),
+                util::replace(
+                    &template,
+                    "<effect>",
+                    &format!("{}{}", clickable.chat_color, clickable.material),
+                )
             );
+            core::send(&online, &message);
         }
     }
 
     // Confirmation to the bard.
-    {
+    let confirmation = {
         let guard = state().read().unwrap();
         let template = if clickable.apply_to_enemy {
             guard.raw.language.string("BARD_CLASS.CLICKABLE_ITEM.MESSAGE_ENEMY")
         } else {
             guard.raw.language.string("BARD_CLASS.CLICKABLE_ITEM.MESSAGE_FRIENDLY")
         };
-        let prefix = guard.raw.language.string("PREFIX");
-        if !template.is_empty() {
+        if template.is_empty() {
+            None
+        } else {
             let effect = format!("{}{}", clickable.chat_color, clickable.effect_name);
-            core::send(
-                player,
-                &format!(
-                    "{prefix}{}",
-                    util::replace_all(
-                        &template,
-                        &[("<effect>", &effect), ("<amount>", &affected.to_string())],
-                    )
-                ),
-            );
+            Some(format!(
+                "{}{}",
+                guard.raw.language.string("PREFIX"),
+                util::replace_all(
+                    &template,
+                    &[("<effect>", &effect), ("<amount>", &affected.to_string())],
+                )
+            ))
         }
+    };
+    if let Some(message) = confirmation {
+        core::send(player, &message);
     }
 
     // Pay the cost and start the cooldown.
@@ -1250,38 +1320,21 @@ pub fn rogue_click(_server: &Server, player: &Player) {
 pub fn mage_click(server: &Server, player: &Player) {
     let uuid = crate::core::uuid_of(player);
 
-    let (pvp_protected, in_safezone) = {
+    // Active Mage + clickable item resolution. The original resolves the
+    // clickable *before* `canApplyMageEffect` (`Mage#onPlayerInteract`), so
+    // right-clicks with any other item return silently and never warn.
+    let (clickable, faction_members, energy, now) = {
         let guard = state().read().unwrap();
         if guard.classes.active.get(&uuid) != Some(&ClassKind::Mage) {
             return;
         }
-        let location = crate::core::location(player);
-        (
-            guard
-                .timers
-                .is_active(&uuid, crate::timers::TimerType::PvpProtection),
-            matches!(
-                crate::core::territory_at_guard(&guard, &location.world, location.block_x(), location.block_z()),
-                crate::core::Territory::Safezone
-            ),
-        )
-    };
-    if in_safezone {
-        warn(player, "MAGE_CLASS.CAN_NOT_USE_MAGE_IN_SAFEZONE");
-        return;
-    }
-    let _ = pvp_protected;
-
-    let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
-        return;
-    };
-    let key = item
-        .get_registry_key()
-        .trim_start_matches("minecraft:")
-        .to_string();
-
-    let (clickable, faction_members, energy, now) = {
-        let guard = state().read().unwrap();
+        let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
+            return;
+        };
+        let key = item
+            .get_registry_key()
+            .trim_start_matches("minecraft:")
+            .to_string();
         let Some(clickable) = guard
             .classes
             .mage_clickables
@@ -1300,14 +1353,40 @@ pub fn mage_click(server: &Server, player: &Player) {
         (clickable, faction_members, energy, util::now_millis())
     };
 
-    // Mage clickables work under pvp protection, except poison ones.
-    if clickable.effect_name.to_ascii_uppercase().contains("POISON")
-        && state()
-            .read()
-            .unwrap()
-            .timers
-            .is_active(&uuid, crate::timers::TimerType::PvpProtection)
-    {
+    // `Mage#canApplyMageEffect` in the original order: staffmode/vanish -> pvp
+    // protection -> safezone -> SOTW. The flags are computed while the guard is
+    // held, but the guard is dropped before any message is sent.
+    let location = crate::core::location(player);
+    let (staff_or_vanished, pvp_protected, in_safezone, sotw_protected) = {
+        let guard = state().read().unwrap();
+        (
+            // `StaffModeManager#isInStaffModeOrVanished`.
+            guard.staff.is_vanished(&uuid) || guard.staff.is_staff(&uuid),
+            // `PvpProtTimer#isActive`.
+            guard.timers.pvp_active(&uuid),
+            matches!(
+                crate::core::territory_at_guard(&guard, &location.world, location.block_x(), location.block_z()),
+                crate::core::Territory::Safezone
+            ),
+            // `SotwHandler#isUnderSotwProtection` (inlined: the helper re-locks).
+            guard.timers.sotw_active() && !guard.sotw.enabled_players.contains(&uuid),
+        )
+    };
+
+    if staff_or_vanished {
+        warn(player, "MAGE_CLASS.VANISHED_OR_IN_STAFFMODE");
+        return;
+    }
+    if pvp_protected {
+        warn(player, "MAGE_CLASS.CAN_NOT_USE_MAGE_WITH_PVP_TIMER");
+        return;
+    }
+    if in_safezone {
+        warn(player, "MAGE_CLASS.CAN_NOT_USE_MAGE_IN_SAFEZONE");
+        return;
+    }
+    if sotw_protected {
+        warn(player, "MAGE_CLASS.CAN_NOT_USE_MAGE_WHEN_SOTW_NOT_ENABLED");
         return;
     }
 
@@ -1399,22 +1478,55 @@ pub fn mage_click(server: &Server, player: &Player) {
             continue;
         }
 
+        // Enemy targets: skip faction allies (the original checks
+        // `faction.isAlly(enemyFaction)`), staff/vanished, safezone and
+        // pvp-protected players (`Mage#applyClickableEffect`). SOTW is checked on
+        // the caster only — the original has no per-target SOTW check.
+        let (target_ally, target_staff_or_vanished, target_in_safezone, target_pvp_protected) = {
+            let guard = state().read().unwrap();
+            let target_ally = guard
+                .factions
+                .by_member(&uuid)
+                .zip(guard.factions.by_member(&member_uuid))
+                .map(|(caster, target_faction)| {
+                    caster.relation_to(target_faction) == crate::factions::Relation::Ally
+                })
+                .unwrap_or(false);
+            (
+                target_ally,
+                guard.staff.is_vanished(&member_uuid) || guard.staff.is_staff(&member_uuid),
+                matches!(
+                    crate::core::territory_at_guard(&guard, &target.world, target.block_x(), target.block_z()),
+                    crate::core::Territory::Safezone
+                ),
+                guard.timers.pvp_active(&member_uuid),
+            )
+        };
+        if target_ally || target_staff_or_vanished || target_in_safezone || target_pvp_protected {
+            continue;
+        }
+
         apply(&online);
 
-        {
+        let message = {
             let guard = state().read().unwrap();
-            let prefix = guard.raw.language.string("PREFIX");
             let template = guard
                 .raw
                 .language
                 .string("MAGE_CLASS.CLICKABLE_ITEM.MESSAGE_OTHERS");
-            let effect = format!("{}{}", clickable.chat_color, clickable.effect_name);
-            if !template.is_empty() {
-                core::send(
-                    &online,
-                    &format!("{prefix}{}", util::replace(&template, "<effect>", &effect)),
-                );
+            if template.is_empty() {
+                None
+            } else {
+                let effect = format!("{}{}", clickable.chat_color, clickable.effect_name);
+                Some(format!(
+                    "{}{}",
+                    guard.raw.language.string("PREFIX"),
+                    util::replace(&template, "<effect>", &effect)
+                ))
             }
+        };
+        if let Some(message) = message {
+            core::send(&online, &message);
         }
 
         if combat_tag {
@@ -1440,39 +1552,62 @@ pub fn mage_click(server: &Server, player: &Player) {
 pub fn bomber_click(server: &Server, player: &Player) {
     let uuid = crate::core::uuid_of(player);
 
-    let (pvp_protected, in_safezone, gun) = {
+    // Active Bomber + TNT gun in hand. The original resolves the gun *before*
+    // `canShootTnt` (`Bomber#onPlayerInteract`), so right-clicks with any other
+    // item return silently and never warn.
+    let cooldown_ms = {
         let guard = state().read().unwrap();
         if guard.classes.active.get(&uuid) != Some(&ClassKind::Bomber) {
             return;
         }
-        let location = crate::core::location(player);
+        let Some((material, cooldown_ms)) = guard.classes.bomber_gun.clone() else {
+            return;
+        };
+        let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
+            return;
+        };
+        if item.get_registry_key().trim_start_matches("minecraft:")
+            != material.trim_start_matches("minecraft:")
+        {
+            return;
+        }
+        cooldown_ms
+    };
+
+    // `Bomber#canShootTnt` in the original order: staffmode/vanish -> pvp
+    // protection -> safezone -> SOTW. The flags are computed while the guard is
+    // held, but the guard is dropped before any message is sent.
+    let location = crate::core::location(player);
+    let (staff_or_vanished, pvp_protected, in_safezone, sotw_protected) = {
+        let guard = state().read().unwrap();
         (
-            guard
-                .timers
-                .is_active(&uuid, crate::timers::TimerType::PvpProtection),
+            // `StaffModeManager#isInStaffModeOrVanished`.
+            guard.staff.is_vanished(&uuid) || guard.staff.is_staff(&uuid),
+            // `PvpProtTimer#isActive`.
+            guard.timers.pvp_active(&uuid),
             matches!(
                 crate::core::territory_at_guard(&guard, &location.world, location.block_x(), location.block_z()),
                 crate::core::Territory::Safezone
             ),
-            guard.classes.bomber_gun.clone(),
+            // `SotwHandler#isUnderSotwProtection` (inlined: the helper re-locks).
+            guard.timers.sotw_active() && !guard.sotw.enabled_players.contains(&uuid),
         )
     };
-    if in_safezone {
-        warn(player, "BOMBER_CLASS.CAN_NOT_SHOOT_TNT_IN_SAFEZONE");
+
+    if staff_or_vanished {
+        warn(player, "BOMBER_CLASS.VANISHED_OR_IN_STAFFMODE");
         return;
     }
     if pvp_protected {
         warn(player, "BOMBER_CLASS.CAN_NOT_SHOOT_TNT_WITH_PVP_TIMER");
         return;
     }
-    let Some((material, cooldown_ms)) = gun else {
+    if in_safezone {
+        warn(player, "BOMBER_CLASS.CAN_NOT_SHOOT_TNT_IN_SAFEZONE");
         return;
-    };
-
-    let Some(item) = player.get_item_in_hand(pumpkin_plugin_api::common::Hand::Right) else {
-        return;
-    };
-    if item.get_registry_key().trim_start_matches("minecraft:") != material.trim_start_matches("minecraft:") {
+    }
+    if sotw_protected {
+        warn(player, "BOMBER_CLASS.CAN_NOT_SHOOT_TNT_WHEN_SOTW_NOT_ENABLED");
         return;
     }
 

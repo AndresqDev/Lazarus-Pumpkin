@@ -36,6 +36,7 @@ lang! {
     player_not_found = "&ePlayer &c<player> &ehas never played before!";
     command_not_found = "&eCommand &c<command> &ecould not be found!";
     invalid_number = "&ePlease use a valid &cinteger &evalue.";
+    invalid_duration = "&ePlease use a valid &ctime duration&e.";
     command_cooldown = "&cYou are currently on command cooldown.";
 
     join_welcome = "&eWelcome <player> &eto &6HCF&e!";
@@ -181,8 +182,45 @@ lang! {
     enderpearl_cooldown = "&cYou cannot use enderpearls for another &e<time>&c.";
     gapple_cooldown = "&cYou cannot use golden apples for another &e<time>&c.";
     pvp_protection_active = "&aYou have PvP protection for &e<time>&a.";
-    pvp_protection_expired = "&cYour PvP protection has expired.";
+    pvp_protection_expired = "&eYour &cpvp protection &ehas expired!";
     pvp_protection_denied = "&cYou cannot do that while protected.";
+
+    // ---- PvP protection command (port of `PVP_COMMAND`) ----
+    pvp_command_disabled = "&eYou have disabled your &cpvp protection&e!";
+    pvp_command_not_active = "&eYour &cpvp protection &eis not active!";
+    pvp_command_time = "&eYour &cpvp protection &etime is: &c<time>";
+    pvp_command_usage_header = "&7&m                                                           ";
+    pvp_command_usage_enable = " &c/pvp enable &f- &7Enable PvP for yourself";
+    pvp_command_usage_time = " &c/pvp time &f- &7Check time left on your timer";
+    pvp_command_usage_footer = "&7&m                                                           ";
+
+    // ---- PvP protection restrictions (port of `PVP_PROTECTION`) ----
+    pvp_protection_deny_teleport = "&eYou cannot teleport inside claims while your &cpvp protection &eis active!";
+    pvp_protection_deny_attacker = "&eYou cannot attack &c<name> &ewhile their &cpvp protection &eis active!";
+    pvp_protection_deny_victim = "&eYou cannot attack other players while your &cpvp protection &eis active!";
+    pvp_protection_teleport_due_to_claim = "&eYou have been &cteleported &eoutside claimed land!";
+
+    // ---- SOTW (port of `SOTW`) ----
+    sotw_started = "&8[&a!&8] &aSOTW &ehas been started at &b<time>&e. &e&lGood Luck! &8[&a!&8]";
+    sotw_ended = "&8[&c!&8] &aSOTW &ehas ended. &eWatch your back! &8[&c!&8]";
+    sotw_not_running = "&cSotw timer &eis currently not running!";
+    sotw_already_running = "&eThere is &csotw timer &ealready running!";
+    sotw_enabled = "&eYou have &cdisabled &eyour &csotw &edamage protection!";
+    sotw_already_enabled = "&eYou have already &cdisabled &eyour &csotw &edamage protection!";
+    sotw_void_fix = "&eDue to active &csotw &eyou have been teleported to &cend spawn&e!";
+    sotw_time_status = "&eRemaining &cSOTW &etimer time is: &c<time>";
+    sotw_hide_players_enabled = "&eYou have &aenabled &esotw &chide players &efeature.";
+    sotw_hide_players_disabled = "&eYou have &cdisabled &esotw &chide players &efeature.";
+    sotw_admin_usage_header = "&7&m                                                           ";
+    sotw_admin_usage_title = " &6&lSotw management";
+    sotw_admin_usage_start = "  &e/sotw start [time]";
+    sotw_admin_usage_stop = "  &e/sotw stop";
+    sotw_admin_usage_hideplayers = "  &e/sotw hideplayers";
+    sotw_admin_usage_footer = "&7&m                                                           ";
+    sotw_player_usage_header = "&7&m                                                           ";
+    sotw_player_usage_enable = " &c/sotw enable &f- &7Disable SOTW protection";
+    sotw_player_usage_time = " &c/sotw time &f- &7Check SOTW time left";
+    sotw_player_usage_footer = "&7&m                                                           ";
     home_warmup = "&eTeleporting to your faction home in &c<time>&e.";
     home_warmup_cancelled = "&cTeleport cancelled.";
     stuck_warmup = "&eYou will be teleported to &csafe location &ein &b<time>&e.";

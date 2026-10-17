@@ -3,6 +3,7 @@
 
 use pumpkin_plugin_api::events::{
     EventData, EventHandler, PlayerDeathEvent, PlayerJoinEvent, PlayerLeaveEvent, PlayerMoveEvent,
+    PlayerRespawnEvent, PlayerTeleportEvent,
 };
 use pumpkin_plugin_api::{Player, Server};
 
@@ -21,16 +22,30 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
         crate::classes::remove_infinite_effects(&event.player);
         let name = core::name_of(&event.player);
 
-        let (welcome_enabled, welcome_message, protect_seconds, show_info) = {
+        let (welcome_enabled, welcome_message, protect_seconds, show_info, first_join, in_safezone) = {
             let mut guard = state().write().unwrap();
             let config = guard.config.clone();
+            let first_join = guard.userdata.get(&uuid).is_none();
             guard.userdata.get_or_create(uuid.clone(), name.clone(), &config);
+
+            let location = core::location(&event.player);
+            let in_safezone = matches!(
+                core::territory_at_guard(
+                    &guard,
+                    &location.world,
+                    location.block_x(),
+                    location.block_z()
+                ),
+                core::Territory::Safezone
+            );
 
             (
                 config.join_welcome_message_enabled,
                 guard.lang.join_welcome.clone(),
                 config.timers.pvp_protection_seconds,
                 config.factions.show_info_on_join,
+                first_join,
+                in_safezone,
             )
         };
 
@@ -39,9 +54,16 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
             event.join_message = util::text(message);
         }
 
-        // PvP protection (port of PvpProtTimer).
-        if protect_seconds > 0 {
-            state().write().unwrap().timers.activate(&uuid, TimerType::PvpProtection, protect_seconds);
+        // PvP protection (port of `PvpProtHandler#onPlayerJoin`): first joins are
+        // awarded the full timer — banked while inside the safezone — while
+        // returning players only resume whatever they had banked.
+        {
+            let mut guard = state().write().unwrap();
+            if first_join {
+                guard.timers.activate_pvp(&uuid, protect_seconds, in_safezone);
+            } else if !in_safezone {
+                guard.timers.resume_pvp(&uuid);
+            }
         }
 
         // Deathban enforcement (port of DeathbanManager join handling).
@@ -51,6 +73,10 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
 
         // Hide vanished staff from the joiner.
         state().read().unwrap().staff.apply_vanish_to(&server, &event.player);
+
+        // SOTW: hide safezone players from the joiner (port of
+        // `SotwHandler#onPlayerJoin`).
+        crate::sotw::on_player_join(&server, &event.player, in_safezone);
 
         scoreboard::setup(&event.player);
         crate::tab::setup(&event.player, &server);
@@ -76,6 +102,8 @@ impl EventHandler<PlayerLeaveEvent> for LeaveListener {
         guard.chunk_cache.remove(&uuid);
         guard.selection.forget(&uuid);
         guard.glass.forget(&uuid);
+        // PvP protection banks while offline (port of `PvpProtHandler#onPlayerQuit`).
+        guard.timers.bank_pvp(&uuid);
 
         event
     }
@@ -84,7 +112,7 @@ impl EventHandler<PlayerLeaveEvent> for LeaveListener {
 pub struct MoveListener;
 
 impl EventHandler<PlayerMoveEvent> for MoveListener {
-    fn handle(&self, _server: Server, mut event: EventData<PlayerMoveEvent>) -> EventData<PlayerMoveEvent> {
+    fn handle(&self, server: Server, mut event: EventData<PlayerMoveEvent>) -> EventData<PlayerMoveEvent> {
         let uuid = core::uuid_of(&event.player);
 
         let (x, _y, z) = event.to_position;
@@ -190,6 +218,23 @@ impl EventHandler<PlayerMoveEvent> for MoveListener {
             return event;
         }
 
+        // PvP protection banking: time only ticks outside the safezone (port of
+        // the `PvpProtTimer#pause` calls on faction/world changes).
+        {
+            let mut guard = state().write().unwrap();
+            if is_safezone {
+                guard.timers.bank_pvp(&uuid);
+            } else {
+                guard.timers.resume_pvp(&uuid);
+            }
+        }
+
+        // SOTW visibility follows the safezone boundary (port of
+        // `SotwHandler#toggleSotwInvisibility(Player, Faction)`).
+        if is_safezone != was_safezone {
+            crate::sotw::update_player_visibility(&server, &event.player, is_safezone);
+        }
+
         let announce = {
             let mut guard = state().write().unwrap();
             let previous = guard.chunk_cache.get(&uuid).cloned();
@@ -261,6 +306,8 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
             }
 
             guard.timers.cancel(&uuid, TimerType::CombatTag);
+            // Death removes PvP protection entirely (port of `PvpProtHandler#onPlayerDeath`).
+            guard.timers.cancel_pvp(&uuid);
 
             // DTR loss for the victim's faction (port of the faction death handlers).
             let faction_id = guard.factions.by_member(&uuid).map(|f| f.id.clone());
@@ -305,6 +352,121 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
             guard.selection.cancel_local(&event.player);
             guard.glass.clear_type(&event.player, crate::glass::GlassType::ClaimSelection);
         }
+
+        event
+    }
+}
+
+/// Re-awards PvP protection on respawn and flags protected players that
+/// respawned inside a claim they may not enter (port of
+/// `PvpProtHandler#onPlayerRespawn`).
+pub struct RespawnListener;
+
+impl EventHandler<PlayerRespawnEvent> for RespawnListener {
+    fn handle(&self, _server: Server, event: EventData<PlayerRespawnEvent>) -> EventData<PlayerRespawnEvent> {
+        let uuid = core::uuid_of(&event.player);
+        let (x, _y, z) = event.position;
+        let world = event.respawned_world.get_name();
+        let block_x = x.floor() as i32;
+        let block_z = z.floor() as i32;
+
+        let protect_seconds = state().read().unwrap().config.timers.pvp_protection_seconds;
+        let (in_safezone, deny) = {
+            let guard = state().read().unwrap();
+            let in_safezone = matches!(
+                core::territory_at_guard(&guard, &world, block_x, block_z),
+                core::Territory::Safezone
+            );
+            let deny = if in_safezone {
+                false
+            } else {
+                let can_enter = guard.raw.config.bool("PVP_PROTECTION.CAN_ENTER_OWN_CLAIM");
+                guard
+                    .claims
+                    .faction_at(&world, block_x, block_z)
+                    .and_then(|owner| guard.factions.get(owner))
+                    .map(|faction| faction.should_cancel_pvp_timer_entrance(&uuid, can_enter))
+                    .unwrap_or(false)
+            };
+            (in_safezone, deny)
+        };
+
+        {
+            let mut guard = state().write().unwrap();
+            guard.timers.cancel_pvp(&uuid);
+            guard.timers.activate_pvp(&uuid, protect_seconds, in_safezone);
+            if deny {
+                // Ejected on the next tick, once the respawn teleport has been applied.
+                guard.protection_ejects.insert(uuid.clone());
+            }
+            // Keep the territory cache in sync with the new position.
+            guard.chunk_cache.remove(&uuid);
+        }
+
+        event
+    }
+}
+
+/// Denies teleports into claims while PvP protection is active (port of
+/// `PvpProtHandler#onPlayerTeleport`; the enderpearl refund is not ported),
+/// banks/resumes the timer depending on the destination and applies SOTW
+/// visibility (port of `SotwHandler#onPlayerTeleport`).
+pub struct TeleportListener;
+
+impl EventHandler<PlayerTeleportEvent> for TeleportListener {
+    fn handle(&self, server: Server, mut event: EventData<PlayerTeleportEvent>) -> EventData<PlayerTeleportEvent> {
+        let uuid = core::uuid_of(&event.player);
+        let (x, _y, z) = event.to_position;
+        let block_x = x.floor() as i32;
+        let block_z = z.floor() as i32;
+        let world = core::world_name(&event.player);
+
+        let (in_safezone, deny, protected) = {
+            let guard = state().read().unwrap();
+            let in_safezone = matches!(
+                core::territory_at_guard(&guard, &world, block_x, block_z),
+                core::Territory::Safezone
+            );
+            let protected = guard.timers.is_active(&uuid, TimerType::PvpProtection);
+            let deny = if protected && !in_safezone {
+                let can_enter = guard.raw.config.bool("PVP_PROTECTION.CAN_ENTER_OWN_CLAIM");
+                guard
+                    .claims
+                    .faction_at(&world, block_x, block_z)
+                    .and_then(|owner| guard.factions.get(owner))
+                    .map(|faction| faction.should_cancel_pvp_timer_entrance(&uuid, can_enter))
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            (in_safezone, deny, protected)
+        };
+
+        if deny {
+            event.cancelled = true;
+            let (prefix, message) = {
+                let guard = state().read().unwrap();
+                (
+                    guard.raw.language.string("PREFIX"),
+                    guard.lang.pvp_protection_deny_teleport.clone(),
+                )
+            };
+            core::send(&event.player, &format!("{prefix}{message}"));
+            return event;
+        }
+
+        if protected {
+            let mut guard = state().write().unwrap();
+            if in_safezone {
+                guard.timers.bank_pvp(&uuid);
+            } else {
+                guard.timers.resume_pvp(&uuid);
+            }
+        }
+
+        // SOTW: update visibility for the destination (no-op when the timer is
+        // not running or hiding is disabled).
+        crate::sotw::update_player_visibility(&server, &event.player, in_safezone);
 
         event
     }

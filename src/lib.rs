@@ -28,6 +28,7 @@ mod listeners;
 mod potion_components;
 mod scoreboard;
 mod selection;
+mod sotw;
 mod staffmode;
 mod state;
 mod tab;

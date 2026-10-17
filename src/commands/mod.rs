@@ -6,6 +6,8 @@ pub mod faction;
 pub mod hologram;
 pub mod kit;
 pub mod lives;
+pub mod pvp;
+pub mod sotw;
 pub mod staff;
 
 use pumpkin_plugin_api::command::{Arg, Command, ConsumedArgs};
@@ -44,6 +46,8 @@ pub fn register(context: &Context) -> Result<(), String> {
     staff::register(context)?;
     hologram::register(context)?;
     kit::register(context)?;
+    pvp::register(context)?;
+    sotw::register(context)?;
     Ok(())
 }
 

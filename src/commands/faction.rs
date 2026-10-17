@@ -1149,6 +1149,20 @@ fn home(sender: &CommandSender, player: &Player, uuid: &str) {
             return;
         };
 
+        // PvP protection denies `/f home` unless own claims may be entered
+        // (port of `HomeCommand#execute`).
+        if !guard.raw.config.bool("PVP_PROTECTION.CAN_ENTER_OWN_CLAIM")
+            && guard.timers.is_active(uuid, TimerType::PvpProtection)
+        {
+            let prefix = guard.raw.language.string("FACTION_PREFIX");
+            let message = guard
+                .raw
+                .language
+                .string("FACTIONS.HOME_COMMAND.CANNOT_TELEPORT.WITH_PVP_TIMER");
+            reply(sender, &format!("{prefix}{message}"));
+            return;
+        }
+
         let warmup = match core::dimension_of(&home.world) {
             core::Dimension::Overworld => guard.config.home_warmup.overworld,
             core::Dimension::Nether => guard.config.home_warmup.nether,

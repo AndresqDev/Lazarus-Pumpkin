@@ -91,7 +91,9 @@ fn tick(server: &Server) {
     };
 
     announce_expired(server, &expired);
+    crate::sotw::check_expiry(server);
     process_pending(server);
+    process_protection_ejects(server);
 
     for player in server.get_all_players() {
         scoreboard::update(&player, server);
@@ -104,7 +106,7 @@ fn tick(server: &Server) {
         let players = server.get_all_players();
 
         // Precompute the per-player flags (avoids borrowing fields twice).
-        let flags: Vec<(bool, bool)> = players
+        let flags: Vec<(bool, bool, bool)> = players
             .iter()
             .map(|player| {
                 let uuid = crate::core::uuid_of(player);
@@ -113,6 +115,7 @@ fn tick(server: &Server) {
                     guard
                         .timers
                         .is_active(&uuid, crate::timers::TimerType::PvpProtection),
+                    guard.timers.sotw_active() && !guard.sotw.enabled_players.contains(&uuid),
                     matches!(
                         crate::core::territory_at_guard(
                             &guard,
@@ -127,7 +130,7 @@ fn tick(server: &Server) {
             .collect();
 
         let crate::state::AppState { classes, raw, factions, .. } = &mut *guard;
-        for (player, (pvp_protected, in_safezone)) in players.iter().zip(flags) {
+        for (player, (pvp_protected, sotw_protected, in_safezone)) in players.iter().zip(flags) {
             let uuid = crate::core::uuid_of(player);
             let faction_id = factions.by_member(&uuid).map(|f| f.id.clone());
             classes.tick_player(player, &server, &raw.language, &raw.config, faction_id.as_deref());
@@ -137,6 +140,7 @@ fn tick(server: &Server) {
                 factions,
                 &raw.config,
                 pvp_protected,
+                sotw_protected,
                 in_safezone,
             );
             // Mage energy regen.
@@ -174,15 +178,17 @@ fn glass_tick(server: &Server) {
 fn announce_expired(server: &Server, expired: &[(String, TimerType)]) {
     for (uuid, timer_type) in expired {
         let message = match timer_type {
-            TimerType::CombatTag => Some("&aYou are no longer combat tagged."),
-            TimerType::PvpProtection => Some("&cYour PvP protection has expired."),
+            TimerType::CombatTag => Some("&aYou are no longer combat tagged.".to_string()),
+            TimerType::PvpProtection => {
+                Some(state().read().unwrap().lang.pvp_protection_expired.clone())
+            }
             _ => None,
         };
         let Some(message) = message else {
             continue;
         };
         if let Some(player) = lookup(server, uuid) {
-            core::send(&player, message);
+            core::send(&player, &message);
         }
     }
 }
@@ -223,6 +229,70 @@ fn process_pending(server: &Server) {
             }
             _ => {}
         }
+    }
+}
+
+/// Teleports protected players out of claims they cannot enter (delayed respawn
+/// ejections; port of the safe-location teleport in
+/// `PvpProtHandler#onPlayerRespawn`).
+fn process_protection_ejects(server: &Server) {
+    let pending: Vec<String> = {
+        let mut guard = state().write().unwrap();
+        std::mem::take(&mut guard.protection_ejects).into_iter().collect()
+    };
+
+    let mut retry: Vec<String> = Vec::new();
+
+    for uuid in pending {
+        let Some(player) = lookup(server, &uuid) else {
+            // Offline: keep the flag so the ejection runs after they log back in.
+            retry.push(uuid);
+            continue;
+        };
+
+        let safe = {
+            let guard = state().read().unwrap();
+            if !guard.timers.is_active(&uuid, TimerType::PvpProtection) {
+                continue;
+            }
+            let location = core::location(&player);
+            let Some(owner) =
+                guard.claims.faction_at(&location.world, location.block_x(), location.block_z())
+            else {
+                continue;
+            };
+            let can_enter = guard.raw.config.bool("PVP_PROTECTION.CAN_ENTER_OWN_CLAIM");
+            let deny = guard
+                .factions
+                .get(owner)
+                .map(|faction| faction.should_cancel_pvp_timer_entrance(&uuid, can_enter))
+                .unwrap_or(false);
+            if !deny {
+                continue;
+            }
+            guard
+                .claims
+                .get_safe_location(&location.world, location.block_x(), location.block_z())
+        };
+
+        let (world_name, safe_x, safe_z) = safe;
+        if let Some(world) = server.get_world_by_name(&world_name) {
+            let (_, y, _) = player.get_position();
+            player.teleport((safe_x as f64 + 0.5, y, safe_z as f64 + 0.5), None, None, world);
+        }
+
+        let (prefix, message) = {
+            let guard = state().read().unwrap();
+            (
+                guard.raw.language.string("FACTION_PREFIX"),
+                guard.lang.pvp_protection_teleport_due_to_claim.clone(),
+            )
+        };
+        core::send(&player, &format!("{prefix}{message}"));
+    }
+
+    if !retry.is_empty() {
+        state().write().unwrap().protection_ejects.extend(retry);
     }
 }
 

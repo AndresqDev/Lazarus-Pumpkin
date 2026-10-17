@@ -63,6 +63,68 @@ pub fn format_duration(millis: i64) -> String {
     }
 }
 
+/// Formats a duration (in milliseconds) as a `MM:SS` clock (or `HH:MM:SS` past
+/// one hour), the format `PvpProtTimer#getTimeLeft` / `SystemTimer#getDynamicTimeLeft`
+/// used for `/pvp time` and `/sotw time`.
+pub fn format_clock(millis: i64) -> String {
+    let total_seconds = millis.max(0) / 1000;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+
+    if hours > 0 {
+        format!("{hours:02}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
+    }
+}
+
+/// Formats an amount of seconds as `HH:MM:SS` (original
+/// `StringUtils.formatTime(..., SECONDS_TO_HOURS)`, used by the SOTW broadcast).
+pub fn format_hms(seconds: u64) -> String {
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    let secs = seconds % 60;
+    format!("{hours:02}:{minutes:02}:{secs:02}")
+}
+
+/// Port of `StringUtils#parseSeconds`: accepts a plain integer (seconds) or a
+/// combination of `d`/`h`/`m`/`s` suffixes (`10`, `10s`, `5m`, `2h`, `1d2h30m`).
+/// Returns `None` for invalid input (the original returns `-1`).
+pub fn parse_seconds(value: &str) -> Option<i64> {
+    let trimmed = value.trim();
+    if let Ok(seconds) = trimmed.parse::<i64>() {
+        return Some(seconds.abs());
+    }
+
+    let mut rest = trimmed.to_lowercase();
+    if rest == "0s" {
+        return Some(0);
+    }
+
+    let mut seconds: i64 = 0;
+    for (ch, multiplier) in [('d', 86400_i64), ('h', 3600), ('m', 60), ('s', 1)] {
+        if !rest.contains(ch) {
+            continue;
+        }
+        let mut split = rest.splitn(2, ch);
+        let first = split.next().unwrap_or("");
+        let after = split.next().unwrap_or("");
+        if let Ok(part) = first.parse::<i64>() {
+            seconds += part.abs() * multiplier;
+            if !after.is_empty() {
+                rest = after.to_string();
+            }
+        }
+    }
+
+    if seconds == 0 {
+        None
+    } else {
+        Some(seconds)
+    }
+}
+
 /// Capitalizes the first character of a string (used by role names).
 pub fn capitalize(input: &str) -> String {
     let mut chars = input.chars();

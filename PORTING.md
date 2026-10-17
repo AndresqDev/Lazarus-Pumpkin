@@ -72,7 +72,7 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `tab.*` | ✅ | header/footer + per-player name/order/latency (`tab.toml`) |
 | `hologram.*` | ✅ | `TextDisplay` entities + `/hologram` commands |
 | `handlers.chat.*` | 🟡 | faction/ally chat + format; blocked commands handled |
-| `handlers.timer.*` | ✅ | combat tag, pvp protection, enderpearl/gapple cooldowns |
+| `handlers.timer.*` | ✅ | combat tag, pvp protection (banked/paused in safezones), SOTW timer + hide-players |
 | `handlers.block.*` (auto-smelt, cobweb, crowbar, filter, subclaim, found ore) | ⬜ | |
 | `handlers.death.*` (death messages, death signs, head drop, stattrak) | ⬜ | |
 | `handlers.limiter.*` (enchant/potion/entity limits) | ⬜ | |
@@ -110,12 +110,43 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   exist on Pumpkin.
 * **Time** is measured in unix milliseconds for timers, using Pumpkin's scheduler
   (20 ticks/second).
+* **PvP protection is banked, not ticking, inside safezones**: the full
+  `PvpProtTimer` model is ported — `pvp_banked` holds the paused remainder,
+  `is_active`/`remaining` report paused protection as active and every consumer
+  (scoreboard, class gates, glass walls, claim entry) sees it.
+* **SOTW** keeps the original's runtime state in memory (`enabled_players`,
+  `hide_players`) and persists only the timer (`timers.json` → `sotw_until`),
+  matching `timers.yml` `SotwTimer`.
+
+### Incomplete ports caused by host API limits
+
+Final where the API allows; the following pieces of the originals could not be
+ported and are documented instead of silently diverging (see the sources for
+context):
+
+* `PVP_PROTECTION.DISABLE_END_ENTRY` — the host teleport event carries no cause,
+  so end-portal teleports cannot be told apart from any other teleport.
+* `PVP_PROTECTION.DISABLED_ITEMS` / `PICKUP_DENY_ITEMS` — dead code in the
+  original snapshot (no consumption path); not ported, like the original.
+* SOTW auto-inventory drops (`onBlockBreak`) — the host block-drop event fires
+  without the owning player, so drops cannot be routed into the miner's
+  inventory; they stay on the ground.
+* SOTW drops-to-killer (`onEntityDeath`) — the entity-drop event has no killer
+  id in the host API.
+* SOTW nametag colour via `updateTabRelations` — the port has no nametag team
+  system.
+* Enderpearl refund on a denied protected teleport — the cancellation works,
+  the item refund is not implemented.
+* `CreatureSpawnEvent` — the gate is ported but the host does not fire it for
+  every spawn path, so the SOTW spawner-only rule is best-effort.
 
 ## 5. Roadmap
 
 Recently completed: client-side block render (`glass.rs`), selection wand,
 scoreboard placeholders, tab list, enderpearl/gapple cooldowns, deathbans + lives,
-admin faction subcommands, vanish/staff mode, holograms and kits.
+admin faction subcommands, vanish/staff mode, holograms, kits, PvP protection
+phase timers (safe-time banking, `/pvp`, attacker-side denial, `/f home` gate)
+and the SOTW system (`/sotw`, damage immunity, safezone hiding, scoreboard line).
 
 Still to port (in rough priority order):
 
@@ -144,8 +175,9 @@ src/
 ├── tab.rs              tab list header/footer + names
 ├── glass.rs            client-side block render engine (send_block_change)
 ├── selection.rs        claim wand + selection state
-├── timers.rs           TimerManager (player/faction/custom timers)
+├── timers.rs           TimerManager (player/faction/custom timers, PvP-prot banking, SOTW)
 ├── staffmode.rs        vanish + staff mode
+├── sotw.rs             Start-Of-The-World timer, immunity + safezone hiding
 ├── hologram.rs         TextDisplay holograms
 ├── kits.rs             inventory kits (lore + enchantments)
 ├── deathban.rs         deathban / lives handling
@@ -162,9 +194,11 @@ src/
 │   ├── lives.rs        /lives
 │   ├── staff.rs        /vanish, /staffmode
 │   ├── hologram.rs     /hologram
+│   ├── pvp.rs          /pvp (enable / time)
+│   ├── sotw.rs         /sotw (start/stop/hideplayers/enable/time)
 │   └── kit.rs          /kit
 └── listeners/
-    ├── player.rs       join/leave/move/death
+    ├── player.rs       join/leave/move/death/respawn/teleport
     ├── chat.rs         faction/ally chat
     ├── combat.rs       friendly fire, combat tag, pvp protection
     ├── block.rs        claim block protection

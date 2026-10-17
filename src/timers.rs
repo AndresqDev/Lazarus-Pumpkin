@@ -64,15 +64,46 @@ pub struct TimerManager {
     pub faction_freeze: BTreeMap<String, i64>,
     /// custom timer name -> (uuid -> expiry millis)
     pub custom: BTreeMap<String, BTreeMap<String, i64>>,
+    /// PvP protection paused/banked (uuid -> remaining millis). Port of
+    /// `PvpProtTimer#paused`: while inside a safezone (or offline) protection
+    /// time does not tick.
+    #[serde(default)]
+    pub pvp_banked: BTreeMap<String, i64>,
+    /// SOTW global timer expiry millis (`None` = timer not running). Not
+    /// serialised directly: the persisted form is `sotw_remaining_seconds`, so
+    /// server downtime does not consume the timer (port of
+    /// `SystemTimer#saveTimer`, which stores the remaining seconds).
+    #[serde(skip)]
+    pub sotw_until: Option<i64>,
+    /// Remaining SOTW seconds as of the last save (see
+    /// [`TimerManager::sotw_capture_remaining`]).
+    #[serde(default)]
+    pub sotw_remaining_seconds: Option<u64>,
 }
 
 impl TimerManager {
     pub fn is_active(&self, uuid: &str, timer_type: TimerType) -> bool {
-        self.remaining(uuid, timer_type) > 0
+        // The original `PvpProtTimer#isActive` returns true for banked entries
+        // too, so every consumer (scoreboard, glass walls, class ticks) sees the
+        // protection as active while paused.
+        if timer_type == TimerType::PvpProtection && self.pvp_banked.contains_key(uuid) {
+            return true;
+        }
+        self.remaining_raw(uuid, timer_type) > 0
     }
 
-    /// Remaining time in millis (0 when inactive/expired).
+    /// Remaining time in millis (0 when inactive/expired). Ranked/banked PvP
+    /// protection reports its banked remainder.
     pub fn remaining(&self, uuid: &str, timer_type: TimerType) -> i64 {
+        if timer_type == TimerType::PvpProtection
+            && let Some(banked) = self.pvp_banked.get(uuid)
+        {
+            return *banked;
+        }
+        self.remaining_raw(uuid, timer_type)
+    }
+
+    fn remaining_raw(&self, uuid: &str, timer_type: TimerType) -> i64 {
         let Some(timers) = self.players.get(uuid) else {
             return 0;
         };
@@ -151,6 +182,97 @@ impl TimerManager {
         self.custom
             .get(name)
             .and_then(|map| map.get(uuid))
+            .map(|expiry| (expiry - crate::util::now_millis()).max(0))
+            .unwrap_or(0)
+    }
+
+    // -----------------------------------------------------------------------
+    // PvP protection (port of `timer.scoreboard.PvpProtTimer`).
+    // -----------------------------------------------------------------------
+
+    /// `PvpProtTimer#activate`: awards protection; when `banked` (safezone) it
+    /// stores the full duration instead of starting to tick.
+    pub fn activate_pvp(&mut self, uuid: &str, seconds: u64, banked: bool) {
+        if seconds == 0 {
+            return;
+        }
+        if banked {
+            self.pvp_banked.insert(uuid.to_string(), seconds as i64 * 1000);
+        } else {
+            self.activate(uuid, TimerType::PvpProtection, seconds);
+        }
+    }
+
+    /// `PvpProtTimer#pause(player, true)`: banks the remaining time so it stops
+    /// ticking (no-op when nothing is running or it is already banked).
+    pub fn bank_pvp(&mut self, uuid: &str) {
+        if self.pvp_banked.contains_key(uuid) {
+            return;
+        }
+        let remaining = self.remaining_raw(uuid, TimerType::PvpProtection);
+        if remaining <= 0 {
+            return;
+        }
+        self.pvp_banked.insert(uuid.to_string(), remaining);
+        self.cancel(uuid, TimerType::PvpProtection);
+    }
+
+    /// `PvpProtTimer#pause(player, false)`: resumes a banked timer (no-op when
+    /// nothing is banked).
+    pub fn resume_pvp(&mut self, uuid: &str) {
+        let Some(remaining) = self.pvp_banked.remove(uuid) else {
+            return;
+        };
+        if remaining <= 0 {
+            return;
+        }
+        self.players
+            .entry(uuid.to_string())
+            .or_default()
+            .insert(TimerType::PvpProtection, crate::util::now_millis() + remaining);
+    }
+
+    /// `PvpProtTimer#cancel`: removes running **and** banked protection.
+    pub fn cancel_pvp(&mut self, uuid: &str) {
+        self.pvp_banked.remove(uuid);
+        self.cancel(uuid, TimerType::PvpProtection);
+    }
+
+    /// `PvpProtTimer#isActive`.
+    pub fn pvp_active(&self, uuid: &str) -> bool {
+        self.is_active(uuid, TimerType::PvpProtection)
+    }
+
+    // -----------------------------------------------------------------------
+    // SOTW (port of `timer.scoreboard.SotwTimer`).
+    // -----------------------------------------------------------------------
+
+    /// `SystemTimer#activate`: starts (or restarts) the global SOTW timer.
+    pub fn activate_sotw(&mut self, seconds: u64) {
+        self.sotw_until = Some(crate::util::now_millis() + seconds as i64 * 1000);
+    }
+
+    /// `SystemTimer#cancel`.
+    pub fn cancel_sotw(&mut self) {
+        self.sotw_until = None;
+    }
+
+    /// `SotwTimer#isActive`.
+    pub fn sotw_active(&self) -> bool {
+        self.sotw_remaining() > 0
+    }
+
+    /// Refreshes the serialised SOTW remaining seconds from the live expiry;
+    /// called by [`crate::state::save_all`] before writing `timers.json`.
+    pub fn sotw_capture_remaining(&mut self) {
+        self.sotw_remaining_seconds = self
+            .sotw_until
+            .map(|until| ((until - crate::util::now_millis()).max(0) / 1000) as u64);
+    }
+
+    /// `SystemTimer#getCooldown` in millis (0 when not running).
+    pub fn sotw_remaining(&self) -> i64 {
+        self.sotw_until
             .map(|expiry| (expiry - crate::util::now_millis()).max(0))
             .unwrap_or(0)
     }

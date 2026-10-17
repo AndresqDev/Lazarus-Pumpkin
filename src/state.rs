@@ -103,6 +103,7 @@ pub struct AppState {
     pub claims: ClaimManager,
     pub userdata: UserdataManager,
     pub timers: TimerManager,
+    pub sotw: crate::sotw::SotwState,
     pub glass: GlassManager,
     pub selection: SelectionManager,
     pub staff: StaffManager,
@@ -117,6 +118,9 @@ pub struct AppState {
     pub tab_cache: std::collections::BTreeMap<String, Vec<String>>,
     /// Transient: world name -> (spawn x, spawn z), used to centre the warzone.
     pub spawn_centers: std::collections::BTreeMap<String, (i32, i32)>,
+    /// Transient: protected players to eject on the next tick (they respawned
+    /// inside a claim they cannot enter).
+    pub protection_ejects: std::collections::BTreeSet<String>,
 }
 
 /// Tracks a player's last known chunk + displayed territory.
@@ -146,7 +150,14 @@ pub fn init(data_folder: String) -> Result<(), String> {
     claims.rebuild_index();
 
     let userdata: UserdataManager = load_json(&data_folder, "userdata.json");
-    let timers: TimerManager = load_json(&data_folder, "timers.json");
+    let mut timers: TimerManager = load_json(&data_folder, "timers.json");
+    // Resume a persisted SOTW timer from its saved remaining seconds (the
+    // original `SystemTimer#loadTimer` reactivates from `timers.yml`).
+    if let Some(seconds) = timers.sotw_remaining_seconds
+        && seconds > 0
+    {
+        timers.sotw_until = Some(crate::util::now_millis() + seconds as i64 * 1000);
+    }
     let holograms: std::collections::BTreeMap<String, Hologram> =
         load_json(&data_folder, "holograms.json");
     // Ship the 9 default kits (converted from the original `kits.yml`) on first run.
@@ -158,6 +169,8 @@ pub fn init(data_folder: String) -> Result<(), String> {
     tracing::info!("lazarus-kits loaded {} kits", kits.kits.len());
     let mut classes = crate::classes::PvpClassManager::new();
     classes.load(&raw.classes);
+
+    let sotw = crate::sotw::SotwState::new(config.sotw.hide_players);
 
     STATE
         .set(RwLock::new(AppState {
@@ -171,6 +184,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
             claims,
             userdata,
             timers,
+            sotw,
             glass: GlassManager::default(),
             selection: SelectionManager::default(),
             staff: StaffManager::default(),
@@ -181,6 +195,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
             chunk_cache: std::collections::BTreeMap::new(),
             tab_cache: std::collections::BTreeMap::new(),
             spawn_centers: std::collections::BTreeMap::new(),
+            protection_ejects: std::collections::BTreeSet::new(),
         }))
         .map_err(|_| "state already initialised".to_string())
 }
@@ -192,7 +207,10 @@ pub fn state() -> &'static RwLock<AppState> {
 
 /// Persists every store to the data folder.
 pub fn save_all() {
-    let guard = state().read().unwrap();
+    let mut guard = state().write().unwrap();
+    // Store the SOTW timer as remaining seconds so downtime does not consume it.
+    guard.timers.sotw_capture_remaining();
+
     let folder = guard.data_folder.clone();
 
     write_json(&folder, "factions.json", &guard.factions);
@@ -287,6 +305,18 @@ pub fn sync_faction_yaml(config: &mut Config, raw: &RawConfigs) {
         config.relation_colors.teammate = y.string("RELATION_COLORS.TEAMMATE_COLOR");
         config.relation_colors.ally = y.string("RELATION_COLORS.ALLY_COLOR");
         config.relation_colors.enemy = y.string("RELATION_COLORS.ENEMY_COLOR");
+        config.relation_colors.sotw = y.string("RELATION_COLORS.SOTW_COLOR");
+    }
+    // PvP protection duration (the original `PvpProtTimer` default delay).
+    if y.has("PVP_PROTECTION") {
+        config.timers.pvp_protection_seconds = y.int("PVP_PROTECTION.DURATION").max(0) as u64;
+    }
+    // SOTW timer (port of the `SOTW_TIMER` section).
+    if y.has("SOTW_TIMER") {
+        config.sotw.default_time_minutes = y.int("SOTW_TIMER.DEFAULT_TIME").max(0) as u64;
+        config.sotw.spawn_mobs_from_spawners_only =
+            y.bool("SOTW_TIMER.SPAWN_MOBS_FROM_SPAWNERS_ONLY");
+        config.sotw.hide_players = y.bool("SOTW_TIMER.HIDE_PLAYERS");
     }
 }
 
