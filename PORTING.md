@@ -63,7 +63,7 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `factions.*` (model, manager, claims, roles, relations) | ✅ | flattened `Faction` + `FactionKind`; fast chunk claim index |
 | `factions.commands.player.*` | ✅ | core + admin subcommands; selection-wand claiming (see below) |
 | `factions.commands.admin.*` | ✅ | setdtr/adddtr/removedtr/setpoints/setbalance/setlives/setkills/setfreeze(`setregen`)/thaw/forcekick/forceleader/forcerename/system*/color/deathban/save/… — messages + usage from the raw `language.yml` |
-| `factions.listeners.*` | 🟡 | join/leave/move/death/chat/block/damage/command/interact ported |
+| `factions.listeners.*` | 🟡 | join/leave/move/death/chat/block (break/place/bucket/grief) + block-use protection/damage/command/wand ported; hanging (paintings/item frames) + `PHYSICAL` interacts pending |
 | `factions.event.*` (Bukkit events) | ⬜ | replaced by direct calls; no custom Bukkit event bus in Pumpkin |
 | `userdata.Userdata`, `UserdataManager` | ✅ | JSON persistence (Mongo dropped; sandbox only exposes the data folder) |
 | `timer.*` (combat tag, apple, enderpearl, pvp prot, home, stuck, logout) | ✅ | timer storage, scoreboard + consumption hooks (pearl/apple) |
@@ -78,6 +78,7 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `handlers.death.*` (death messages, death signs, head drop, stattrak) | ⬜ | |
 | `handlers.limiter.*` (enchant/potion/entity limits) | ⬜ | |
 | `handlers.logger.*` (combat logger) | ⬜ | |
+| `handlers.kitmap.*` (KitmapHandler, KillstreakHandler) | 🟡 | kitmap mode fully wired: config sync from raw `config.yml`, deathban/DTR-loss skips, safezone drop denial, item-clear task, kill reward + killstreaks (console commands + broadcast), PvP-timer clearing/gating, first-join spawn teleport, `KITMAP_STATS` sidebar block, KITMAP-only kits restricted to safezones; `/spawn` teleport, `/topkillstreaks` and the Miner kitmap renames pending (below) |
 | `handlers.leaderboard.*` | 🟡 | `/f top` + `/f list` faithful (hover/click, relation colours, pagination); leaderboard holograms TODO |
 | `abilities.*` | ⬜ | large subsystem; ported last |
 | `classes.*` (Archer, Bard, Miner, Rogue, Mage, Bomber) | ⬜ | |
@@ -133,6 +134,20 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 * **SOTW** keeps the original's runtime state in memory (`enabled_players`,
   `hide_players`) and persists only the timer (`timers.json` →
   `sotw_remaining_millis`), matching `timers.yml` `SotwTimer`.
+* **The spawn safezone is never claimed automatically.** Like the original, a fresh
+  install only creates the system factions (Wilderness, Warzone and the
+  `SpawnFaction` — kind `Safezone`); the spawn claim itself is made manually
+  (`/f claimfor Spawn`, admin wand, …). `additionalFactionSetup` is ported as
+  `normalize_system_factions`: it forces `safezone = true` / `deathban = false` on
+  the spawn faction on every load but **does not rename it**, so `/f rename` on
+  the spawn faction persists like in the original.
+* **Kitmap mode** mirrors the original's two classes: `KitmapHandler` is emulated
+  by checking `KITMAP_MODE.ENABLED` inside the relevant handlers (the original only
+  registered the handler when kitmap was on) and `KillstreakHandler` by the death
+  handler's kitmap block. Config values are synced from the raw `config.yml` on
+  every load (`KITMAP_MODE`, `KITMAP_CLEAR_ITEMS`, `KITMAP_KILL_REWARD`,
+  `KITMAP_KILLSTREAK.KILLS`), and the sidebar adds the `KITMAP_STATS` block from the
+  raw `scoreboard.yml`.
 
 ### Incomplete ports caused by host API limits
 
@@ -175,6 +190,32 @@ context):
   metric is non-zero, which shows the same top-10 once factions have activity.
 * Combat-logger-only helpers (`Userdata#addKill`/`addDeath` for logger deaths)
   — folded into the regular death flow described above.
+* Kitmap kill/killstreak credit follows the same online-killer convention as the
+  kill stats (see `Player#getKiller` above): the victim's killstreak is always
+  reset, the killer's only when the killer is online.
+* Kitmap reward commands (`KITMAP_KILL_REWARD`, `KITMAP_KILLSTREAK.KILLS`) run
+  through Pumpkin's console command dispatcher, so they must reference commands
+  the server actually provides. The original's `econ`/legacy item-id examples
+  come from an economy plugin + 1.8 syntax; on the port the internal economy is
+  `/economy give <player> <amount>` (`/eco`), and `give`/`effect` take modern
+  registry names.
+* Kitmap `/spawn` (`SpawnTeleportHandler`, `KITMAP_MODE.SPAWN_TELEPORT_DELAY`,
+  `SPAWN_COMMAND.TELEPORTED_KITMAP`, the quit teleport-timer cancel) — the config
+  value is loaded, the command itself is not ported yet.
+* Kitmap leaderboards (`/topkillstreaks`, `LEADERBOARDS.KITMAP_MODE_ONLY`, the
+  killstreak/highest-killstreak holograms) — pending with the leaderboard holograms.
+* Kitmap `Miner`-class renames and ability changes (`SpawnTeleportHandler`,
+  `KitmapHandler`-driven class tweaks) — pending with the abilities/classes port.
+* Block *use* protection is ported (`BlockInteractListener`: clickable materials,
+  safezone allow-list, sneak-with-a-non-block-item bypass, kitmap warzone
+  clickables). Two pieces of the same original listener remain:
+  `PlayerInteractEvent` with the `PHYSICAL` action (the host never fires it, so
+  pressure plates keep their vanilla behaviour instead of being cancelled in
+  protected areas) and the hanging listeners (`HangingPlaceEvent`,
+  `HangingBreakByEntityEvent`, `HangingDamageByEntityEvent` for paintings/item
+  frames — the host events exist and this is the next candidate).
+* `PvpProtHandler#onPlayerInteract` (item-use denial while the PvP timer runs,
+  behind the 10-second logout rule) — pending with the next PvP-protection pass.
 
 ## 5. Roadmap
 
@@ -193,7 +234,14 @@ pass: `/f help` pages from `FACTIONS.HELP_COMMAND.PAGES.<n>`, usage +
 (absolute-vs-points values, `getDtrString()` broadcasts, `setfreeze`/`thaw`
 with `parseSeconds`), `deposit`/`withdraw` broadcasts, `forcekick`/`forceleader`
 messages, and usage messages on every admin subcommand reached without
-arguments (the literals now execute).
+arguments (the literals now execute). Kitmap mode is now ported end to end
+(config sync, every toggle + handler above), the spawn safezone is no longer
+auto-claimed (claims are manual, `additionalFactionSetup` no longer renames the
+spawn faction), and block *use* protection landed: using a clickable block
+outside your territory is denied with the original's `DENY_INTERACT` message
+(chests, doors, buttons, ... — with the safezone allow-list, the sneak bypass
+and the kitmap warzone clickables), and the claim wand skips denied interacts
+like the original `SelectionManager`.
 
 Still to port (in rough priority order):
 
@@ -252,5 +300,6 @@ src/
     ├── block.rs        claim block protection
     ├── command.rs      blocked commands
     ├── interact.rs     claim wand interactions + sneak tracking
+    ├── kitmap.rs       kitmap mode (safezone item-drop denial)
     └── items.rs        enderpearl / golden apple cooldowns
 ```

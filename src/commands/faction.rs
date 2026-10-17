@@ -1398,26 +1398,24 @@ fn territory_info(
     let world = location.world.clone();
     let (bx, bz) = coords.unwrap_or((location.block_x(), location.block_z()));
 
-    let (war_radius, safe_radius) = {
+    let war_radius = {
         let guard = state().read().unwrap();
-        let war = match core::dimension_of(&world) {
+        match core::dimension_of(&world) {
             core::Dimension::Overworld => guard.config.warzone_radius.overworld,
             core::Dimension::Nether => guard.config.warzone_radius.nether,
             core::Dimension::End => guard.config.warzone_radius.end,
-        };
-        (war, guard.config.spawn.safezone_radius)
+        }
     };
 
     let r = war_radius;
-    let s = safe_radius;
     let dist = bx.abs().max(bz.abs());
 
     let territory = core::territory_at(&world, bx, bz);
     let viewer = core::faction_id_of(uuid);
     let display = core::territory_display(&territory, viewer.as_deref());
 
-    let reason = if dist <= s {
-        "Safezone (dist <= safezone)"
+    let reason = if matches!(territory, core::Territory::Safezone) {
+        "Safezone (claimed by the spawn faction)"
     } else if dist <= r {
         "Warzone (dist <= warzone)"
     } else {
@@ -1428,7 +1426,6 @@ fn territory_info(
     reply(sender, &sep);
     reply(sender, "&6&lWarzone square (centro 0,0)");
     reply(sender, format!(" &eWorld: &f{world}"));
-    reply(sender, format!(" &eSafezone: &fX[-{s}, {s}] &7Z[&f-{s}, {s}&7] &8(|x|,|z| <= {s})"));
     reply(sender, format!(" &eWarzone: &fX[-{r}, {r}] &7Z[&f-{r}, {r}&7] &8(|x|,|z| <= {r})"));
     reply(
         sender,

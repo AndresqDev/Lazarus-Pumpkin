@@ -277,6 +277,15 @@ impl TimerManager {
         self.cancel(uuid, TimerType::PvpProtection);
     }
 
+    /// `PvpProtTimer#clearPvpProtections`: drops every banked entry and cancels
+    /// every running protection (called on startup when kitmap mode is on).
+    pub fn clear_pvp_protections(&mut self) {
+        self.pvp_banked.clear();
+        for timers in self.players.values_mut() {
+            timers.remove(&TimerType::PvpProtection);
+        }
+    }
+
     /// `PvpProtTimer#isActive`.
     pub fn pvp_active(&self, uuid: &str) -> bool {
         self.is_active(uuid, TimerType::PvpProtection)

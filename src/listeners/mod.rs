@@ -7,6 +7,7 @@ pub mod command;
 pub mod entity;
 pub mod interact;
 pub mod items;
+pub mod kitmap;
 pub mod player;
 
 use pumpkin_plugin_api::events::EventPriority;
@@ -22,6 +23,7 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(player::TeleportListener, EventPriority::Normal, true)?;
 
     context.register_event_handler(chat::ChatListener, EventPriority::Normal, true)?;
+    context.register_event_handler(kitmap::DropItemListener, EventPriority::Normal, true)?;
 
     context.register_event_handler(combat::EntityDamageByEntityListener, EventPriority::High, true)?;
     context.register_event_handler(combat::EntityDamageListener, EventPriority::High, true)?;
@@ -37,6 +39,8 @@ pub fn register(context: &Context) -> Result<(), String> {
 
     context.register_event_handler(block::BlockBreakListener, EventPriority::High, true)?;
     context.register_event_handler(block::BlockPlaceListener, EventPriority::High, true)?;
+    // Use protection must run before the wand listener (see `BlockInteractListener`).
+    context.register_event_handler(block::BlockInteractListener, EventPriority::High, true)?;
     context.register_event_handler(block::BucketEmptyListener, EventPriority::High, true)?;
     context.register_event_handler(block::BucketFillListener, EventPriority::High, true)?;
     context.register_event_handler(block::EntityExplodeListener, EventPriority::High, true)?;

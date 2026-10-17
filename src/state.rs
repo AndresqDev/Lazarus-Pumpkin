@@ -429,6 +429,38 @@ pub fn sync_faction_yaml(config: &mut Config, raw: &RawConfigs) {
             y.bool("SOTW_TIMER.SPAWN_MOBS_FROM_SPAWNERS_ONLY");
         config.sotw.hide_players = y.bool("SOTW_TIMER.HIDE_PLAYERS");
     }
+    // Kitmap mode (`KITMAP_MODE` / `KITMAP_CLEAR_ITEMS` / `KITMAP_KILL_REWARD` /
+    // `KITMAP_KILLSTREAK`).
+    if y.has("KITMAP_MODE") {
+        config.kitmap.enabled = y.bool("KITMAP_MODE.ENABLED");
+        config.kitmap.disable_deathban = y.bool("KITMAP_MODE.DISABLE_DEATHBAN");
+        config.kitmap.disable_dtr_loss = y.bool("KITMAP_MODE.DISABLE_DTR_LOSS");
+        config.kitmap.disable_item_drop_in_safezone =
+            y.bool("KITMAP_MODE.DISABLE_ITEM_DROP_IN_SAFEZONE");
+        config.kitmap.pvp_timer_enabled = y.bool("KITMAP_MODE.PVP_TIMER_ENABLED");
+        config.kitmap.spawn_teleport_delay = y.int("KITMAP_MODE.SPAWN_TELEPORT_DELAY").max(0) as u64;
+    }
+    if y.has("KITMAP_CLEAR_ITEMS") {
+        config.kitmap.clear_items_enabled = y.bool("KITMAP_CLEAR_ITEMS.ENABLED");
+        config.kitmap.clear_items_interval = y.int("KITMAP_CLEAR_ITEMS.INTERVAL").max(1) as u64;
+    }
+    if y.has("KITMAP_KILL_REWARD") {
+        config.kitmap.kill_reward_enabled = y.bool("KITMAP_KILL_REWARD.ENABLED");
+        config.kitmap.kill_reward_commands = y.string_list("KITMAP_KILL_REWARD.COMMANDS");
+    }
+    if y.has("KITMAP_KILLSTREAK") {
+        config.kitmap.killstreak_enabled = y.bool("KITMAP_KILLSTREAK.ENABLED");
+        // `KillstreakHandler#loadKillstreakRewards`: only integer keys count.
+        config.kitmap.killstreak_rewards = y
+            .keys("KITMAP_KILLSTREAK.KILLS")
+            .into_iter()
+            .filter_map(|key| {
+                key.parse::<i32>().ok().map(|count| {
+                    (count, y.string_list(&format!("KITMAP_KILLSTREAK.KILLS.{key}")))
+                })
+            })
+            .collect();
+    }
 }
 
 fn load_toml<T>(folder: &str, name: &str) -> T

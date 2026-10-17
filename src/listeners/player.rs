@@ -22,22 +22,18 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
         crate::classes::remove_infinite_effects(&event.player);
         let name = core::name_of(&event.player);
 
-        let (welcome_enabled, welcome_message, protect_seconds, show_info, first_join, in_safezone) = {
+        let (
+            welcome_enabled,
+            welcome_message,
+            protect_seconds,
+            show_info,
+            first_join,
+            kitmap_skips_pvp,
+        ) = {
             let mut guard = state().write().unwrap();
             let config = guard.config.clone();
             let first_join = guard.userdata.get(&uuid).is_none();
             guard.userdata.get_or_create(uuid.clone(), name.clone(), &config);
-
-            let location = core::location(&event.player);
-            let in_safezone = matches!(
-                core::territory_at_guard(
-                    &guard,
-                    &location.world,
-                    location.block_x(),
-                    location.block_z()
-                ),
-                core::Territory::Safezone
-            );
 
             (
                 config.join_welcome_message_enabled,
@@ -45,7 +41,7 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
                 config.timers.pvp_protection_seconds,
                 config.factions.show_info_on_join,
                 first_join,
-                in_safezone,
+                config.kitmap.enabled && !config.kitmap.pvp_timer_enabled,
             )
         };
 
@@ -54,10 +50,31 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
             event.join_message = util::text(message);
         }
 
+        // First-join spawn teleport (port of `PvpProtHandler#onPlayerJoin` and,
+        // when kitmap mode skips that handler, `KitmapHandler#onPlayerJoin`).
+        if first_join {
+            teleport_to_join_spawn(&server, &event.player);
+        }
+
+        let in_safezone = {
+            let guard = state().read().unwrap();
+            let location = core::location(&event.player);
+            matches!(
+                core::territory_at_guard(
+                    &guard,
+                    &location.world,
+                    location.block_x(),
+                    location.block_z()
+                ),
+                core::Territory::Safezone
+            )
+        };
+
         // PvP protection (port of `PvpProtHandler#onPlayerJoin`): first joins are
         // awarded the full timer — banked while inside the safezone — while
-        // returning players only resume whatever they had banked.
-        {
+        // returning players only resume whatever they had banked. Kitmap without
+        // the PvP timer skips the whole block.
+        if !kitmap_skips_pvp {
             let mut guard = state().write().unwrap();
             if first_join {
                 guard.timers.activate_pvp(&uuid, protect_seconds, in_safezone);
@@ -87,6 +104,58 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
 
         event
     }
+}
+
+/// First-join teleport (port of `PvpProtHandler#onPlayerJoin` /
+/// `KitmapHandler#onPlayerJoin`): new players are sent to `WORLD_SPAWN` from
+/// `utilities.yml`, or their own world's spawn point when it is unset or points
+/// at a world that is not loaded.
+fn teleport_to_join_spawn(server: &Server, player: &Player) {
+    let configured = {
+        let guard = state().read().unwrap();
+        parse_utilities_location(&guard.raw.utilities.string("WORLD_SPAWN"))
+    };
+
+    if let Some((world_name, x, y, z, yaw, pitch)) = configured
+        && let Some(world) = server.get_world_by_name(&world_name)
+    {
+        player.teleport((x, y, z), Some(yaw), Some(pitch), world);
+        return;
+    }
+
+    let world = player.get_world();
+    let spawn = world.get_spawn_location();
+    player.teleport(
+        (
+            spawn.pos.x as f64 + 0.5,
+            spawn.pos.y as f64,
+            spawn.pos.z as f64 + 0.5,
+        ),
+        Some(spawn.yaw),
+        Some(spawn.pitch),
+        world,
+    );
+}
+
+/// Parses `LocationUtils#stringToLocation`: `world|x|y|z|yaw|pitch`.
+fn parse_utilities_location(value: &str) -> Option<(String, f64, f64, f64, f32, f32)> {
+    if value.is_empty() {
+        return None;
+    }
+
+    let parts: Vec<&str> = value.split('|').collect();
+    if parts.len() < 6 {
+        return None;
+    }
+
+    Some((
+        parts[0].to_string(),
+        parts[1].parse().ok()?,
+        parts[2].parse().ok()?,
+        parts[3].parse().ok()?,
+        parts[4].parse().ok()?,
+        parts[5].parse().ok()?,
+    ))
 }
 
 pub struct LeaveListener;
@@ -373,6 +442,9 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
         };
 
         let mut messages: Vec<(String, String)> = Vec::new();
+        let mut victim_killstreak_lost = 0i32;
+        let mut killer_killstreak_reward: Option<(String, i32, Vec<String>)> = None;
+        let mut kill_reward_commands: Option<Vec<String>> = None;
 
         {
             let mut guard = state().write().unwrap();
@@ -393,9 +465,47 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
                 }
             }
 
+            // Kitmap killstreaks (port of `KillstreakHandler#onPlayerDeath`):
+            // the victim loses theirs (announced when it was non-zero) and the
+            // killer extends theirs, receiving the threshold rewards.
+            if config.kitmap.enabled && config.kitmap.killstreak_enabled {
+                if let Some(user) = guard.userdata.get_mut(&uuid) {
+                    victim_killstreak_lost = user.reset_killstreak();
+                }
+
+                if killer_player.is_some()
+                    && let Some(killer) = &killer_uuid
+                    && let Some(user) = guard.userdata.get_mut(killer)
+                {
+                    user.add_killstreak();
+                    let streak = user.killstreak;
+
+                    if let Some(commands) = config.kitmap.killstreak_rewards.get(&streak) {
+                        killer_killstreak_reward = Some((
+                            killer_name.clone().unwrap_or_default(),
+                            streak,
+                            commands.clone(),
+                        ));
+                    }
+                }
+            }
+
+            // Kitmap kill reward commands (port of `KitmapHandler#onPlayerDeath`).
+            if config.kitmap.enabled
+                && config.kitmap.kill_reward_enabled
+                && killer_player.is_some()
+                && !config.kitmap.kill_reward_commands.is_empty()
+            {
+                kill_reward_commands = Some(config.kitmap.kill_reward_commands.clone());
+            }
+
             guard.timers.cancel(&uuid, TimerType::CombatTag);
-            // Death removes PvP protection entirely (port of `PvpProtHandler#onPlayerDeath`).
-            guard.timers.cancel_pvp(&uuid);
+            // Death removes PvP protection entirely (port of
+            // `PvpProtHandler#onPlayerDeath`; skipped in kitmap mode when the
+            // PvP timer is disabled).
+            if !(config.kitmap.enabled && !config.kitmap.pvp_timer_enabled) {
+                guard.timers.cancel_pvp(&uuid);
+            }
 
             let victim_faction = guard.factions.by_member(&uuid).map(|f| f.id.clone());
 
@@ -403,16 +513,26 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
             // the faction check in `PlayerEventListener#onPlayerDeath`.
             if let Some(faction_id) = &victim_faction {
                 let frozen = guard.timers.is_frozen(faction_id);
-                let loss = match environment {
-                    core::Dimension::Overworld => config.factions.dtr_death_loss.overworld,
-                    core::Dimension::Nether => config.factions.dtr_death_loss.nether,
-                    core::Dimension::End => config.factions.dtr_death_loss.end,
+                // Kitmap can disable DTR loss (and the freeze) entirely, while
+                // still awarding the death points and sending the message with a
+                // zero loss (`PlayerFaction#onDeath`).
+                let skip_dtr_loss = config.kitmap.enabled && config.kitmap.disable_dtr_loss;
+                let loss = if skip_dtr_loss {
+                    0.0
+                } else {
+                    match environment {
+                        core::Dimension::Overworld => config.factions.dtr_death_loss.overworld,
+                        core::Dimension::Nether => config.factions.dtr_death_loss.nether,
+                        core::Dimension::End => config.factions.dtr_death_loss.end,
+                    }
                 };
                 let template = guard.raw.language.string("FACTIONS.MEMBER_DEATH");
 
                 if let Some(faction) = guard.factions.get_mut(faction_id) {
-                    let amount = faction.dtr - loss;
-                    faction.set_dtr(&config, amount);
+                    if !skip_dtr_loss {
+                        let amount = faction.dtr - loss;
+                        faction.set_dtr(&config, amount);
+                    }
                     faction.change_points(
                         faction.points + config.factions.points_per_death,
                         config.factions.allow_negative_points,
@@ -436,10 +556,12 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
                 }
 
                 // `FactionFreezeTimer#activate(this)`.
-                guard.timers.freeze_faction(
-                    faction_id,
-                    config.factions.freeze_duration_minutes * 60,
-                );
+                if !skip_dtr_loss {
+                    guard.timers.freeze_faction(
+                        faction_id,
+                        config.factions.freeze_duration_minutes * 60,
+                    );
+                }
 
                 guard.timers.clear_pending(&uuid);
             }
@@ -465,6 +587,54 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
             let faction = state().read().unwrap().factions.get(&faction_id).cloned();
             if let Some(faction) = faction {
                 core::faction_message(&server, &faction, &message);
+            }
+        }
+
+        // Kitmap killstreak messages and console reward commands (port of
+        // `KillstreakHandler` and `KitmapHandler#onPlayerDeath`); host calls
+        // happen outside the state lock.
+        if victim_killstreak_lost > 0 {
+            let (prefix, template) = {
+                let guard = state().read().unwrap();
+                (
+                    guard.raw.language.string("PREFIX"),
+                    guard.raw.language.string("KITMAP_KILLSTREAK.ON_DEATH"),
+                )
+            };
+            let message =
+                util::replace(&template, "<amount>", &victim_killstreak_lost.to_string());
+            core::send(&event.player, &format!("{prefix}{message}"));
+        }
+
+        if let Some((killer, streak, commands)) = killer_killstreak_reward {
+            for command in &commands {
+                server.execute_command(
+                    &util::replace(command, "<player>", &killer),
+                    pumpkin_plugin_api::server::CommandSender::Console,
+                );
+            }
+
+            let template = state()
+                .read()
+                .unwrap()
+                .raw
+                .language
+                .string("KITMAP_KILLSTREAK.MESSAGE");
+            let message = util::replace_all(
+                &template,
+                &[("<player>", &killer), ("<amount>", &streak.to_string())],
+            );
+            crate::sotw::broadcast(&server, &message);
+        }
+
+        if let Some(commands) = kill_reward_commands {
+            if let Some(killer) = &killer_name {
+                for command in &commands {
+                    server.execute_command(
+                        &util::replace(command, "<player>", killer),
+                        pumpkin_plugin_api::server::CommandSender::Console,
+                    );
+                }
             }
         }
 
@@ -496,7 +666,21 @@ impl EventHandler<PlayerRespawnEvent> for RespawnListener {
         let block_x = x.floor() as i32;
         let block_z = z.floor() as i32;
 
-        let protect_seconds = state().read().unwrap().config.timers.pvp_protection_seconds;
+        let (protect_seconds, kitmap_skips_pvp) = {
+            let guard = state().read().unwrap();
+            (
+                guard.config.timers.pvp_protection_seconds,
+                guard.config.kitmap.enabled && !guard.config.kitmap.pvp_timer_enabled,
+            )
+        };
+
+        // `PvpProtHandler#onPlayerRespawn` returns early in kitmap mode without
+        // the PvP timer: neither cancels nor (re)activates protection.
+        if kitmap_skips_pvp {
+            state().write().unwrap().chunk_cache.remove(&uuid);
+            return event;
+        }
+
         let (in_safezone, deny) = {
             let guard = state().read().unwrap();
             let in_safezone = core::is_safezone_guard(

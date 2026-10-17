@@ -144,6 +144,14 @@ impl<'a> SidebarBuilder<'a> {
         self.last_line = true;
     }
 
+    /// `PlayerScoreboard#addEmptyLine(color)`: a blank spacer row. The original
+    /// stores an empty entry with a coloured strikethrough prefix (renders as
+    /// nothing) and still sets `lastLine`; it has no size/line guards.
+    fn add_empty_line(&mut self, _color: &str) {
+        self.lines.push(String::new());
+        self.last_line = true;
+    }
+
     fn sb_line(&self, color: &str) -> String {
         if self.s.line_invisible {
             format!("{color}&r")
@@ -252,7 +260,7 @@ fn build_lines(guard: &AppState, player: &Player, server: &Server, uuid: &str) -
     }
     b.add_line("&9");
 
-    // ---- Territory (applyMiscellaneousPlaceholders) ----
+    // ---- Territory + kitmap stats (applyMiscellaneousPlaceholders) ----
     {
         let location = crate::core::location(player);
         // Guard-based helpers: never re-enter the state lock (the caller already
@@ -265,6 +273,39 @@ fn build_lines(guard: &AppState, player: &Player, server: &Server, uuid: &str) -
         );
         let viewer = guard.factions.by_member(uuid).map(|f| f.id.clone());
         let display = crate::core::territory_display_guard(guard, &territory, viewer.as_deref());
+
+        // Kitmap mode prepends the `KITMAP_STATS` block (title, kills, deaths,
+        // balance and — only while streaking — the killstreak) and an extra
+        // spacer line before the claim.
+        if guard.config.kitmap.enabled {
+            if let Some(user) = guard.userdata.get(uuid) {
+                let sb = &guard.raw.scoreboard;
+                b.add(&sb.string("KITMAP_STATS.TITLE_PLACEHOLDER"), "");
+                b.add(
+                    &sb.string("KITMAP_STATS.KILLS_PLACEHOLDER"),
+                    &user.kills.to_string(),
+                );
+                b.add(
+                    &sb.string("KITMAP_STATS.DEATHS_PLACEHOLDER"),
+                    &user.deaths.to_string(),
+                );
+                b.add(
+                    &sb.string("KITMAP_STATS.BALANCE_PLACEHOLDER"),
+                    &user.balance.to_string(),
+                );
+                if user.killstreak > 0 {
+                    b.add(
+                        &sb.string("KITMAP_STATS.KILLSTREAK_PLACEHOLDER"),
+                        &user.killstreak.to_string(),
+                    );
+                }
+            }
+
+            if !s.claim.is_empty() {
+                b.add_empty_line("&4");
+            }
+        }
+
         b.add(&s.claim, &display);
         b.add_line("&5");
     }

@@ -99,6 +99,33 @@ fn give_self(sender: &CommandSender, args: &ConsumedArgs) {
         return;
     };
 
+    // `KitsManager#giveKit`: KITMAP kits are only obtainable inside a safezone.
+    if kit.kind == "KITMAP" {
+        let (in_safezone, prefix, message) = {
+            let guard = state().read().unwrap();
+            let location = core::location(&player);
+            let in_safezone = matches!(
+                core::territory_at_guard(
+                    &guard,
+                    &location.world,
+                    location.block_x(),
+                    location.block_z()
+                ),
+                core::Territory::Safezone
+            );
+            (
+                in_safezone,
+                guard.raw.language.string("KIT_PREFIX"),
+                guard.raw.language.string("KITS.EXCEPTION.KITMAP_ONLY_IN_SAFEZONE"),
+            )
+        };
+
+        if !in_safezone {
+            reply(sender, format!("{prefix}{message}"));
+            return;
+        }
+    }
+
     if remaining > 0 {
         reply(sender, format!("&cYou must wait &e{} &cbefore using that kit.", util::format_duration(remaining)));
         return;

@@ -124,15 +124,21 @@ pub fn apply_on_death(player: &Player, reason: &str) {
         return;
     }
 
-    let (enabled, ban_times, default_ban_time) = {
+    let (enabled, ban_times, default_ban_time, kitmap_disables_deathban) = {
         let guard = state().read().unwrap();
         (
             guard.config.deathban.enabled,
             guard.config.deathban.ban_times.clone(),
             guard.config.deathban.default_ban_time,
+            guard.config.kitmap.enabled && guard.config.kitmap.disable_deathban,
         )
     };
     if !enabled {
+        return;
+    }
+    // Kitmap can disable deathbans entirely (port of the check in
+    // `DeathbanManager#deathbanPlayer`).
+    if kitmap_disables_deathban {
         return;
     }
 

@@ -72,12 +72,19 @@ impl Plugin for LazarusPlugin {
         // Cache world spawns before anything else so the warzone is centred correctly.
         core::refresh_spawn_centers(&context.get_server());
 
-        // Materialise the spawn safezone claim (safezone == spawn claim).
-        core::setup_spawn_claim(&context.get_server());
-
         commands::register(&context)?;
         listeners::register(&context)?;
         tasks::start(&context);
+
+        // KitmapHandler constructor: clear every PvP protection on startup so
+        // nobody keeps a timer when kitmap mode is on.
+        {
+            let mut guard = state::state().write().unwrap();
+            if guard.config.kitmap.enabled {
+                guard.timers.clear_pvp_protections();
+                tracing::info!("kitmap mode is enabled: PvP protections cleared");
+            }
+        }
 
         tracing::info!("Lazarus HCF core enabled (Pumpkin/WASM port).");
         Ok(())

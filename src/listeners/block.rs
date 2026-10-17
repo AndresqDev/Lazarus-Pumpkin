@@ -1,20 +1,48 @@
 //! Block protection listeners — port of `factions.listeners.BlockEventListener`.
 //!
-//! Rules (`checkPlayerBuild`):
+//! Build rules (`checkPlayerBuild`):
 //! * wilderness and your own faction's claim are free to build in;
 //! * a player faction's claim is free to build in when it is raidable (DTR <= 0);
-//! * the warzone is buildable past `WARZONE_BREAK_AFTER` (never in the End);
-//! * safezones deny everyone.
+//! * the warzone is buildable past `WARZONE_BREAK_AFTER` (never in the End) and,
+//!   in kitmap mode, its clickables stay usable inside the protected ring;
+//! * safezones deny everyone;
+//! * `lazarus.factions.bypass` in creative bypasses everything.
+//!
+//! Use rules (`onPlayerInteract`): using a *clickable* block (chest, door,
+//! button, ...) outside your territory is denied; the safezone clickables,
+//! sneaking with a non-block item in hand and the kitmap warzone clickables are
+//! the exceptions. Pumpkin fires no PHYSICAL interact action, so pressure
+//! plates keep their vanilla behaviour (the original cancelled them in
+//! protected areas).
 
-use pumpkin_plugin_api::events::{BlockBreakEvent, BlockPlaceEvent, EventData, EventHandler};
-use pumpkin_plugin_api::common::BlockPos;
-use pumpkin_plugin_api::{Player, Server};
+use pumpkin_plugin_api::common::{BlockPos, GameMode, Hand};
+use pumpkin_plugin_api::events::{
+    BlockBreakEvent, BlockPlaceEvent, EventData, EventHandler, InteractAction, PlayerInteractEvent,
+};
+use pumpkin_plugin_api::{BlockType, Player, Server};
 
 use crate::core::{self, Territory};
 use crate::state::state;
 use crate::util;
 
-fn can_build(player_uuid: &str, world: &str, x: i32, z: i32) -> bool {
+/// Port of `BlockEventListener#checkPlayerBuild`: may `player` build, or use the
+/// block carried by `interact_block` (the clicked block's registry key; `None`
+/// on build events), at `(world, x, z)`?
+fn check_player_build(
+    player: &Player,
+    world: &str,
+    x: i32,
+    z: i32,
+    interact_block: Option<&str>,
+) -> bool {
+    // `player.hasPermission("lazarus.factions.bypass") && gamemode == CREATIVE`.
+    if player.has_permission("lazarus.factions.bypass")
+        && player.get_gamemode() == GameMode::Creative
+    {
+        return true;
+    }
+
+    let uuid = core::uuid_of(player);
     let territory = core::territory_at(world, x, z);
     match territory {
         Territory::Safezone => false,
@@ -25,17 +53,24 @@ fn can_build(player_uuid: &str, world: &str, x: i32, z: i32) -> bool {
             if dimension == core::Dimension::End {
                 return false;
             }
-            let guard = state().read().unwrap();
-            let break_after = match dimension {
-                core::Dimension::Overworld => guard.config.factions.warzone_break_after.overworld,
-                core::Dimension::Nether => guard.config.factions.warzone_break_after.nether,
-                core::Dimension::End => 0,
+            let (break_after, kitmap) = {
+                let guard = state().read().unwrap();
+                let break_after = match dimension {
+                    core::Dimension::Overworld => guard.config.factions.warzone_break_after.overworld,
+                    core::Dimension::Nether => guard.config.factions.warzone_break_after.nether,
+                    core::Dimension::End => 0,
+                };
+                (break_after, guard.config.kitmap.enabled)
             };
-            x.abs().max(z.abs()) > break_after
+            if x.abs().max(z.abs()) > break_after {
+                return true;
+            }
+            // Kitmap mode keeps the warzone clickables usable inside the ring.
+            kitmap && interact_block.is_some_and(is_kitmap_clickable)
         }
         Territory::Faction(owner_id) => {
             let guard = state().read().unwrap();
-            if guard.factions.by_member(player_uuid).map(|f| f.id.as_str()) == Some(owner_id.as_str()) {
+            if guard.factions.by_member(&uuid).map(|f| f.id.as_str()) == Some(owner_id.as_str()) {
                 return true;
             }
             match guard.factions.get(&owner_id) {
@@ -61,6 +96,103 @@ fn deny_message(player: &Player, world: &str, x: i32, z: i32, interact: bool) ->
     };
     let template = state().read().unwrap().raw.language.string(key);
     util::replace(&template, "<faction>", &name)
+}
+
+// ---------------------------------------------------------------------------
+// Use protection (rest of `BlockEventListener#onPlayerInteract`).
+// ---------------------------------------------------------------------------
+
+/// 1.8 `NmsUtils#getClickableItems` translated to 1.21 block keys: whose *use*
+/// is protected outside your territory.
+fn is_clickable(block: &str) -> bool {
+    matches!(
+        block,
+        "anvil" | "chipped_anvil" | "damaged_anvil" | "beacon" | "fire" | "soul_fire"
+            | "chest" | "trapped_chest" | "ender_chest" | "furnace" | "brewing_stand"
+            | "hopper" | "dropper" | "dispenser" | "enchanting_table" | "lever"
+            | "repeater" | "comparator" | "jukebox" | "crafting_table"
+    ) || block.ends_with("_button")
+        || block.ends_with("_door")
+        || block.ends_with("_bed")
+        || block.ends_with("_fence_gate")
+        // 1.8 only listed the wooden trapdoor, not the iron one.
+        || (block.ends_with("_trapdoor") && block != "iron_trapdoor")
+}
+
+/// `BlockEventListener`'s `safezoneClickables`: usable even inside safezones.
+fn is_safezone_clickable(block: &str) -> bool {
+    matches!(
+        block,
+        "crafting_table" | "ender_chest" | "trapped_chest" | "chest"
+            | "enchanting_table" | "anvil" | "chipped_anvil" | "damaged_anvil" | "beacon"
+    )
+}
+
+/// `NmsUtils#getKitmapClickables`: interactable in the warzone in kitmap mode.
+fn is_kitmap_clickable(block: &str) -> bool {
+    matches!(block, "lever" | "crafting_table" | "furnace")
+        || block.ends_with("_button")
+        || block.ends_with("_pressure_plate")
+        || block.ends_with("_fence_gate")
+}
+
+/// Use protection (port of `BlockEventListener#onPlayerInteract`, always with
+/// `purgeActive == false` — the purge handler is not ported). Runs before the
+/// wand listener, mirroring `SelectionManager`'s `ignoreCancelled = true`: an
+/// interact denied here must not move the selection.
+pub struct BlockInteractListener;
+
+impl EventHandler<PlayerInteractEvent> for BlockInteractListener {
+    fn handle(&self, _server: Server, mut event: EventData<PlayerInteractEvent>) -> EventData<PlayerInteractEvent> {
+        // `ignoreCancelled = true`. The host fires no PHYSICAL actions.
+        if event.cancelled || event.action != InteractAction::RightClickBlock {
+            return event;
+        }
+        let Some(pos) = event.clicked_pos.clone() else {
+            return event;
+        };
+
+        let player = &event.player;
+        let world = core::world_name(player);
+        let block = event.block.strip_prefix("minecraft:").unwrap_or(&event.block).to_string();
+
+        // `factionAt.isSafezone() && safezoneClickables.contains(blockType)`.
+        if matches!(core::territory_at(&world, pos.x, pos.z), Territory::Safezone)
+            && is_safezone_clickable(&block)
+        {
+            return event;
+        }
+
+        // `isItemClickable`: the clickable blocks, or grass with a hoe in hand.
+        let held = player.get_item_in_hand(Hand::Right);
+        let held_key = held.as_ref().map(|item| item.get_registry_key());
+        let clickable = is_clickable(&block)
+            || (block == "grass_block"
+                && held_key
+                    .as_deref()
+                    .is_some_and(|key| key.strip_prefix("minecraft:").unwrap_or(key).ends_with("_hoe")));
+        if !clickable {
+            return event;
+        }
+
+        // `player.isSneaking() && event.hasItem() && !item.getType().isBlock()`:
+        // an item is held and it is not a placeable block.
+        if player.as_entity().is_sneaking()
+            && held_key
+                .as_deref()
+                .is_some_and(|key| BlockType::from_registry_key(key).is_none())
+        {
+            return event;
+        }
+
+        if !check_player_build(player, &world, pos.x, pos.z, Some(block.as_str())) {
+            event.cancelled = true;
+            let message = deny_message(player, &world, pos.x, pos.z, true);
+            core::send(player, &message);
+        }
+
+        event
+    }
 }
 
 pub struct BlockBreakListener;
@@ -94,7 +226,7 @@ impl EventHandler<BlockBreakEvent> for BlockBreakListener {
             }
         }
 
-        if !can_build(&uuid, &world, event.block_pos.x, event.block_pos.z) {
+        if !check_player_build(player, &world, event.block_pos.x, event.block_pos.z, None) {
             event.cancelled = true;
             let message = deny_message(player, &world, event.block_pos.x, event.block_pos.z, false);
             core::send(player, &message);
@@ -113,7 +245,6 @@ pub struct BlockPlaceListener;
 impl EventHandler<BlockPlaceEvent> for BlockPlaceListener {
     fn handle(&self, server: Server, mut event: EventData<BlockPlaceEvent>) -> EventData<BlockPlaceEvent> {
         let player = &event.player;
-        let uuid = core::uuid_of(player);
         let world = core::world_name(player);
 
         // Re-assert any client-side render at this position (see BlockBreakListener).
@@ -125,7 +256,7 @@ impl EventHandler<BlockPlaceEvent> for BlockPlaceListener {
             event.block_pos.z,
         );
 
-        if !can_build(&uuid, &world, event.block_pos.x, event.block_pos.z) {
+        if !check_player_build(player, &world, event.block_pos.x, event.block_pos.z, None) {
             event.cancelled = true;
             let message = deny_message(player, &world, event.block_pos.x, event.block_pos.z, false);
             core::send(player, &message);
@@ -154,10 +285,9 @@ impl EventHandler<pumpkin_plugin_api::events::PlayerBucketEmptyEvent> for Bucket
         mut event: EventData<pumpkin_plugin_api::events::PlayerBucketEmptyEvent>,
     ) -> EventData<pumpkin_plugin_api::events::PlayerBucketEmptyEvent> {
         let player = &event.player;
-        let uuid = core::uuid_of(player);
         let world = core::world_name(player);
 
-        if !can_build(&uuid, &world, event.block_pos.x, event.block_pos.z) {
+        if !check_player_build(player, &world, event.block_pos.x, event.block_pos.z, None) {
             event.cancelled = true;
             let message = deny_message(player, &world, event.block_pos.x, event.block_pos.z, true);
             core::send(player, &message);
@@ -176,10 +306,9 @@ impl EventHandler<pumpkin_plugin_api::events::PlayerBucketFillEvent> for BucketF
         mut event: EventData<pumpkin_plugin_api::events::PlayerBucketFillEvent>,
     ) -> EventData<pumpkin_plugin_api::events::PlayerBucketFillEvent> {
         let player = &event.player;
-        let uuid = core::uuid_of(player);
         let world = core::world_name(player);
 
-        if !can_build(&uuid, &world, event.block_pos.x, event.block_pos.z) {
+        if !check_player_build(player, &world, event.block_pos.x, event.block_pos.z, None) {
             event.cancelled = true;
             let message = deny_message(player, &world, event.block_pos.x, event.block_pos.z, true);
             core::send(player, &message);

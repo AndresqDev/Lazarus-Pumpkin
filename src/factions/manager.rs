@@ -67,16 +67,16 @@ impl FactionsManager {
         self.initialized = true;
     }
 
-    /// Port of `FactionsManager#additionalFactionSetup`: the spawn faction is
-    /// forced to `safezone = true` / `deathban = false` on every load (and named
-    /// "Spawn", like `SpawnFaction`), so stale values persisted by older builds
-    /// can never make spawn deathban.
+    /// Port of `FactionsManager#additionalFactionSetup` for the spawn faction:
+    /// `SpawnFaction` instances are forced to `safezone = true` /
+    /// `deathban = false` on every load, so stale values persisted by older
+    /// builds can never make spawn deathban. Like the original, the name is
+    /// **not** touched — `/f rename` on the spawn faction persists.
     pub fn normalize_system_factions(&mut self) {
         let safezone_id = self.safezone_id.clone();
         if let Some(faction) = self.factions.get_mut(&safezone_id) {
             faction.safezone = true;
             faction.deathban = false;
-            faction.name = "Spawn".to_string();
         }
     }
 

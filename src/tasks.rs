@@ -72,9 +72,38 @@ pub fn start(context: &Context) {
     // Apply the configured world borders (square, infinite on Y), centred on spawn.
     context.schedule_delayed_task(20, |server| {
         crate::core::refresh_spawn_centers(&server);
-        crate::core::setup_spawn_claim(&server);
         crate::core::apply_world_borders_from_config(&server);
     });
+
+    // Kitmap item clear task (port of `KitmapHandler.ItemClearTask`): every
+    // `KITMAP_CLEAR_ITEMS.INTERVAL` seconds, deleting every dropped item in
+    // every world. (The original also ran once at tick 0, when no items can
+    // exist yet.)
+    {
+        let (enabled, interval) = {
+            let guard = state().read().unwrap();
+            (
+                guard.config.kitmap.enabled && guard.config.kitmap.clear_items_enabled,
+                guard.config.kitmap.clear_items_interval.max(1),
+            )
+        };
+        if enabled {
+            let period = interval * 20;
+            context.schedule_repeating_task(period, period, |server| clear_items(&server));
+        }
+    }
+}
+
+/// Deletes every item entity in every world (port of
+/// `KitmapHandler.ItemClearTask#run`).
+fn clear_items(server: &Server) {
+    for world in server.get_all_worlds() {
+        for entity in world.get_entities() {
+            if entity.get_type() == pumpkin_plugin_api::EntityType::Item {
+                entity.remove();
+            }
+        }
+    }
 }
 
 fn tick(server: &Server) {

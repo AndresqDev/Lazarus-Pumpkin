@@ -22,6 +22,12 @@ pub struct EnderPearlListener;
 
 impl EventHandler<PlayerInteractEvent> for EnderPearlListener {
     fn handle(&self, _server: Server, mut event: EventData<PlayerInteractEvent>) -> EventData<PlayerInteractEvent> {
+        // `useInteractedBlock() == DENY && useItemInHand() == DENY`: an interact
+        // already denied (block protection, wand) must not arm the pearl timer.
+        if event.cancelled {
+            return event;
+        }
+
         if !matches!(event.action, InteractAction::RightClickBlock | InteractAction::RightClickAir) {
             return event;
         }

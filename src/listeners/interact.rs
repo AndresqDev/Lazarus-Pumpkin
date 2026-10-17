@@ -61,6 +61,13 @@ impl EventHandler<PlayerInteractEvent> for InteractListener {
             crate::classes::bomber_click(&server, &event.player);
         }
 
+        // The class clicks above mirror the original's HIGHEST-priority handlers
+        // (they run even on a cancelled event); the selection part mirrors
+        // `SelectionManager#onPlayerInteract`'s `ignoreCancelled = true`.
+        if event.cancelled {
+            return event;
+        }
+
         let (has_selection, holds_wand) = {
             let guard = state().read().unwrap();
             (

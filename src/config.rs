@@ -7,6 +7,8 @@
 //! Knockback and LunarClient configuration from the original is intentionally
 //! omitted, as requested.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,7 +26,6 @@ pub struct Config {
     pub warzone_radius: WorldRadii,
     pub border_size: WorldRadii,
     pub home_warmup: HomeWarmup,
-    pub spawn: SpawnConfig,
     pub economy: EconomyConfig,
     pub timers: TimersConfig,
     pub sotw: SotwConfig,
@@ -34,6 +35,7 @@ pub struct Config {
     pub tab: TabConfig,
     pub sidebar: SidebarConfig,
     pub deathban: DeathbanConfig,
+    pub kitmap: KitmapConfig,
 }
 
 impl Default for Config {
@@ -49,7 +51,6 @@ impl Default for Config {
             warzone_radius: WorldRadii { overworld: 500, nether: 300, end: 300 },
             border_size: WorldRadii { overworld: 3000, nether: 1000, end: 300 },
             home_warmup: HomeWarmup::default(),
-            spawn: SpawnConfig::default(),
             economy: EconomyConfig::default(),
             timers: TimersConfig::default(),
             sotw: SotwConfig::default(),
@@ -67,6 +68,7 @@ impl Default for Config {
             tab: TabConfig::default(),
             sidebar: SidebarConfig::default(),
             deathban: DeathbanConfig::default(),
+            kitmap: KitmapConfig::default(),
         }
     }
 }
@@ -256,16 +258,49 @@ impl Default for HomeWarmup {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+/// Kitmap mode (`KITMAP_MODE` / `KITMAP_CLEAR_ITEMS` / `KITMAP_KILL_REWARD` /
+/// `KITMAP_KILLSTREAK` sections of the original `config.yml`).
+///
+/// The typed `config.toml` is legacy: [`crate::state::sync_faction_yaml`] makes
+/// the raw `config.yml` authoritative for these values on every load.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct SpawnConfig {
-    pub safezone_radius: i32,
-    pub teleport_delay: u64,
+pub struct KitmapConfig {
+    pub enabled: bool,
+    pub disable_deathban: bool,
+    pub disable_dtr_loss: bool,
+    pub disable_item_drop_in_safezone: bool,
+    pub pvp_timer_enabled: bool,
+    /// Spawn teleport delay in seconds (`/spawn`; command not ported yet).
+    pub spawn_teleport_delay: u64,
+
+    pub clear_items_enabled: bool,
+    pub clear_items_interval: u64,
+
+    pub kill_reward_enabled: bool,
+    pub kill_reward_commands: Vec<String>,
+
+    pub killstreak_enabled: bool,
+    /// Kill count -> console commands (`KITMAP_KILLSTREAK.KILLS`).
+    pub killstreak_rewards: BTreeMap<i32, Vec<String>>,
 }
 
-impl Default for SpawnConfig {
+impl Default for KitmapConfig {
     fn default() -> Self {
-        Self { safezone_radius: 100, teleport_delay: 10 }
+        Self {
+            enabled: false,
+            disable_deathban: true,
+            disable_dtr_loss: false,
+            disable_item_drop_in_safezone: true,
+            pvp_timer_enabled: false,
+            spawn_teleport_delay: 10,
+            clear_items_enabled: true,
+            clear_items_interval: 30,
+            kill_reward_enabled: true,
+            kill_reward_commands: vec!["econ give <player> 150".to_string()],
+            killstreak_enabled: true,
+            killstreak_rewards: BTreeMap::new(),
+        }
     }
 }
 

@@ -163,33 +163,6 @@ pub fn apply_world_borders_from_config(server: &Server) {
     }
 }
 
-/// Creates the spawn/safezone faction claim from config if it does not exist yet.
-///
-/// The safezone is *exclusively* the spawn claim, so this materialises a square
-/// claim (`spawn.safezone_radius`) owned by the safezone faction.
-pub fn setup_spawn_claim(server: &Server) {
-    let mut guard = state().write().unwrap();
-    let radius = guard.config.spawn.safezone_radius;
-    if radius <= 0 {
-        return;
-    }
-
-    let safezone_id = guard.factions.safezone_id.clone();
-    if !guard.claims.claims_of(&safezone_id).is_empty() {
-        return;
-    }
-
-    let world = server
-        .get_all_worlds()
-        .into_iter()
-        .find(|w| dimension_of(&w.get_name()) == Dimension::Overworld)
-        .map(|w| w.get_name())
-        .unwrap_or_else(|| "world".to_string());
-
-    let claim = crate::factions::Claim::new(world.clone(), -radius, radius, -radius, radius);
-    guard.claims.add_claim(&safezone_id, claim);
-}
-
 /// Resolves the territory at `(world, x, z)`.
 pub fn territory_at(world: &str, x: i32, z: i32) -> Territory {
     let guard = state().read().unwrap();
