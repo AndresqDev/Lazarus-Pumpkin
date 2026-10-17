@@ -1,180 +1,618 @@
-//! `/lives` command — port of `LivesCommand` / `LivesReviveCommand` / `LivesAddCommand`.
+//! `/lives` command — port of `me.qiooip.lazarus.commands.staff.LivesCommand`
+//! and the `DeathbanManager` lives helpers.
+//!
+//! - `/lives check [player]` shows a lives count.
+//! - `/lives revive <player>` consumes one of the **sender's** own lives
+//!   (players only, exactly like the original).
+//! - `/lives send <player> <amount>` transfers lives between players.
+//! - `/lives add|set <player> <amount>` are staff commands guarded by
+//!   `lazarus.lives.add` / `lazarus.lives.set`.
 
-use pumpkin_plugin_api::command::{CommandError, CommandNode, ArgumentType, CommandSender, ConsumedArgs};
+use pumpkin_plugin_api::command::{
+    ArgumentType, CommandError, CommandNode, CommandSender, ConsumedArgs, StringType,
+};
 use pumpkin_plugin_api::commands::CommandHandler;
 use pumpkin_plugin_api::{Context, Server};
 
-use super::{command, int_arg, register_op_permission, register_public_permission, reply, string_arg};
+use super::{command, register_public_permission, reply, string_arg};
 use crate::core;
 use crate::state::state;
 use crate::util;
 
 pub fn register(context: &Context) -> Result<(), String> {
-    register_public_permission(context, "lazarus:command.lives", "View your lives")?;
-    register_op_permission(context, "lazarus:command.lives.admin", "Manage players' lives")?;
+    register_public_permission(context, "lazarus:command.lives", "Manage lives")?;
+
+    let word = |name: &str| {
+        CommandNode::argument(name, &ArgumentType::String(StringType::SingleWord))
+    };
 
     let root = command(&["lives"], "Manage lives")
-        .execute(LivesExecutor)
+        .execute(LivesUsageExecutor)
+        .then(
+            CommandNode::literal("check")
+                .execute(LivesCheckSelfExecutor)
+                .then(word("player").execute(LivesCheckOtherExecutor)),
+        )
+        .then(
+            CommandNode::literal("revive")
+                .execute(LivesUsageExecutor)
+                .then(word("player").execute(LivesReviveExecutor)),
+        )
+        .then(
+            CommandNode::literal("send")
+                .execute(LivesUsageExecutor)
+                .then(word("player").then(word("amount").execute(LivesSendExecutor))),
+        )
         .then(
             CommandNode::literal("add")
+                .execute(LivesAddUsageExecutor)
                 .then(
-                    CommandNode::argument("player", &ArgumentType::String(pumpkin_plugin_api::command::StringType::SingleWord))
-                        .then(CommandNode::argument("amount", &ArgumentType::Integer((None, None))).execute(LivesAddExecutor)),
+                    word("player")
+                        .execute(LivesAddUsageExecutor)
+                        .then(word("amount").execute(LivesAddExecutor)),
                 ),
         )
         .then(
             CommandNode::literal("set")
+                .execute(LivesSetUsageExecutor)
                 .then(
-                    CommandNode::argument("player", &ArgumentType::String(pumpkin_plugin_api::command::StringType::SingleWord))
-                        .then(CommandNode::argument("amount", &ArgumentType::Integer((None, None))).execute(LivesSetExecutor)),
+                    word("player")
+                        .execute(LivesSetUsageExecutor)
+                        .then(word("amount").execute(LivesSetExecutor)),
                 ),
-        )
-        .then(
-            CommandNode::literal("revive")
-                .then(CommandNode::argument("player", &ArgumentType::String(pumpkin_plugin_api::command::StringType::SingleWord)).execute(LivesReviveExecutor)),
         );
 
     context.register_command(root, "lazarus:command.lives");
     Ok(())
 }
 
-struct LivesExecutor;
+/// `LIVES_COMMAND.USAGE` (printed for `/lives` and incomplete subcommands).
+struct LivesUsageExecutor;
 
-impl CommandHandler for LivesExecutor {
-    fn handle(&self, sender: CommandSender, _server: Server, _args: ConsumedArgs) -> Result<i32, CommandError> {
+impl CommandHandler for LivesUsageExecutor {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let lines = state()
+            .read()
+            .unwrap()
+            .raw
+            .language
+            .string_list("LIVES_COMMAND.USAGE");
+        for line in lines {
+            reply(&sender, line);
+        }
+        Ok(1)
+    }
+}
+
+struct LivesCheckSelfExecutor;
+
+impl CommandHandler for LivesCheckSelfExecutor {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
         let Some(player) = sender.as_player() else {
-            reply(&sender, "&cPlayers only.");
+            reply(&sender, for_players_only());
             return Ok(0);
         };
+
         let uuid = core::uuid_of(&player);
+        let name = core::name_of(&player);
+        send_lives_count(&sender, &uuid, &name);
+        Ok(1)
+    }
+}
+
+struct LivesCheckOtherExecutor;
+
+impl CommandHandler for LivesCheckOtherExecutor {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let Some(name) = string_arg(&args, "player") else {
+            return Ok(0);
+        };
+        let Some((target_uuid, target_name)) = resolve_target(&server, &name) else {
+            player_not_found(&sender, &name);
+            return Ok(0);
+        };
+
+        send_lives_count(&sender, &target_uuid, &target_name);
+        Ok(1)
+    }
+}
+
+struct LivesReviveExecutor;
+
+impl CommandHandler for LivesReviveExecutor {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let Some(name) = string_arg(&args, "player") else {
+            return Ok(0);
+        };
+        let Some((target_uuid, target_name)) = resolve_target(&server, &name) else {
+            player_not_found(&sender, &name);
+            return Ok(0);
+        };
+
+        // `DeathbanManager#reviveUsingLives`: players only (they pay the life).
+        let Some(player) = sender.as_player() else {
+            reply(&sender, for_players_only());
+            return Ok(0);
+        };
+        let sender_uuid = core::uuid_of(&player);
 
         let message = {
-            let guard = state().read().unwrap();
-            let lives = guard.userdata.get(&uuid).map(|u| u.lives).unwrap_or(0);
-            util::replace(&guard.lang.lives_message, "<lives>", &lives.to_string())
+            let mut guard = state().write().unwrap();
+            let prefix = guard.raw.language.string("PREFIX");
+
+            if !guard
+                .userdata
+                .get(&target_uuid)
+                .is_some_and(|user| user.is_deathbanned())
+            {
+                let template = guard
+                    .raw
+                    .language
+                    .string("LIVES_COMMAND.PLAYER_NOT_DEATHBANNED");
+                format!(
+                    "{prefix}{}",
+                    util::replace(&template, "<player>", &target_name)
+                )
+            } else {
+                let sender_lives = guard
+                    .userdata
+                    .get(&sender_uuid)
+                    .map(|user| user.lives)
+                    .unwrap_or(0);
+
+                if sender_lives <= 0 {
+                    format!(
+                        "{prefix}{}",
+                        guard.raw.language.string("LIVES_COMMAND.ZERO_LIVES")
+                    )
+                } else {
+                    if let Some(user) = guard.userdata.get_mut(&sender_uuid) {
+                        user.lives -= 1;
+                    }
+                    if let Some(user) = guard.userdata.get_mut(&target_uuid) {
+                        user.revive();
+                    }
+
+                    let template = guard
+                        .raw
+                        .language
+                        .string("LIVES_COMMAND.SUCCESSFULLY_REVIVED_PLAYER");
+                    format!(
+                        "{prefix}{}",
+                        util::replace(&template, "<player>", &target_name)
+                    )
+                }
+            }
         };
 
         reply(&sender, message);
         Ok(1)
+    }
+}
+
+struct LivesSendExecutor;
+
+impl CommandHandler for LivesSendExecutor {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        // `LivesCommand` resolves the target before calling `sendLives`.
+        let Some(name) = string_arg(&args, "player") else {
+            return Ok(0);
+        };
+        let Some((target_uuid, target_name)) = resolve_target(&server, &name) else {
+            player_not_found(&sender, &name);
+            return Ok(0);
+        };
+
+        // `DeathbanManager#sendLives`.
+        let Some(player) = sender.as_player() else {
+            reply(&sender, for_players_only());
+            return Ok(0);
+        };
+        let sender_uuid = core::uuid_of(&player);
+
+        let Some(amount_raw) = string_arg(&args, "amount") else {
+            return Ok(0);
+        };
+        let Ok(amount) = amount_raw.parse::<i32>() else {
+            invalid_number(&sender);
+            return Ok(0);
+        };
+        let lives = amount.abs();
+
+        let (message, transferred) = {
+            let mut guard = state().write().unwrap();
+            let prefix = guard.raw.language.string("PREFIX");
+
+            if target_uuid == sender_uuid {
+                (
+                    format!(
+                        "{prefix}{}",
+                        guard
+                            .raw
+                            .language
+                            .string("LIVES_COMMAND.CAN_NOT_SEND_LIVES_TO_YOURSELF")
+                    ),
+                    false,
+                )
+            } else {
+                let sender_lives = guard
+                    .userdata
+                    .get(&sender_uuid)
+                    .map(|user| user.lives)
+                    .unwrap_or(0);
+
+                if sender_lives <= 0 {
+                    (
+                        format!(
+                            "{prefix}{}",
+                            guard.raw.language.string("LIVES_COMMAND.ZERO_LIVES")
+                        ),
+                        false,
+                    )
+                } else if sender_lives < lives {
+                    let template = guard
+                        .raw
+                        .language
+                        .string("LIVES_COMMAND.NOT_ENOUGH_LIVES");
+                    (
+                        format!(
+                            "{prefix}{}",
+                            util::replace(&template, "<amount>", &lives.to_string())
+                        ),
+                        false,
+                    )
+                } else {
+                    if let Some(user) = guard.userdata.get_mut(&sender_uuid) {
+                        user.lives -= lives;
+                    }
+                    if let Some(user) = guard.userdata.get_mut(&target_uuid) {
+                        user.lives += lives;
+                    }
+
+                    let template = guard
+                        .raw
+                        .language
+                        .string("LIVES_COMMAND.SUCCESSFULLY_SENT_LIVES");
+                    (
+                        format!(
+                            "{prefix}{}",
+                            util::replace_all(
+                                &template,
+                                &[
+                                    ("<amount>", &lives.to_string()),
+                                    ("<player>", &target_name),
+                                ],
+                            )
+                        ),
+                        true,
+                    )
+                }
+            }
+        };
+
+        reply(&sender, message);
+
+        // Notify the target when they are online.
+        if transferred
+            && let Some(target_player) = pumpkin_plugin_api::uuid::parse(&target_uuid)
+                .and_then(|id| server.get_player_by_uuid(id))
+        {
+            let (prefix, template) = {
+                let guard = state().read().unwrap();
+                (
+                    guard.raw.language.string("PREFIX"),
+                    guard
+                        .raw
+                        .language
+                        .string("LIVES_COMMAND.SUCCESSFULLY_RECEIVED_LIVES"),
+                )
+            };
+            let message = util::replace_all(
+                &template,
+                &[
+                    ("<amount>", &lives.to_string()),
+                    ("<player>", &sender.get_name()),
+                ],
+            );
+            core::send(&target_player, format!("{prefix}{message}"));
+        }
+
+        Ok(1)
+    }
+}
+
+struct LivesAddUsageExecutor;
+
+impl CommandHandler for LivesAddUsageExecutor {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        if !require_lives_permission(&sender, &server, "lazarus.lives.add") {
+            return Ok(0);
+        }
+        let template = state()
+            .read()
+            .unwrap()
+            .raw
+            .language
+            .string("LIVES_COMMAND.LIVES_ADD_USAGE");
+        reply(&sender, prefixed(&template));
+        Ok(0)
+    }
+}
+
+struct LivesSetUsageExecutor;
+
+impl CommandHandler for LivesSetUsageExecutor {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        if !require_lives_permission(&sender, &server, "lazarus.lives.set") {
+            return Ok(0);
+        }
+        let template = state()
+            .read()
+            .unwrap()
+            .raw
+            .language
+            .string("LIVES_COMMAND.LIVES_SET_USAGE");
+        reply(&sender, prefixed(&template));
+        Ok(0)
     }
 }
 
 struct LivesAddExecutor;
 
 impl CommandHandler for LivesAddExecutor {
-    fn handle(&self, sender: CommandSender, server: Server, args: ConsumedArgs) -> Result<i32, CommandError> {
-        change_lives(&sender, &server, &args, false)
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        change_lives(&sender, &server, &args, true)
     }
 }
 
 struct LivesSetExecutor;
 
 impl CommandHandler for LivesSetExecutor {
-    fn handle(&self, sender: CommandSender, server: Server, args: ConsumedArgs) -> Result<i32, CommandError> {
-        change_lives(&sender, &server, &args, true)
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        change_lives(&sender, &server, &args, false)
     }
 }
 
-fn change_lives(sender: &CommandSender, server: &Server, args: &ConsumedArgs, absolute: bool) -> Result<i32, CommandError> {
-    if !allowed(sender, server, "lazarus:command.lives.admin") {
+/// `DeathbanManager#changeLives` (`/lives add|set`).
+fn change_lives(
+    sender: &CommandSender,
+    server: &Server,
+    args: &ConsumedArgs,
+    add: bool,
+) -> Result<i32, CommandError> {
+    let permission = if add { "lazarus.lives.add" } else { "lazarus.lives.set" };
+    if !require_lives_permission(sender, server, permission) {
         return Ok(0);
     }
 
     let Some(name) = string_arg(args, "player") else {
         return Ok(0);
     };
-    let Some(amount) = int_arg(args, "amount") else {
-        reply(sender, "&cInvalid amount.");
+    let Some((target_uuid, target_name)) = resolve_target(server, &name) else {
+        player_not_found(sender, &name);
         return Ok(0);
     };
 
-    let Some(target) = server.get_player_by_name(&name) else {
-        let guard = state().read().unwrap();
-        reply(sender, util::replace(&guard.lang.player_not_online, "<player>", &name));
+    // The original takes the amount as a string and validates it here, so the
+    // invalid-number message matches.
+    let Some(amount_raw) = string_arg(args, "amount") else {
         return Ok(0);
     };
-    let uuid = core::uuid_of(&target);
+    let Ok(amount) = amount_raw.parse::<i32>() else {
+        invalid_number(sender);
+        return Ok(0);
+    };
 
     let message = {
         let mut guard = state().write().unwrap();
-        let Some(user) = guard.userdata.get_mut(&uuid) else {
-            return Ok(0);
-        };
-        if absolute {
-            user.lives = amount.max(0) as i32;
+        let prefix = guard.raw.language.string("PREFIX");
+        let template = guard.raw.language.string(if add {
+            "LIVES_COMMAND.LIVES_ADDED"
         } else {
-            user.lives = (user.lives + amount as i32).max(0);
-        }
-        let new_lives = user.lives;
+            "LIVES_COMMAND.LIVES_SET"
+        });
 
-        if absolute {
-            util::replace(
-                &util::replace(&guard.lang.lives_set, "<amount>", &new_lives.to_string()),
-                "<player>",
-                &name,
+        guard.userdata.get_mut(&target_uuid).map(|user| {
+            if add {
+                user.lives += amount.abs();
+            } else {
+                user.lives = amount.abs();
+            }
+
+            format!(
+                "{prefix}{}",
+                util::replace_all(
+                    &template,
+                    &[("<amount>", &amount_raw), ("<player>", &target_name)],
+                )
             )
-        } else {
-            util::replace(
-                &util::replace(&guard.lang.lives_added, "<amount>", &amount.to_string()),
-                "<player>",
-                &name,
-            )
-        }
+        })
     };
 
+    let Some(message) = message else {
+        player_not_found(sender, &name);
+        return Ok(0);
+    };
     reply(sender, message);
+
+    // Notify the target when they are online.
+    if let Some(target_player) = pumpkin_plugin_api::uuid::parse(&target_uuid)
+        .and_then(|id| server.get_player_by_uuid(id))
+    {
+        let (prefix, template) = {
+            let guard = state().read().unwrap();
+            (
+                guard.raw.language.string("PREFIX"),
+                guard.raw.language.string(if add {
+                    "LIVES_COMMAND.LIVES_ADD_RECEIVED"
+                } else {
+                    "LIVES_COMMAND.LIVES_SET_RECEIVED"
+                }),
+            )
+        };
+        let message = util::replace_all(
+            &template,
+            &[
+                ("<amount>", &amount_raw),
+                ("<player>", &sender.get_name()),
+            ],
+        );
+        core::send(&target_player, format!("{prefix}{message}"));
+    }
+
     Ok(1)
 }
 
-struct LivesReviveExecutor;
+/// `DeathbanManager#sendLivesCount`.
+fn send_lives_count(sender: &CommandSender, target_uuid: &str, target_name: &str) {
+    let is_self = sender
+        .as_player()
+        .map(|player| core::uuid_of(&player) == target_uuid)
+        .unwrap_or(false);
 
-impl CommandHandler for LivesReviveExecutor {
-    fn handle(&self, sender: CommandSender, server: Server, args: ConsumedArgs) -> Result<i32, CommandError> {
-        if !allowed(&sender, &server, "lazarus:command.lives.admin") {
-            return Ok(0);
-        }
-
-        let Some(name) = string_arg(&args, "player") else {
-            return Ok(0);
+    let (prefix, template, lives) = {
+        let guard = state().read().unwrap();
+        let lives = guard
+            .userdata
+            .get(target_uuid)
+            .map(|user| user.lives)
+            .unwrap_or(0);
+        let key = if is_self {
+            "LIVES_COMMAND.CHECK_SELF"
+        } else {
+            "LIVES_COMMAND.CHECK_OTHERS"
         };
-        let Some(target) = server.get_player_by_name(&name) else {
-            reply(&sender, util::replace(&state().read().unwrap().lang.player_not_online, "<player>", &name));
-            return Ok(0);
-        };
-        let uuid = core::uuid_of(&target);
+        (
+            guard.raw.language.string("PREFIX"),
+            guard.raw.language.string(key),
+            lives,
+        )
+    };
 
-        let message = {
-            let mut guard = state().write().unwrap();
-            let was_banned = guard.userdata.get(&uuid).is_some_and(|u| u.is_deathbanned());
-            if !was_banned {
-                reply(&sender, &guard.lang.deathban_not_banned);
-                return Ok(0);
-            }
-            if let Some(user) = guard.userdata.get_mut(&uuid) {
-                user.revive();
-            }
-            util::replace(&guard.lang.deathban_revive_sender, "<player>", &name)
-        };
+    let message = if is_self {
+        util::replace(&template, "<lives>", &lives.to_string())
+    } else {
+        util::replace(
+            &util::replace(&template, "<player>", target_name),
+            "<lives>",
+            &lives.to_string(),
+        )
+    };
 
-        reply(&sender, message);
-
-        let revived = {
-            let guard = state().read().unwrap();
-            util::replace(&guard.lang.deathban_revived, "<sender>", &sender.get_name())
-        };
-        core::send(&target, revived);
-        Ok(1)
-    }
+    reply(sender, format!("{prefix}{message}"));
 }
 
-/// Op check that also allows the console.
-fn allowed(sender: &CommandSender, server: &Server, node: &str) -> bool {
-    if sender.is_console() {
+/// `BaseCommand#checkOfflinePlayer` equivalent: online players first, then the
+/// userdata of players seen before (persisted in `userdata.json`).
+fn resolve_target(server: &Server, name: &str) -> Option<(String, String)> {
+    if let Some(player) = server.get_player_by_name(name) {
+        return Some((core::uuid_of(&player), core::name_of(&player)));
+    }
+
+    state()
+        .read()
+        .unwrap()
+        .userdata
+        .users
+        .values()
+        .find(|user| user.name.eq_ignore_ascii_case(name))
+        .map(|user| (user.uuid.clone(), user.name.clone()))
+}
+
+fn require_lives_permission(sender: &CommandSender, server: &Server, node: &str) -> bool {
+    if sender.is_console() || sender.has_permission(server, node) {
         return true;
     }
-    if sender.has_permission(server, node) {
-        return true;
-    }
-    reply(sender, "&cYou do not have permission.");
+
+    let (prefix, template) = {
+        let guard = state().read().unwrap();
+        (
+            guard.raw.language.string("PREFIX"),
+            guard.raw.language.string("COMMANDS.NO_PERMISSION"),
+        )
+    };
+    reply(sender, format!("{prefix}{template}"));
     false
+}
+
+fn prefixed(template: &str) -> String {
+    format!("{}{}", state().read().unwrap().raw.language.string("PREFIX"), template)
+}
+
+fn for_players_only() -> String {
+    // Guard dropped between the statements, `prefixed` takes its own lock.
+    let template = state()
+        .read()
+        .unwrap()
+        .raw
+        .language
+        .string("COMMANDS.FOR_PLAYERS_ONLY");
+    prefixed(&template)
+}
+
+fn player_not_found(sender: &CommandSender, name: &str) {
+    let template = state()
+        .read()
+        .unwrap()
+        .raw
+        .language
+        .string("COMMANDS.PLAYER_NOT_FOUND");
+    let message = prefixed(&util::replace(&template, "<player>", name));
+    reply(sender, message);
+}
+
+fn invalid_number(sender: &CommandSender) {
+    let template = state()
+        .read()
+        .unwrap()
+        .raw
+        .language
+        .string("COMMANDS.INVALID_NUMBER");
+    let message = prefixed(&template);
+    reply(sender, message);
 }

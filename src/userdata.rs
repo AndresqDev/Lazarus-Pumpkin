@@ -60,6 +60,9 @@ pub struct Userdata {
     /// Unix millis until which the player is deathbanned (None = not banned).
     #[serde(default)]
     pub deathban_until: Option<i64>,
+    /// Death message stored with the deathban (`Deathban#getReason`).
+    #[serde(default)]
+    pub deathban_reason: Option<String>,
 
     pub ignoring: Vec<String>,
     pub notes: Vec<String>,
@@ -84,6 +87,7 @@ impl Userdata {
             reclaim_used: false,
             settings: Settings::default(),
             deathban_until: None,
+            deathban_reason: None,
             ignoring: Vec::new(),
             notes: Vec::new(),
             last_kills: Vec::new(),
@@ -135,12 +139,20 @@ impl Userdata {
             .unwrap_or(0)
     }
 
-    pub fn deathban(&mut self, minutes: u64) {
-        self.deathban_until = Some(crate::util::now_millis() + (minutes as i64 * 60 * 1000));
+    /// Applies a deathban of `millis` from now, storing the death-message
+    /// reason (`Deathban#setReason`).
+    pub fn deathban(&mut self, millis: i64, reason: String) {
+        self.deathban_until = Some(crate::util::now_millis() + millis);
+        self.deathban_reason = Some(reason);
+    }
+
+    pub fn deathban_reason(&self) -> String {
+        self.deathban_reason.clone().unwrap_or_default()
     }
 
     pub fn revive(&mut self) {
         self.deathban_until = None;
+        self.deathban_reason = None;
     }
 
     pub fn toggle_ignoring(&mut self, uuid: &str) {

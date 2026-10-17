@@ -83,6 +83,11 @@ fn tick(server: &Server) {
         // Expired custom timers are removed by their scheduled task in the
         // original (`CustomTimer#scheduleExpiry`).
         guard.timers.purge_expired_custom();
+        // Stale killer candidates (the window is 5s).
+        let now = crate::util::now_millis();
+        guard
+            .last_damagers
+            .retain(|_, (_, at)| now - *at <= 10_000);
         guard.timers.purge_expired()
     };
 
@@ -90,6 +95,7 @@ fn tick(server: &Server) {
     crate::sotw::check_expiry(server);
     process_pending(server);
     process_protection_ejects(server);
+    crate::deathban::process_pending_kicks(server);
 
     for player in server.get_all_players() {
         scoreboard::update(&player, server);

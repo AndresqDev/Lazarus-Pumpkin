@@ -62,7 +62,7 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `config.Config`, `config.Language` | ✅ | now TOML; legacy `MATERIAL_ID` (`"294:0"`) replaced by registry keys |
 | `factions.*` (model, manager, claims, roles, relations) | ✅ | flattened `Faction` + `FactionKind`; fast chunk claim index |
 | `factions.commands.player.*` | ✅ | core + admin subcommands; selection-wand claiming (see below) |
-| `factions.commands.admin.*` | 🟡 | setdtr/setpoints/setbalance/setlives/forcekick/forceleader/freeze/thaw/save |
+| `factions.commands.admin.*` | ✅ | setdtr/adddtr/removedtr/setpoints/setbalance/setlives/setkills/setfreeze(`setregen`)/thaw/forcekick/forceleader/forcerename/system*/color/deathban/save/… — messages + usage from the raw `language.yml` |
 | `factions.listeners.*` | 🟡 | join/leave/move/death/chat/block/damage/command/interact ported |
 | `factions.event.*` (Bukkit events) | ⬜ | replaced by direct calls; no custom Bukkit event bus in Pumpkin |
 | `userdata.Userdata`, `UserdataManager` | ✅ | JSON persistence (Mongo dropped; sandbox only exposes the data folder) |
@@ -78,13 +78,13 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `handlers.death.*` (death messages, death signs, head drop, stattrak) | ⬜ | |
 | `handlers.limiter.*` (enchant/potion/entity limits) | ⬜ | |
 | `handlers.logger.*` (combat logger) | ⬜ | |
-| `handlers.leaderboard.*` | 🟡 | `/f top` + `/f list`; leaderboard holograms TODO |
+| `handlers.leaderboard.*` | 🟡 | `/f top` + `/f list` faithful (hover/click, relation colours, pagination); leaderboard holograms TODO |
 | `abilities.*` | ⬜ | large subsystem; ported last |
 | `classes.*` (Archer, Bard, Miner, Rogue, Mage, Bomber) | ⬜ | |
 | `kits.*` | ✅ | inventory capture/give incl. lore + vanilla enchantments (`kits.json`) |
 | `games.*` (Koth, Conquest, DTC, Dragon, King, Mountain, Loot, Schedule) | ⬜ | |
 | `economy.*` + `integration.vault` | 🟡 | internal balance implemented; Vault has no Pumpkin equivalent |
-| `deathban.*` | ✅ | `deathban_until` on userdata + `/lives` |
+| `deathban.*` | ✅ | faithful prelogin flow (first join with lives = join-again prompt, second join consumes a life), per-permission `BAN_TIMES`, faction auto-revive, `deathban_until` + `deathban_reason` on userdata, `/lives` (+ `/f livesrevive`, deposit/withdraw) |
 | `staffmode.*`, `VanishManager` | 🟡 | vanish via `hide_player/show_player`; staff-mode flag |
 | `glass.*`, claim pillars, `/f map` visuals | ✅ | client-side `send_block_change` engine |
 | `selection.*` (WorldEdit-style wand) | ✅ | `/f claim` wand with sneak-purchase |
@@ -100,6 +100,10 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   `Road`) replaces the class hierarchy so serialisation stays trivial.
 * **UUIDs are stored as strings** (`uuid` in WIT is a record; strings are the
   stable on-disk form).
+* **Absent command arguments read back as `""`** — the host
+  `consumed-args.get-value` returns an empty string for an argument the parser
+  never reached, so `commands::present_string_arg` maps `Some("")` back to
+  "missing" (numeric args already failed to parse and were unaffected).
 * **Claims are still rectangles**, but a `chunk -> faction` index is maintained so
   `territory_at(world, x, z)` is O(1) instead of scanning every claim.
 * **Single-chunk claiming** is replaced by the original **selection wand**: `/f claim`
@@ -151,6 +155,26 @@ context):
   the item refund is not implemented.
 * `CreatureSpawnEvent` — the gate is ported but the host does not fire it for
   every spawn path, so the SOTW spawner-only rule is best-effort.
+* `Player#getKiller` — the host death event carries no damage source, so the
+  killer is the last player recorded by the combat-tag handler (`last_damagers`,
+  5-second window, the same window Bukkit's combat tracker uses). A death by
+  environment right after PvP therefore still credits the last attacker.
+* `event.getDeathMessage()` (`DeathMessageHandler`) — not ported; deathban
+  reasons and userdata kill/death messages use `"<player> was slain by <killer>"`
+  or `"<player> died"`.
+* Offline player lookup (`/lives check|revive|send|add|set`) is limited to the
+  players present in `userdata.json` (online + everyone seen before), since the
+  port has no Bukkit profile cache.
+* `/f forcekick` / `/f forceleader` targets — the original accepts offline
+  players (`Bukkit.getOfflinePlayer`); the port still requires the target to be
+  online and reports `PLAYER_NOT_ONLINE` otherwise.
+* `/f top` from console — the original casts the sender to `Player` to build the
+  clickable lines; the port prints the plain header/footer/entries instead.
+* Faction leaderboards (`/f top`) — the original fills a 10-entry cache only when
+  a faction's value *changes*; the port sorts the live values of factions whose
+  metric is non-zero, which shows the same top-10 once factions have activity.
+* Combat-logger-only helpers (`Userdata#addKill`/`addDeath` for logger deaths)
+  — folded into the regular death flow described above.
 
 ## 5. Roadmap
 
@@ -158,8 +182,18 @@ Recently completed: client-side block render (`glass.rs`), selection wand,
 scoreboard placeholders, tab list, enderpearl/gapple cooldowns, deathbans + lives,
 admin faction subcommands, vanish/staff mode, holograms, kits, PvP protection
 phase timers (safe-time banking, `/pvp`, attacker-side denial, `/f home` gate),
-the SOTW system (`/sotw`, damage immunity, safezone hiding, scoreboard line)
-and custom timers (`/customtimer`, sidebar lines).
+the SOTW system (`/sotw`, damage immunity, safezone hiding, scoreboard line),
+custom timers (`/customtimer`, sidebar lines), and the fidelity pass over the
+faction systems: `/f list` + `/f top` (pagination, relation colours, hover/click),
+death/kill/death counting, DTR death loss + freeze, claim enter/leave messages
+(`<faction>`/`<deathban>` placeholders resolved from the raw `language.yml`),
+the full `/lives` family (check/revive/send/add/set), and the faction message
+pass: `/f help` pages from `FACTIONS.HELP_COMMAND.PAGES.<n>`, usage +
+`searchForFaction` + raw-language message flows for the `set*` admin commands
+(absolute-vs-points values, `getDtrString()` broadcasts, `setfreeze`/`thaw`
+with `parseSeconds`), `deposit`/`withdraw` broadcasts, `forcekick`/`forceleader`
+messages, and usage messages on every admin subcommand reached without
+arguments (the literals now execute).
 
 Still to port (in rough priority order):
 

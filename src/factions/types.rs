@@ -230,7 +230,9 @@ impl Faction {
             id,
             name,
             kind,
-            deathban: false,
+            // Port of the original `Faction` constructor default: every faction is
+            // deathban except the spawn safezone (`SpawnFaction`).
+            deathban: kind != FactionKind::Safezone,
             color,
             safezone: kind == FactionKind::Safezone,
             enderpearls: true,
@@ -332,6 +334,22 @@ impl Faction {
         };
         self.dtr = (clamped * 100.0).round() / 100.0;
         self.dtr
+    }
+
+    /// Port of `PlayerFaction#changePoints`: negative totals are allowed only
+    /// when `FACTION_TOP.ALLOW_NEGATIVE_POINTS` is enabled.
+    pub fn change_points(&mut self, value: i32, allow_negative: bool) {
+        self.points = if allow_negative { value } else { value.max(0) };
+    }
+
+    /// Port of `PlayerFaction#incrementPoints`.
+    pub fn increment_points(&mut self, value: i32, allow_negative: bool) {
+        self.change_points(self.points + value.abs(), allow_negative);
+    }
+
+    /// Port of `PlayerFaction#addKill`.
+    pub fn add_kill(&mut self) {
+        self.kills += 1;
     }
 
     /// `PlayerFaction#getDtrColor`: red at or below zero, yellow up to one.

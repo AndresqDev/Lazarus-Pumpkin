@@ -119,6 +119,14 @@ pub struct FactionsConfig {
     pub rename_cooldown: u64,
     pub open_change_cooldown: u64,
     pub warzone_break_after: WarzoneBreakAfter,
+
+    // ---- `FACTION_TOP` (faction leaderboard points) ----
+    pub allow_negative_points: bool,
+    pub points_per_kill: i32,
+    pub points_per_death: i32,
+    pub koth_cap_points: i32,
+    pub conquest_cap_points: i32,
+    pub dtc_destroy_points: i32,
 }
 
 impl Default for FactionsConfig {
@@ -162,6 +170,12 @@ impl Default for FactionsConfig {
             rename_cooldown: 30,
             open_change_cooldown: 30,
             warzone_break_after: WarzoneBreakAfter::default(),
+            allow_negative_points: true,
+            points_per_kill: 5,
+            points_per_death: -5,
+            koth_cap_points: 20,
+            conquest_cap_points: 100,
+            dtc_destroy_points: 30,
         }
     }
 }
@@ -330,7 +344,8 @@ impl Default for SystemFactionNames {
         Self {
             wilderness: "&2Wilderness".into(),
             warzone: "&4Warzone".into(),
-            safezone: "&aSafezone".into(),
+            // `SpawnFaction` (name "Spawn", colour `&a`).
+            safezone: "&aSpawn".into(),
         }
     }
 }
@@ -487,10 +502,16 @@ pub struct DeathbanConfig {
     pub enabled: bool,
     /// Default ban time in minutes.
     pub default_ban_time: u64,
-    /// Consume a life instead of deathbanning when the player has one.
-    pub use_lives: bool,
-    /// Worlds that deathban (empty = all worlds).
-    pub deathban_worlds: Vec<String>,
+    /// `DEATHBAN.BAN_TIMES` — first matching permission wins, in config order
+    /// (port of `DeathbanManager#getBanTime`).
+    pub ban_times: Vec<BanTime>,
+}
+
+/// One entry of `DEATHBAN.BAN_TIMES`: time in minutes + required permission.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BanTime {
+    pub minutes: u64,
+    pub permission: String,
 }
 
 impl Default for DeathbanConfig {
@@ -498,8 +519,13 @@ impl Default for DeathbanConfig {
         Self {
             enabled: true,
             default_ban_time: 180,
-            use_lives: true,
-            deathban_worlds: Vec::new(),
+            ban_times: vec![
+                BanTime { minutes: 30, permission: "lazarus.deathban.30".into() },
+                BanTime { minutes: 45, permission: "lazarus.deathban.45".into() },
+                BanTime { minutes: 60, permission: "lazarus.deathban.60".into() },
+                BanTime { minutes: 75, permission: "lazarus.deathban.75".into() },
+                BanTime { minutes: 90, permission: "lazarus.deathban.90".into() },
+            ],
         }
     }
 }

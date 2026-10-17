@@ -43,12 +43,20 @@ impl ConfigFile {
         }
     }
 
-    /// Navigates a dotted path (`FACTION_DTR.MAX_DTR`).
+    /// Navigates a dotted path (`FACTION_DTR.MAX_DTR`). Numeric path segments
+    /// also match numeric YAML keys (e.g. `DEATHBAN.BAN_TIMES.30`).
     fn lookup(&self, path: &str) -> Option<&Value> {
         let mut current = &self.value;
         for part in path.split('.') {
             current = match current {
-                Value::Mapping(map) => map.get(Value::String(part.to_string()))?,
+                Value::Mapping(map) => map
+                    .get(Value::String(part.to_string()))
+                    .or_else(|| part.parse::<i64>().ok().and_then(|n| map.get(Value::Number(n.into()))))
+                    .or_else(|| {
+                        part.parse::<bool>()
+                            .ok()
+                            .and_then(|b| map.get(Value::Bool(b)))
+                    })?,
                 _ => return None,
             };
         }
@@ -122,12 +130,18 @@ impl ConfigFile {
         self.lookup(path).is_some()
     }
 
-    /// Keys of a mapping section (used for dynamic menus like kits).
+    /// Keys of a mapping section (used for dynamic menus like kits). Numeric
+    /// keys are stringified (`DEATHBAN.BAN_TIMES` uses minute keys).
     pub fn keys(&self, path: &str) -> Vec<String> {
         match self.lookup(path) {
             Some(Value::Mapping(map)) => map
                 .keys()
-                .filter_map(|k| k.as_str().map(str::to_string))
+                .filter_map(|k| match k {
+                    Value::String(s) => Some(s.clone()),
+                    Value::Number(n) => Some(n.to_string()),
+                    Value::Bool(b) => Some(b.to_string()),
+                    _ => None,
+                })
                 .collect(),
             _ => Vec::new(),
         }

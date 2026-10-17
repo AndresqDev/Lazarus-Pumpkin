@@ -175,8 +175,9 @@ impl TimerManager {
         }
     }
 
-    pub fn freeze_faction(&mut self, faction_id: &str, minutes: u64) {
-        let expiry = crate::util::now_millis() + (minutes as i64 * 60 * 1000);
+    /// `FactionFreezeTimer#activate(faction, seconds)`.
+    pub fn freeze_faction(&mut self, faction_id: &str, seconds: u64) {
+        let expiry = crate::util::now_millis() + (seconds as i64 * 1000);
         self.faction_freeze.insert(faction_id.to_string(), expiry);
     }
 

@@ -109,100 +109,162 @@ impl EventHandler<PlayerLeaveEvent> for LeaveListener {
     }
 }
 
+/// Port of `PlayerEventListener#checkMovement`: only runs when the block
+/// coordinates (X/Y/Z) change. Cancels home/stuck warmups and, when the faction
+/// at the destination differs from the one at the origin, pauses/resumes the PvP
+/// protection timer and sends the claim leave/enter messages.
+fn check_movement(
+    player: &Player,
+    uuid: &str,
+    from: (f64, f64, f64),
+    to: (f64, f64, f64),
+    world: &str,
+) {
+    let (fx, fy, fz) = from;
+    let (tx, ty, tz) = to;
+
+    if fx.floor() == tx.floor() && fy.floor() == ty.floor() && fz.floor() == tz.floor() {
+        return;
+    }
+
+    let (home_message, stuck_message, announce) = {
+        let mut guard = state().write().unwrap();
+
+        // `checkFactionHomeAndStuckOnMove(player)`: any block move cancels the
+        // home warmup; the stuck warmup only cancels when the player moved
+        // farther than `FACTION_STUCK.ALLOWED_MOVEMENT_RADIUS` (squared value,
+        // compared against the 3D distance just like `hasExceededStuckLimit`).
+        let mut home_message = None;
+        let mut stuck_message = None;
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+
+        match guard.timers.pending(uuid).cloned() {
+            Some(action) if action.timer_type == TimerType::Home => {
+                guard.timers.clear_pending(uuid);
+                home_message = Some(format!(
+                    "{prefix}{}",
+                    guard
+                        .raw
+                        .language
+                        .string("FACTIONS.HOME_COMMAND.TELEPORT_CANCELLED.MOVED")
+                ));
+            }
+            Some(action) if action.timer_type == TimerType::Stuck => {
+                let dx = tx - action.origin_x;
+                let dy = ty - action.origin_y;
+                let dz = tz - action.origin_z;
+                let radius = guard.config.timers.stuck_movement_radius;
+                if dx * dx + dy * dy + dz * dz > radius * radius {
+                    guard.timers.clear_pending(uuid);
+                    stuck_message = Some(format!(
+                        "{prefix}{}",
+                        guard
+                            .raw
+                            .language
+                            .string("FACTIONS.STUCK_COMMAND.TELEPORT_CANCELLED.MOVED")
+                    ));
+                }
+            }
+            _ => {}
+        }
+
+        // `ClaimManager#getFactionAt(from/to)`. The cached chunk (kept in sync by
+        // moves and teleports) is the origin so teleports announce correctly; the
+        // event origin is the fallback for the first move after a join.
+        let from_territory = match guard.chunk_cache.get(uuid) {
+            Some(cached) => {
+                core::territory_at_guard(&guard, &cached.world, cached.cx * 16, cached.cz * 16)
+            }
+            None => core::territory_at_guard(&guard, world, fx.floor() as i32, fz.floor() as i32),
+        };
+        let to_territory =
+            core::territory_at_guard(&guard, world, tx.floor() as i32, tz.floor() as i32);
+
+        let mut announce = None;
+
+        if from_territory != to_territory {
+            // `PvpProtTimer#pause(player, toFaction.isSafezone(), to)`.
+            if core::is_safezone_guard(&guard, &to_territory) {
+                guard.timers.bank_pvp(uuid);
+            } else {
+                guard.timers.resume_pvp(uuid);
+            }
+
+            let viewer_faction = guard.factions.by_member(uuid).map(|f| f.id.clone());
+
+            let leaving = util::replace(
+                &util::replace(
+                    &guard.raw.language.string("FACTIONS.CLAIM_MESSAGES.LEAVING"),
+                    "<faction>",
+                    &core::territory_display_guard(
+                        &guard,
+                        &from_territory,
+                        viewer_faction.as_deref(),
+                    ),
+                ),
+                "<deathban>",
+                &core::deathban_string_guard(&guard, &from_territory),
+            );
+            let entering = util::replace(
+                &util::replace(
+                    &guard.raw.language.string("FACTIONS.CLAIM_MESSAGES.ENTERING"),
+                    "<faction>",
+                    &core::territory_display_guard(&guard, &to_territory, viewer_faction.as_deref()),
+                ),
+                "<deathban>",
+                &core::deathban_string_guard(&guard, &to_territory),
+            );
+
+            announce = Some((leaving, entering));
+        }
+
+        // Remember the latest position for the next check (and teleports).
+        let (cx, cz) = util::chunk_key(tx.floor() as i32, tz.floor() as i32);
+        guard.chunk_cache.insert(
+            uuid.to_string(),
+            ChunkState { world: world.to_string(), cx, cz, territory: to_territory },
+        );
+
+        (home_message, stuck_message, announce)
+    };
+
+    if let Some(message) = home_message {
+        core::send(player, message);
+    }
+    if let Some(message) = stuck_message {
+        core::send(player, message);
+    }
+    if let Some((leaving, entering)) = announce {
+        core::send(player, leaving);
+        core::send(player, entering);
+    }
+}
+
 pub struct MoveListener;
 
 impl EventHandler<PlayerMoveEvent> for MoveListener {
     fn handle(&self, server: Server, mut event: EventData<PlayerMoveEvent>) -> EventData<PlayerMoveEvent> {
         let uuid = core::uuid_of(&event.player);
-
-        let (x, _y, z) = event.to_position;
-        let block_x = x.floor() as i32;
-        let block_z = z.floor() as i32;
         let world = core::world_name(&event.player);
-        let (cx, cz) = util::chunk_key(block_x, block_z);
+        let from = event.from_position;
+        let to = event.to_position;
 
-        let territory = core::territory_at(&world, block_x, block_z);
-        let viewer_faction = core::faction_id_of(&uuid);
-        let display = core::territory_display(&territory, viewer_faction.as_deref());
-
-        // Combat-tagged players may not enter the safezone (port of the original
-        // `PlayerEventListener#onPlayerMove`), and the entering message matches
-        // `CLAIM_MESSAGES.ENTERING`.
-        let (combat, was_safezone, is_safezone, deny_message, entering_message, leaving_message) = {
+        // Fresh from/to territories, exactly like the original computes
+        // `ClaimManager#getFactionAt(event.getFrom()/getTo())`.
+        let (combat, was_safezone, is_safezone, block_enter) = {
             let guard = state().read().unwrap();
+            let (fx, _fy, fz) = from;
+            let (tx, _ty, tz) = to;
+            let from_territory =
+                core::territory_at_guard(&guard, &world, fx.floor() as i32, fz.floor() as i32);
+            let to_territory =
+                core::territory_at_guard(&guard, &world, tx.floor() as i32, tz.floor() as i32);
+            let was_safezone = core::is_safezone_guard(&guard, &from_territory);
+            let is_safezone = core::is_safezone_guard(&guard, &to_territory);
 
-            let previous = guard.chunk_cache.get(&uuid).cloned();
-
-            let (was_safezone, prev_display, prev_deathban) = match &previous {
-                Some(p) => {
-                    let territory = core::territory_at_guard(&guard, &p.world, p.cx * 16, p.cz * 16);
-                    let deathban = match &territory {
-                        core::Territory::Faction(id) => guard
-                            .factions
-                            .get(id)
-                            .map(|f| if f.deathban { "&cDeathban" } else { "&aNon-Deathban" })
-                            .unwrap_or("&aNon-Deathban"),
-                        _ => "&aNon-Deathban",
-                    };
-                    (
-                        matches!(territory, core::Territory::Safezone),
-                        core::territory_display_guard(&guard, &territory, viewer_faction.as_deref()),
-                        deathban.to_string(),
-                    )
-                }
-                None => (false, String::new(), "&aNon-Deathban".to_string()),
-            };
-
-            let deathban = match &territory {
-                core::Territory::Faction(id) => guard
-                    .factions
-                    .get(id)
-                    .map(|f| if f.deathban { "&cDeathban" } else { "&aNon-Deathban" })
-                    .unwrap_or("&aNon-Deathban"),
-                _ => "&aNon-Deathban",
-            };
-
-            let entering = util::replace(
-                &util::replace(&guard.lang.entering_territory, "<faction>", &display),
-                "<deathban>",
-                deathban,
-            );
-            let leaving = util::replace(
-                &util::replace(&guard.lang.leaving_territory, "<faction>", &prev_display),
-                "<deathban>",
-                &prev_deathban,
-            );
-
-            (
-                guard.timers.is_active(&uuid, TimerType::CombatTag),
-                was_safezone,
-                matches!(territory, core::Territory::Safezone),
-                guard.lang.safezone_deny_enter.clone(),
-                entering,
-                leaving,
-            )
-        };
-
-        if combat && is_safezone && !was_safezone {
-            event.cancelled = true;
-            core::send(&event.player, deny_message);
-            return event;
-        }
-
-        // PvP protection: entering another player's claim (or a non-safezone
-        // system claim) is denied; wilderness, warzone, safezone and roads are
-        // walkable. (Combat tag is handled separately above: it only blocks the
-        // safezone.)
-        let block_enter = {
-            let guard = state().read().unwrap();
-            if !guard.timers.is_active(&uuid, TimerType::PvpProtection) {
-                false
-            } else {
-                let can_enter = guard
-                    .raw
-                    .config
-                    .bool("PVP_PROTECTION.CAN_ENTER_OWN_CLAIM");
-                match &territory {
+            let block_enter = guard.timers.is_active(&uuid, TimerType::PvpProtection) && {
+                let can_enter = guard.raw.config.bool("PVP_PROTECTION.CAN_ENTER_OWN_CLAIM");
+                match &to_territory {
                     core::Territory::Faction(id) => guard
                         .factions
                         .get(id)
@@ -210,16 +272,35 @@ impl EventHandler<PlayerMoveEvent> for MoveListener {
                         .unwrap_or(false),
                     _ => false,
                 }
-            }
+            };
+
+            (
+                guard.timers.is_active(&uuid, TimerType::CombatTag),
+                was_safezone,
+                is_safezone,
+                block_enter,
+            )
         };
 
+        // Combat-tagged players may not enter the safezone (silent, exactly like
+        // the original `event.setTo(event.getFrom())`).
+        if combat && is_safezone && !was_safezone {
+            event.cancelled = true;
+            return event;
+        }
+
+        // PvP protection: entering another player's claim (or a non-safezone
+        // system claim) is denied; wilderness, warzone, safezone and roads are
+        // walkable. (Port of `PvpProtHandler#onPlayerMove`, silent.)
         if block_enter {
             event.cancelled = true;
             return event;
         }
 
-        // PvP protection banking: time only ticks outside the safezone (port of
-        // the `PvpProtTimer#pause` calls on faction/world changes).
+        // PvP protection banking: time only ticks outside safezones (port of the
+        // `PvpProtTimer#pause` calls; running them on every move is equivalent
+        // to the original's faction-change checks because bank/resume are
+        // idempotent).
         {
             let mut guard = state().write().unwrap();
             if is_safezone {
@@ -235,56 +316,17 @@ impl EventHandler<PlayerMoveEvent> for MoveListener {
             crate::sotw::update_player_visibility(&server, &event.player, is_safezone);
         }
 
-        let announce = {
-            let mut guard = state().write().unwrap();
-            let previous = guard.chunk_cache.get(&uuid).cloned();
-            let territory_changed = previous.as_ref().is_some_and(|p| p.territory != display);
-            guard.chunk_cache.insert(
-                uuid.clone(),
-                ChunkState { world: world.clone(), cx, cz, territory: display.clone() },
-            );
-            territory_changed
-        };
-
-        if announce {
-            if !leaving_message.is_empty() {
-                core::send(&event.player, leaving_message);
-            }
-            core::send(&event.player, entering_message);
-        }
-
-        // Cancel warmup teleports if the player moved too far (Home/Stuck warmups).
-        let cancelled = {
-            let mut guard = state().write().unwrap();
-            let pending = guard.timers.pending(&uuid).cloned();
-            match pending {
-                Some(action) => {
-                    let dx = x - action.origin_x;
-                    let dz = z - action.origin_z;
-                    let moved = (dx * dx + dz * dz).sqrt();
-                    let radius = match action.timer_type {
-                        TimerType::Home => 3.0,
-                        TimerType::Stuck => guard.config.timers.stuck_movement_radius,
-                        _ => 3.0,
-                    };
-                    if moved > radius {
-                        guard.timers.clear_pending(&uuid);
-                        true
-                    } else {
-                        false
-                    }
-                }
-                None => false,
-            }
-        };
-
-        if cancelled {
-            core::send(&event.player, "&cTeleport cancelled, you moved!");
-        }
+        // Claim leave/enter messages + warmup cancels (`checkMovement`).
+        check_movement(&event.player, &uuid, from, to, &world);
 
         event
     }
 }
+
+/// Window in which the last damaging player still counts as the killer
+/// (approximates Bukkit's `Player#getKiller` combat-tracker window; the port has
+/// no NMS combat loggers).
+const KILLER_WINDOW_MILLIS: i64 = 5000;
 
 pub struct DeathListener;
 
@@ -293,6 +335,42 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
         let uuid = core::uuid_of(&event.player);
         let name = core::name_of(&event.player);
         let world = core::world_name(&event.player);
+        let environment = core::dimension_of(&world);
+
+        // `Player#getKiller` replacement: the last player to damage the victim
+        // within the combat window.
+        let (killer_uuid, killer_player) = {
+            let killer_uuid = {
+                let guard = state().read().unwrap();
+                guard.last_damagers.get(&uuid).and_then(|(killer, at)| {
+                    (util::now_millis() - at <= KILLER_WINDOW_MILLIS && *killer != uuid)
+                        .then(|| killer.clone())
+                })
+            };
+            let killer_player = killer_uuid.as_ref().and_then(|killer| {
+                pumpkin_plugin_api::uuid::parse(killer).and_then(|id| server.get_player_by_uuid(id))
+            });
+            (killer_uuid, killer_player)
+        };
+
+        let killer_name = killer_player.as_ref().map(core::name_of).or_else(|| {
+            killer_uuid.as_ref().map(|killer| {
+                state()
+                    .read()
+                    .unwrap()
+                    .userdata
+                    .get(killer)
+                    .map(|user| user.name.clone())
+                    .unwrap_or_else(|| killer.clone())
+            })
+        });
+
+        // Approximates `event.getDeathMessage()` (`DeathMessageHandler` is not
+        // ported).
+        let reason = match &killer_name {
+            Some(killer_name) => format!("{name} was slain by {killer_name}"),
+            None => format!("{name} died"),
+        };
 
         let mut messages: Vec<(String, String)> = Vec::new();
 
@@ -300,28 +378,45 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
             let mut guard = state().write().unwrap();
             let config = guard.config.clone();
 
-            // Update stats (port of Userdata.updateDeathStats).
+            guard.last_damagers.remove(&uuid);
+
+            // Stats (port of `DynamicEventHandler#onPlayerDeath`): every death is
+            // recorded; kills only when the killer is online.
             if let Some(user) = guard.userdata.get_mut(&uuid) {
-                user.add_death(format!("{name} died in {world}"));
+                user.add_death(reason.clone());
+            }
+            if killer_player.is_some() {
+                if let Some(killer) = &killer_uuid {
+                    if let Some(user) = guard.userdata.get_mut(killer) {
+                        user.add_kill(reason.clone());
+                    }
+                }
             }
 
             guard.timers.cancel(&uuid, TimerType::CombatTag);
             // Death removes PvP protection entirely (port of `PvpProtHandler#onPlayerDeath`).
             guard.timers.cancel_pvp(&uuid);
 
-            // DTR loss for the victim's faction (port of `sendMemberDeath`).
-            let faction_id = guard.factions.by_member(&uuid).map(|f| f.id.clone());
-            if let Some(faction_id) = faction_id {
-                let frozen = guard.timers.is_frozen(&faction_id);
+            let victim_faction = guard.factions.by_member(&uuid).map(|f| f.id.clone());
+
+            // `PlayerFaction#onDeath` + the silent warmup cancels, both guarded by
+            // the faction check in `PlayerEventListener#onPlayerDeath`.
+            if let Some(faction_id) = &victim_faction {
+                let frozen = guard.timers.is_frozen(faction_id);
+                let loss = match environment {
+                    core::Dimension::Overworld => config.factions.dtr_death_loss.overworld,
+                    core::Dimension::Nether => config.factions.dtr_death_loss.nether,
+                    core::Dimension::End => config.factions.dtr_death_loss.end,
+                };
                 let template = guard.raw.language.string("FACTIONS.MEMBER_DEATH");
-                if let Some(faction) = guard.factions.get_mut(&faction_id) {
-                    let loss = match core::dimension_of(&world) {
-                        core::Dimension::Overworld => config.factions.dtr_death_loss.overworld,
-                        core::Dimension::Nether => config.factions.dtr_death_loss.nether,
-                        core::Dimension::End => config.factions.dtr_death_loss.end,
-                    };
+
+                if let Some(faction) = guard.factions.get_mut(faction_id) {
                     let amount = faction.dtr - loss;
                     faction.set_dtr(&config, amount);
+                    faction.change_points(
+                        faction.points + config.factions.points_per_death,
+                        config.factions.allow_negative_points,
+                    );
 
                     let loss_string = format!("-{}", crate::util::java_double(loss));
                     let dtr_string = faction.dtr_string(&config, frozen);
@@ -339,6 +434,30 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
                         ),
                     ));
                 }
+
+                // `FactionFreezeTimer#activate(this)`.
+                guard.timers.freeze_faction(
+                    faction_id,
+                    config.factions.freeze_duration_minutes * 60,
+                );
+
+                guard.timers.clear_pending(&uuid);
+            }
+
+            // Killer faction (port of the `PlayerEventListener#onPlayerDeath`
+            // kill credit).
+            if let Some(killer) = &killer_uuid {
+                if let Some(killer_faction_id) =
+                    guard.factions.by_member(killer).map(|f| f.id.clone())
+                {
+                    if let Some(faction) = guard.factions.get_mut(&killer_faction_id) {
+                        faction.add_kill();
+                        faction.increment_points(
+                            config.factions.points_per_kill as i32,
+                            config.factions.allow_negative_points,
+                        );
+                    }
+                }
             }
         }
 
@@ -349,15 +468,9 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
             }
         }
 
-        // Deathban / life consumption (port of DeathbanManager death handling).
-        if let Some((message, banned)) = crate::deathban::apply_on_death(&event.player) {
-            core::send(&event.player, &message);
-            if banned {
-                if let Some(java) = event.player.as_java() {
-                    java.kick(pumpkin_plugin_api::player::JavaKickOptions::new(util::text(&message)));
-                }
-            }
-        }
+        // Deathban (`DeathbanManager#onPlayerDeath`; the kick fires ~1s later,
+        // like the original's `Tasks.syncLater`).
+        crate::deathban::apply_on_death(&event.player, &reason);
 
         // Drop the claim wand (port of the death handling in SelectionManager).
         {
@@ -386,9 +499,9 @@ impl EventHandler<PlayerRespawnEvent> for RespawnListener {
         let protect_seconds = state().read().unwrap().config.timers.pvp_protection_seconds;
         let (in_safezone, deny) = {
             let guard = state().read().unwrap();
-            let in_safezone = matches!(
-                core::territory_at_guard(&guard, &world, block_x, block_z),
-                core::Territory::Safezone
+            let in_safezone = core::is_safezone_guard(
+                &guard,
+                &core::territory_at_guard(&guard, &world, block_x, block_z),
             );
             let deny = if in_safezone {
                 false
@@ -436,9 +549,9 @@ impl EventHandler<PlayerTeleportEvent> for TeleportListener {
 
         let (in_safezone, deny, protected) = {
             let guard = state().read().unwrap();
-            let in_safezone = matches!(
-                core::territory_at_guard(&guard, &world, block_x, block_z),
-                core::Territory::Safezone
+            let in_safezone = core::is_safezone_guard(
+                &guard,
+                &core::territory_at_guard(&guard, &world, block_x, block_z),
             );
             let protected = guard.timers.is_active(&uuid, TimerType::PvpProtection);
             let deny = if protected && !in_safezone {
@@ -480,6 +593,10 @@ impl EventHandler<PlayerTeleportEvent> for TeleportListener {
         // SOTW: update visibility for the destination (no-op when the timer is
         // not running or hiding is disabled).
         crate::sotw::update_player_visibility(&server, &event.player, in_safezone);
+
+        // `PlayerEventListener#onPlayerTeleport` also runs `checkMovement`, so
+        // teleports announce claim changes immediately (and cancel warmups).
+        check_movement(&event.player, &uuid, event.from_position, event.to_position, &world);
 
         event
     }

@@ -164,9 +164,6 @@ lang! {
     safezone_deny_enter = "&eYou cannot enter &asafezone &ewhile &ccombat tagged&e!";
 
     // Territory
-    territory_wilderness = "&2Wilderness";
-    territory_warzone = "&4Warzone";
-    territory_safezone = "&aSafezone";
     territory_own = "&a<name>";
     territory_ally = "&d<name>";
     territory_enemy = "&c<name>";

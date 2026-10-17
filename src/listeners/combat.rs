@@ -129,17 +129,18 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
         }
 
         // Safezone checks (port of `PlayerEventListener#onEntityDamageByEntity`).
+        let dl = core::location(&damager);
+        let vl = core::location(&victim);
         let (damager_safe, victim_safe) = {
-            let dl = core::location(&damager);
-            let vl = core::location(&victim);
+            let guard = state().read().unwrap();
             (
-                matches!(
-                    core::territory_at(&dl.world, dl.block_x(), dl.block_z()),
-                    core::Territory::Safezone
+                core::is_safezone_guard(
+                    &guard,
+                    &core::territory_at_guard(&guard, &dl.world, dl.block_x(), dl.block_z()),
                 ),
-                matches!(
-                    core::territory_at(&vl.world, vl.block_x(), vl.block_z()),
-                    core::Territory::Safezone
+                core::is_safezone_guard(
+                    &guard,
+                    &core::territory_at_guard(&guard, &vl.world, vl.block_x(), vl.block_z()),
                 ),
             )
         };
@@ -430,6 +431,12 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
             let mut guard = state().write().unwrap();
             guard.timers.activate(&victim_uuid, TimerType::CombatTag, tag_seconds);
             guard.timers.activate(&damager_uuid, TimerType::CombatTag, tag_seconds);
+            // Runtime replacement for Bukkit's `Player#getKiller` (used by the
+            // death flow to credit the kill): the last player to damage the
+            // victim, valid for a few seconds.
+            guard
+                .last_damagers
+                .insert(victim_uuid.clone(), (damager_uuid.clone(), util::now_millis()));
         }
 
         if !victim_combat {
@@ -501,10 +508,19 @@ impl EventHandler<EntityDamageEvent> for EntityDamageListener {
         // All damage is cancelled inside the safezone (port of `onEntityDamage`).
         {
             let location = core::location(&player);
-            if matches!(
-                core::territory_at(&location.world, location.block_x(), location.block_z()),
-                core::Territory::Safezone
-            ) {
+            let in_safezone = {
+                let guard = state().read().unwrap();
+                core::is_safezone_guard(
+                    &guard,
+                    &core::territory_at_guard(
+                        &guard,
+                        &location.world,
+                        location.block_x(),
+                        location.block_z(),
+                    ),
+                )
+            };
+            if in_safezone {
                 event.cancelled = true;
                 return event;
             }

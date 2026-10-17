@@ -121,15 +121,32 @@ pub struct AppState {
     /// Transient: protected players to eject on the next tick (they respawned
     /// inside a claim they cannot enter).
     pub protection_ejects: std::collections::BTreeSet<String>,
+    /// Transient: players kicked with the deathban message at 1s after death
+    /// (port of `Tasks.syncLater(() -> kickPlayer(...), 20L)`).
+    pub pending_kicks: Vec<PendingKick>,
+    /// Transient: players that already saw the "join again to use life" deathban
+    /// kick (port of `DeathbanManager#confirmations`).
+    pub deathban_confirm: std::collections::BTreeSet<String>,
+    /// Transient: last player that damaged each victim (uuid -> damager uuid +
+    /// timestamp), used as the port of Bukkit's `Player#getKiller`.
+    pub last_damagers: std::collections::BTreeMap<String, (String, i64)>,
 }
 
-/// Tracks a player's last known chunk + displayed territory.
+/// A kick scheduled from an event handler (deathban), fired by the 1s tick.
+pub struct PendingKick {
+    pub uuid: String,
+    pub message: String,
+    pub at: i64,
+}
+
+/// Tracks a player's last known chunk + the territory there (identity, so the
+/// claim announcements compare factions like the original).
 #[derive(Debug, Clone, Default)]
 pub struct ChunkState {
     pub world: String,
     pub cx: i32,
     pub cz: i32,
-    pub territory: String,
+    pub territory: crate::core::Territory,
 }
 
 static STATE: OnceLock<RwLock<AppState>> = OnceLock::new();
@@ -145,6 +162,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
 
     let mut factions: FactionsManager = load_json(&data_folder, "factions.json");
     factions.init_system_factions();
+    factions.normalize_system_factions();
 
     let mut claims: ClaimManager = load_json(&data_folder, "claims.json");
     claims.rebuild_index();
@@ -197,6 +215,9 @@ pub fn init(data_folder: String) -> Result<(), String> {
             tab_cache: std::collections::BTreeMap::new(),
             spawn_centers: std::collections::BTreeMap::new(),
             protection_ejects: std::collections::BTreeSet::new(),
+            pending_kicks: Vec::new(),
+            deathban_confirm: std::collections::BTreeSet::new(),
+            last_damagers: std::collections::BTreeMap::new(),
         }))
         .map_err(|_| "state already initialised".to_string())
 }
@@ -311,6 +332,25 @@ pub fn sync_faction_yaml(config: &mut Config, raw: &RawConfigs) {
         config.factions.dtr_full_character = y.string("FACTION_DTR.DTR_CHARACTERS.FULL_DTR");
         config.factions.dtr_regen_character = y.string("FACTION_DTR.DTR_CHARACTERS.REGENERATING");
         config.factions.dtr_frozen_character = y.string("FACTION_DTR.DTR_CHARACTERS.FROZEN");
+        config.factions.dtr_death_loss.overworld = y.double("FACTION_DTR.DTR_DEATH_LOSS.OVERWORLD");
+        config.factions.dtr_death_loss.nether = y.double("FACTION_DTR.DTR_DEATH_LOSS.NETHER");
+        config.factions.dtr_death_loss.end = y.double("FACTION_DTR.DTR_DEATH_LOSS.END");
+    }
+    if y.has("FACTION_TOP") {
+        config.factions.allow_negative_points = y.bool("FACTION_TOP.ALLOW_NEGATIVE_POINTS");
+        config.factions.points_per_kill = y.int("FACTION_TOP.KILL") as i32;
+        config.factions.points_per_death = y.int("FACTION_TOP.DEATH") as i32;
+        config.factions.koth_cap_points = y.int("FACTION_TOP.KOTH_CAP") as i32;
+        config.factions.conquest_cap_points = y.int("FACTION_TOP.CONQUEST_CAP") as i32;
+        config.factions.dtc_destroy_points = y.int("FACTION_TOP.DTC_DESTROY") as i32;
+    }
+    if y.has("FACTION_STUCK") {
+        config.timers.stuck_movement_radius =
+            y.int("FACTION_STUCK.ALLOWED_MOVEMENT_RADIUS") as f64;
+    }
+    if y.has("SYSTEM_FACTION_NAMES") {
+        config.system_faction_names.wilderness = y.string("SYSTEM_FACTION_NAMES.WILDERNESS");
+        config.system_faction_names.warzone = y.string("SYSTEM_FACTION_NAMES.WARZONE");
     }
     if y.has("FACTIONS_AUTO_SAVE") {
         config.factions.auto_save_minutes = y.int("FACTIONS_AUTO_SAVE").max(1) as u64;
@@ -360,6 +400,17 @@ pub fn sync_faction_yaml(config: &mut Config, raw: &RawConfigs) {
     if y.has("DEATHBAN") {
         config.deathban.enabled = y.bool("DEATHBAN.ENABLED");
         config.deathban.default_ban_time = y.int("DEATHBAN.DEFAULT_BAN_TIME") as u64;
+        // `BAN_TIMES` keeps the config order: `getBanTime` takes the first
+        // matching permission (`DeathbanManager#getBanTime`).
+        config.deathban.ban_times = y
+            .keys("DEATHBAN.BAN_TIMES")
+            .into_iter()
+            .filter_map(|key| {
+                let minutes = key.parse::<u64>().ok()?;
+                let permission = y.string(&format!("DEATHBAN.BAN_TIMES.{key}"));
+                (!permission.is_empty()).then_some(crate::config::BanTime { minutes, permission })
+            })
+            .collect();
     }
     if y.has("RELATION_COLORS") {
         config.relation_colors.teammate = y.string("RELATION_COLORS.TEAMMATE_COLOR");

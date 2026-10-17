@@ -53,7 +53,7 @@ impl FactionsManager {
         );
         let safezone = Faction::new_system(
             new_id(),
-            "Safezone".to_string(),
+            "Spawn".to_string(),
             FactionKind::Safezone,
             "&a".into(),
         );
@@ -65,6 +65,19 @@ impl FactionsManager {
         self.factions.insert(warzone.id.clone(), warzone);
         self.factions.insert(safezone.id.clone(), safezone);
         self.initialized = true;
+    }
+
+    /// Port of `FactionsManager#additionalFactionSetup`: the spawn faction is
+    /// forced to `safezone = true` / `deathban = false` on every load (and named
+    /// "Spawn", like `SpawnFaction`), so stale values persisted by older builds
+    /// can never make spawn deathban.
+    pub fn normalize_system_factions(&mut self) {
+        let safezone_id = self.safezone_id.clone();
+        if let Some(faction) = self.factions.get_mut(&safezone_id) {
+            faction.safezone = true;
+            faction.deathban = false;
+            faction.name = "Spawn".to_string();
+        }
     }
 
     pub fn wilderness(&self) -> &Faction {

@@ -61,6 +61,14 @@ pub(crate) fn string_arg(args: &ConsumedArgs, key: &str) -> Option<String> {
     }
 }
 
+/// Like [`string_arg`], but treats the host placeholder for a missing argument
+/// as absent: Pumpkin's `consumed-args.get-value` returns `simple("")` when the
+/// key was not parsed (`wasm_host` `get_value` fallback), and single-word
+/// arguments can never legitimately be empty.
+pub(crate) fn present_string_arg(args: &ConsumedArgs, key: &str) -> Option<String> {
+    string_arg(args, key).filter(|value| !value.is_empty())
+}
+
 /// Extracts an integer argument.
 pub(crate) fn int_arg(args: &ConsumedArgs, key: &str) -> Option<i64> {
     match args.get_value(key) {

@@ -116,6 +116,12 @@ pub enum Territory {
     Faction(String),
 }
 
+impl Default for Territory {
+    fn default() -> Self {
+        Self::Wilderness
+    }
+}
+
 impl Dimension {
     pub fn radius(radii: &crate::config::WorldRadii) -> i32 {
         radii.overworld
@@ -252,23 +258,112 @@ pub fn territory_display_guard(
     let colors = &guard.config.relation_colors;
 
     match territory {
-        Territory::Wilderness => guard.lang.territory_wilderness.clone(),
-        Territory::Warzone => guard.lang.territory_warzone.clone(),
-        Territory::Safezone => guard.lang.territory_safezone.clone(),
+        // `WildernessFaction` / `WarzoneFaction` take their colour-coded names
+        // from `SYSTEM_FACTION_NAMES` (`FactionsManager#createDefaultFaction`).
+        Territory::Wilderness => guard.config.system_faction_names.wilderness.clone(),
+        Territory::Warzone => guard.config.system_faction_names.warzone.clone(),
+        // `SpawnFaction`: name "Spawn" with the `&a` colour.
+        Territory::Safezone => guard.config.system_faction_names.safezone.clone(),
         Territory::Faction(id) => {
             let Some(faction) = guard.factions.get(id) else {
-                return guard.lang.territory_wilderness.clone();
+                return guard.config.system_faction_names.wilderness.clone();
             };
-            let relation = match viewer_faction {
-                Some(viewer) if viewer == id => Relation::Member,
-                Some(viewer) => match guard.factions.get(viewer) {
-                    Some(viewer_faction) if viewer_faction.is_ally(id) => Relation::Ally,
-                    _ => Relation::Enemy,
-                },
-                None => Relation::Enemy,
-            };
-            format!("{}{}", relation.color(colors), faction.name)
+            faction_display_name_guard(guard, faction, viewer_faction, colors)
         }
+    }
+}
+
+/// `Faction#getName(sender)` / `SystemFaction#getDisplayName(sender)`: player
+/// factions use the viewer's relation colour, system factions their own colour.
+pub fn faction_display_name_guard(
+    guard: &crate::state::AppState,
+    faction: &crate::factions::Faction,
+    viewer_faction: Option<&str>,
+    colors: &crate::config::RelationColors,
+) -> String {
+    if faction.is_player() {
+        let relation = match viewer_faction {
+            Some(viewer) if viewer == faction.id => Relation::Member,
+            Some(viewer) => match guard.factions.get(viewer) {
+                Some(viewer_faction) if viewer_faction.is_ally(&faction.id) => Relation::Ally,
+                _ => Relation::Enemy,
+            },
+            None => Relation::Enemy,
+        };
+        return format!("{}{}", relation.color(colors), faction.name);
+    }
+
+    match faction.kind {
+        // `RoadFaction#getDisplayName`: "North Road", "East Road", ...
+        crate::factions::FactionKind::Road => {
+            let spaced = match faction.name.as_str() {
+                "NorthRoad" => "North Road".to_string(),
+                "EastRoad" => "East Road".to_string(),
+                "WestRoad" => "West Road".to_string(),
+                "SouthRoad" => "South Road".to_string(),
+                other => other.to_string(),
+            };
+            format!("{}{}", faction.color, spaced)
+        }
+        // `SystemFaction#getName`: own colour + raw name.
+        _ => format!("{}{}", faction.color, faction.name),
+    }
+}
+
+/// `Faction#getDeathbanString` for a territory: `&cDeathban` / `&aNon-Deathban`.
+/// Only the spawn safezone is non-deathban by default; wilderness, warzone,
+/// roads and (player) factions use the `deathban` flag.
+pub fn deathban_string_guard(guard: &crate::state::AppState, territory: &Territory) -> String {
+    let deathban = match territory {
+        Territory::Wilderness | Territory::Warzone => true,
+        Territory::Safezone => false,
+        Territory::Faction(id) => guard
+            .factions
+            .get(id)
+            .map(|faction| faction.deathban)
+            .unwrap_or(false),
+    };
+
+    if deathban {
+        "&cDeathban".to_string()
+    } else {
+        "&aNon-Deathban".to_string()
+    }
+}
+
+/// `Faction#isSafezone` for a territory (only system factions can be safezones).
+pub fn is_safezone_guard(guard: &crate::state::AppState, territory: &Territory) -> bool {
+    match territory {
+        Territory::Safezone => true,
+        Territory::Faction(id) => guard
+            .factions
+            .get(id)
+            .map(|faction| faction.safezone)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// Deathban gate for the location a player died at: `Faction#isDeathban()`
+/// (`DeathbanManager#deathbanPlayer`). Handles system territories directly.
+pub fn territory_deathbans(territory: &Territory) -> bool {
+    let guard = state().read().unwrap();
+    territory_deathbans_guard(&guard, territory)
+}
+
+/// Lock-free variant of [`territory_deathbans`].
+pub fn territory_deathbans_guard(
+    guard: &crate::state::AppState,
+    territory: &Territory,
+) -> bool {
+    match territory {
+        Territory::Wilderness | Territory::Warzone => true,
+        Territory::Safezone => false,
+        Territory::Faction(id) => guard
+            .factions
+            .get(id)
+            .map(|faction| faction.deathban)
+            .unwrap_or(false),
     }
 }
 

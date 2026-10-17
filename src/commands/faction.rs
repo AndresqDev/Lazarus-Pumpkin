@@ -5,13 +5,18 @@
 //! port has no selection system yet, `/f claim` claims the single chunk the player
 //! stands in (the classic "chunk claim" mode). This is documented in `PORTING.md`.
 
+use std::collections::BTreeMap;
+
 use pumpkin_plugin_api::command::{
     ArgumentType, CommandError, CommandNode, CommandSender, ConsumedArgs, StringType,
 };
 use pumpkin_plugin_api::commands::CommandHandler;
 use pumpkin_plugin_api::{Context, Player, Server};
 
-use super::{command, double_arg, int_arg, register_op_permission, register_public_permission, reply, string_arg};
+use super::{
+    command, double_arg, int_arg, present_string_arg, register_op_permission,
+    register_public_permission, reply,
+};
 use crate::config::Config;
 use crate::core;
 use crate::factions::{member, Claim, ClaimManager, Faction, FactionsManager, Role};
@@ -48,6 +53,7 @@ enum Action {
     ShowSelf,
     ShowNamed,
     List,
+    ListPage,
     TopDefault,
     TopMetric,
     Deposit,
@@ -104,12 +110,11 @@ struct FactionExecutor(Action);
 impl CommandHandler for FactionExecutor {
     fn handle(&self, sender: CommandSender, server: Server, args: ConsumedArgs) -> Result<i32, CommandError> {
         if let Action::Help = self.0 {
-            help(&sender, 1);
+            help(&sender, None);
             return Ok(1);
         }
         if let Action::HelpPage = self.0 {
-            let page = int_arg(&args, "page").unwrap_or(1) as usize;
-            help(&sender, page);
+            help(&sender, present_string_arg(&args, "page"));
             return Ok(1);
         }
         run(self.0, &sender, &server, &args);
@@ -161,21 +166,65 @@ pub fn register(context: &Context) -> Result<(), String> {
         .then(
             CommandNode::literal("help")
                 .execute(FactionExecutor(Action::Help))
-                .then(int_node("page").execute(FactionExecutor(Action::HelpPage))),
+                .then(str_node("page").execute(FactionExecutor(Action::HelpPage))),
         )
-        .then(CommandNode::literal("create").then(str_node("name").execute(FactionExecutor(Action::Create))))
-        .then(CommandNode::literal("new").then(str_node("name").execute(FactionExecutor(Action::Create))))
+        .then(
+            CommandNode::literal("create")
+                .execute(FactionExecutor(Action::Create))
+                .then(str_node("name").execute(FactionExecutor(Action::Create))),
+        )
+        .then(
+            CommandNode::literal("new")
+                .execute(FactionExecutor(Action::Create))
+                .then(str_node("name").execute(FactionExecutor(Action::Create))),
+        )
         .then(CommandNode::literal("disband").execute(FactionExecutor(Action::Disband)))
-        .then(CommandNode::literal("invite").then(str_node("player").execute(FactionExecutor(Action::Invite))))
-        .then(CommandNode::literal("inv").then(str_node("player").execute(FactionExecutor(Action::Invite))))
-        .then(CommandNode::literal("join").then(str_node("name").execute(FactionExecutor(Action::Join))))
-        .then(CommandNode::literal("accept").then(str_node("name").execute(FactionExecutor(Action::Join))))
+        .then(
+            CommandNode::literal("invite")
+                .execute(FactionExecutor(Action::Invite))
+                .then(str_node("player").execute(FactionExecutor(Action::Invite))),
+        )
+        .then(
+            CommandNode::literal("inv")
+                .execute(FactionExecutor(Action::Invite))
+                .then(str_node("player").execute(FactionExecutor(Action::Invite))),
+        )
+        .then(
+            CommandNode::literal("join")
+                .execute(FactionExecutor(Action::Join))
+                .then(str_node("name").execute(FactionExecutor(Action::Join))),
+        )
+        .then(
+            CommandNode::literal("accept")
+                .execute(FactionExecutor(Action::Join))
+                .then(str_node("name").execute(FactionExecutor(Action::Join))),
+        )
         .then(CommandNode::literal("leave").execute(FactionExecutor(Action::Leave)))
-        .then(CommandNode::literal("kick").then(str_node("player").execute(FactionExecutor(Action::Kick))))
-        .then(CommandNode::literal("promote").then(str_node("player").execute(FactionExecutor(Action::Promote))))
-        .then(CommandNode::literal("demote").then(str_node("player").execute(FactionExecutor(Action::Demote))))
-        .then(CommandNode::literal("leader").then(str_node("player").execute(FactionExecutor(Action::Leader))))
-        .then(CommandNode::literal("rename").then(str_node("name").execute(FactionExecutor(Action::Rename))))
+        .then(
+            CommandNode::literal("kick")
+                .execute(FactionExecutor(Action::Kick))
+                .then(str_node("player").execute(FactionExecutor(Action::Kick))),
+        )
+        .then(
+            CommandNode::literal("promote")
+                .execute(FactionExecutor(Action::Promote))
+                .then(str_node("player").execute(FactionExecutor(Action::Promote))),
+        )
+        .then(
+            CommandNode::literal("demote")
+                .execute(FactionExecutor(Action::Demote))
+                .then(str_node("player").execute(FactionExecutor(Action::Demote))),
+        )
+        .then(
+            CommandNode::literal("leader")
+                .execute(FactionExecutor(Action::Leader))
+                .then(str_node("player").execute(FactionExecutor(Action::Leader))),
+        )
+        .then(
+            CommandNode::literal("rename")
+                .execute(FactionExecutor(Action::Rename))
+                .then(str_node("name").execute(FactionExecutor(Action::Rename))),
+        )
         .then(CommandNode::literal("chat").execute(FactionExecutor(Action::Chat)))
         .then(CommandNode::literal("c").execute(FactionExecutor(Action::Chat)))
         .then(CommandNode::literal("claim").execute(FactionExecutor(Action::Claim)))
@@ -197,113 +246,311 @@ pub fn register(context: &Context) -> Result<(), String> {
         .then(CommandNode::literal("i").execute(FactionExecutor(Action::ShowSelf)))
         .then(CommandNode::literal("info").execute(FactionExecutor(Action::ShowSelf)))
         .then(CommandNode::literal("who").execute(FactionExecutor(Action::ShowSelf)))
-        .then(CommandNode::literal("list").execute(FactionExecutor(Action::List)))
+        .then(
+            CommandNode::literal("list")
+                .execute(FactionExecutor(Action::List))
+                .then(str_node("page").execute(FactionExecutor(Action::ListPage))),
+        )
         .then(
             CommandNode::literal("top")
                 .execute(FactionExecutor(Action::TopDefault))
                 .then(str_node("metric").execute(FactionExecutor(Action::TopMetric))),
         )
-        .then(CommandNode::literal("deposit").then(str_node("amount").execute(FactionExecutor(Action::Deposit))))
-        .then(CommandNode::literal("d").then(str_node("amount").execute(FactionExecutor(Action::Deposit))))
-        .then(CommandNode::literal("withdraw").then(str_node("amount").execute(FactionExecutor(Action::Withdraw))))
-        .then(CommandNode::literal("w").then(str_node("amount").execute(FactionExecutor(Action::Withdraw))))
-        .then(CommandNode::literal("ally").then(str_node("faction").execute(FactionExecutor(Action::Ally))))
-        .then(CommandNode::literal("unally").then(str_node("faction").execute(FactionExecutor(Action::Unally))))
+        .then(
+            CommandNode::literal("deposit")
+                .execute(FactionExecutor(Action::Deposit))
+                .then(str_node("amount").execute(FactionExecutor(Action::Deposit))),
+        )
+        .then(
+            CommandNode::literal("d")
+                .execute(FactionExecutor(Action::Deposit))
+                .then(str_node("amount").execute(FactionExecutor(Action::Deposit))),
+        )
+        .then(
+            CommandNode::literal("withdraw")
+                .execute(FactionExecutor(Action::Withdraw))
+                .then(str_node("amount").execute(FactionExecutor(Action::Withdraw))),
+        )
+        .then(
+            CommandNode::literal("w")
+                .execute(FactionExecutor(Action::Withdraw))
+                .then(str_node("amount").execute(FactionExecutor(Action::Withdraw))),
+        )
+        .then(
+            CommandNode::literal("ally")
+                .execute(FactionExecutor(Action::Ally))
+                .then(str_node("faction").execute(FactionExecutor(Action::Ally))),
+        )
+        .then(
+            CommandNode::literal("unally")
+                .execute(FactionExecutor(Action::Unally))
+                .then(str_node("faction").execute(FactionExecutor(Action::Unally))),
+        )
         // ---- Admin subcommands ----
         .then(
-            CommandNode::literal("setdtr").then(
-                str_node("faction").then(
-                    CommandNode::argument("value", &ArgumentType::Double((None, None)))
-                        .execute(FactionExecutor(Action::AdminSetDtr)),
+            CommandNode::literal("setdtr")
+                .execute(FactionExecutor(Action::AdminSetDtr))
+                .then(
+                    str_node("faction")
+                        .execute(FactionExecutor(Action::AdminSetDtr))
+                        .then(str_node("value").execute(FactionExecutor(Action::AdminSetDtr))),
                 ),
-            ),
         )
         .then(
-            CommandNode::literal("adddtr").then(
-                str_node("faction").then(
-                    CommandNode::argument("value", &ArgumentType::Double((None, None)))
-                        .execute(FactionExecutor(Action::AdminAddDtr)),
+            CommandNode::literal("adddtr")
+                .execute(FactionExecutor(Action::AdminAddDtr))
+                .then(
+                    str_node("faction")
+                        .execute(FactionExecutor(Action::AdminAddDtr))
+                        .then(str_node("value").execute(FactionExecutor(Action::AdminAddDtr))),
                 ),
-            ),
         )
         .then(
-            CommandNode::literal("removedtr").then(
-                str_node("faction").then(
-                    CommandNode::argument("value", &ArgumentType::Double((None, None)))
-                        .execute(FactionExecutor(Action::AdminRemoveDtr)),
+            CommandNode::literal("removedtr")
+                .execute(FactionExecutor(Action::AdminRemoveDtr))
+                .then(
+                    str_node("faction")
+                        .execute(FactionExecutor(Action::AdminRemoveDtr))
+                        .then(str_node("value").execute(FactionExecutor(Action::AdminRemoveDtr))),
                 ),
-            ),
         )
         .then(
-            CommandNode::literal("setpoints").then(
-                str_node("faction").then(int_node("value").execute(FactionExecutor(Action::AdminSetPoints))),
-            ),
+            CommandNode::literal("setpoints")
+                .execute(FactionExecutor(Action::AdminSetPoints))
+                .then(
+                    str_node("faction")
+                        .execute(FactionExecutor(Action::AdminSetPoints))
+                        .then(str_node("value").execute(FactionExecutor(Action::AdminSetPoints))),
+                ),
         )
         .then(
-            CommandNode::literal("setbalance").then(
-                str_node("faction").then(int_node("value").execute(FactionExecutor(Action::AdminSetBalance))),
-            ),
+            CommandNode::literal("setbalance")
+                .execute(FactionExecutor(Action::AdminSetBalance))
+                .then(
+                    str_node("faction")
+                        .execute(FactionExecutor(Action::AdminSetBalance))
+                        .then(str_node("value").execute(FactionExecutor(Action::AdminSetBalance))),
+                ),
         )
         .then(
-            CommandNode::literal("setlives").then(
-                str_node("faction").then(int_node("value").execute(FactionExecutor(Action::AdminSetLives))),
-            ),
+            CommandNode::literal("setlives")
+                .execute(FactionExecutor(Action::AdminSetLives))
+                .then(
+                    str_node("faction")
+                        .execute(FactionExecutor(Action::AdminSetLives))
+                        .then(str_node("value").execute(FactionExecutor(Action::AdminSetLives))),
+                ),
         )
-        .then(CommandNode::literal("forcekick").then(str_node("player").execute(FactionExecutor(Action::AdminForceKick))))
-        .then(CommandNode::literal("forceleader").then(str_node("player").execute(FactionExecutor(Action::AdminForceLeader))))
-        .then(CommandNode::literal("freeze").then(str_node("faction").execute(FactionExecutor(Action::AdminFreeze))))
-        .then(CommandNode::literal("thaw").then(str_node("faction").execute(FactionExecutor(Action::AdminThaw))))
+        .then(
+            CommandNode::literal("forcekick")
+                .execute(FactionExecutor(Action::AdminForceKick))
+                .then(str_node("player").execute(FactionExecutor(Action::AdminForceKick))),
+        )
+        .then(
+            CommandNode::literal("forceleader")
+                .execute(FactionExecutor(Action::AdminForceLeader))
+                .then(str_node("player").execute(FactionExecutor(Action::AdminForceLeader))),
+        )
+        .then(
+            CommandNode::literal("setfreeze")
+                .execute(FactionExecutor(Action::AdminFreeze))
+                .then(
+                    str_node("faction")
+                        .execute(FactionExecutor(Action::AdminFreeze))
+                        .then(str_node("time").execute(FactionExecutor(Action::AdminFreeze))),
+                ),
+        )
+        .then(
+            CommandNode::literal("setregen")
+                .execute(FactionExecutor(Action::AdminFreeze))
+                .then(
+                    str_node("faction")
+                        .execute(FactionExecutor(Action::AdminFreeze))
+                        .then(str_node("time").execute(FactionExecutor(Action::AdminFreeze))),
+                ),
+        )
+        .then(
+            CommandNode::literal("thaw")
+                .execute(FactionExecutor(Action::AdminThaw))
+                .then(str_node("faction").execute(FactionExecutor(Action::AdminThaw))),
+        )
         .then(CommandNode::literal("save").execute(FactionExecutor(Action::AdminSave)))
-        .then(CommandNode::literal("remove").then(str_node("faction").execute(FactionExecutor(Action::AdminRemove))))
-        .then(CommandNode::literal("clearclaims").then(str_node("faction").execute(FactionExecutor(Action::AdminClearClaims))))
         .then(
-            CommandNode::literal("setkills").then(
-                str_node("faction").then(int_node("amount").execute(FactionExecutor(Action::AdminSetKills))),
-            ),
+            CommandNode::literal("remove")
+                .execute(FactionExecutor(Action::AdminRemove))
+                .then(str_node("faction").execute(FactionExecutor(Action::AdminRemove))),
         )
-        .then(CommandNode::literal("forcepromote").then(str_node("player").execute(FactionExecutor(Action::AdminForcePromote))))
-        .then(CommandNode::literal("forcedemote").then(str_node("player").execute(FactionExecutor(Action::AdminForceDemote))))
-        .then(CommandNode::literal("forcejoin").then(str_node("faction").execute(FactionExecutor(Action::AdminForceJoin))))
-        .then(CommandNode::literal("forcerename").then(str_node("faction").then(str_node("name").execute(FactionExecutor(Action::AdminForceRename)))))
-        .then(CommandNode::literal("systemcreate").then(str_node("name").execute(FactionExecutor(Action::AdminSystemCreate))))
+        .then(
+            CommandNode::literal("clearclaims")
+                .execute(FactionExecutor(Action::AdminClearClaims))
+                .then(str_node("faction").execute(FactionExecutor(Action::AdminClearClaims))),
+        )
+        .then(
+            CommandNode::literal("setkills")
+                .execute(FactionExecutor(Action::AdminSetKills))
+                .then(
+                    str_node("faction")
+                        .execute(FactionExecutor(Action::AdminSetKills))
+                        .then(str_node("value").execute(FactionExecutor(Action::AdminSetKills))),
+                ),
+        )
+        .then(
+            CommandNode::literal("forcepromote")
+                .execute(FactionExecutor(Action::AdminForcePromote))
+                .then(str_node("player").execute(FactionExecutor(Action::AdminForcePromote))),
+        )
+        .then(
+            CommandNode::literal("forcedemote")
+                .execute(FactionExecutor(Action::AdminForceDemote))
+                .then(str_node("player").execute(FactionExecutor(Action::AdminForceDemote))),
+        )
+        .then(
+            CommandNode::literal("forcejoin")
+                .execute(FactionExecutor(Action::AdminForceJoin))
+                .then(str_node("faction").execute(FactionExecutor(Action::AdminForceJoin))),
+        )
+        .then(
+            CommandNode::literal("forcerename")
+                .execute(FactionExecutor(Action::AdminForceRename))
+                .then(
+                    str_node("faction")
+                        .execute(FactionExecutor(Action::AdminForceRename))
+                        .then(str_node("name").execute(FactionExecutor(Action::AdminForceRename))),
+                ),
+        )
+        .then(
+            CommandNode::literal("systemcreate")
+                .execute(FactionExecutor(Action::AdminSystemCreate))
+                .then(str_node("name").execute(FactionExecutor(Action::AdminSystemCreate))),
+        )
         .then(CommandNode::literal("systemlist").execute(FactionExecutor(Action::AdminSystemList)))
-        .then(CommandNode::literal("systemrename").then(str_node("faction").then(str_node("name").execute(FactionExecutor(Action::AdminSystemRename)))))
-        .then(CommandNode::literal("safezone").then(str_node("faction").execute(FactionExecutor(Action::AdminSafezone))))
-        .then(CommandNode::literal("enderpearls").then(str_node("faction").execute(FactionExecutor(Action::AdminEnderpearls))))
-        .then(CommandNode::literal("abilities").then(str_node("faction").execute(FactionExecutor(Action::AdminAbilities))))
-        .then(CommandNode::literal("color").then(str_node("faction").then(str_node("color").execute(FactionExecutor(Action::AdminColor)))))
-        .then(CommandNode::literal("deathban").then(str_node("faction").execute(FactionExecutor(Action::AdminDeathban))))
-        .then(CommandNode::literal("claimfor").then(str_node("faction").execute(FactionExecutor(Action::AdminClaimFor))))
+        .then(
+            CommandNode::literal("systemrename")
+                .execute(FactionExecutor(Action::AdminSystemRename))
+                .then(
+                    str_node("faction")
+                        .execute(FactionExecutor(Action::AdminSystemRename))
+                        .then(str_node("name").execute(FactionExecutor(Action::AdminSystemRename))),
+                ),
+        )
+        .then(
+            CommandNode::literal("safezone")
+                .execute(FactionExecutor(Action::AdminSafezone))
+                .then(str_node("faction").execute(FactionExecutor(Action::AdminSafezone))),
+        )
+        .then(
+            CommandNode::literal("enderpearls")
+                .execute(FactionExecutor(Action::AdminEnderpearls))
+                .then(str_node("faction").execute(FactionExecutor(Action::AdminEnderpearls))),
+        )
+        .then(
+            CommandNode::literal("abilities")
+                .execute(FactionExecutor(Action::AdminAbilities))
+                .then(str_node("faction").execute(FactionExecutor(Action::AdminAbilities))),
+        )
+        .then(
+            CommandNode::literal("color")
+                .execute(FactionExecutor(Action::AdminColor))
+                .then(
+                    str_node("faction")
+                        .execute(FactionExecutor(Action::AdminColor))
+                        .then(str_node("color").execute(FactionExecutor(Action::AdminColor))),
+                ),
+        )
+        .then(
+            CommandNode::literal("deathban")
+                .execute(FactionExecutor(Action::AdminDeathban))
+                .then(str_node("faction").execute(FactionExecutor(Action::AdminDeathban))),
+        )
+        .then(
+            CommandNode::literal("claimfor")
+                .execute(FactionExecutor(Action::AdminClaimFor))
+                .then(str_node("faction").execute(FactionExecutor(Action::AdminClaimFor))),
+        )
         .then(CommandNode::literal("removeclaim").execute(FactionExecutor(Action::AdminRemoveClaim)))
         .then(CommandNode::literal("chatspy").execute(FactionExecutor(Action::AdminChatSpy)))
-        .then(CommandNode::literal("tphere").then(str_node("faction").execute(FactionExecutor(Action::AdminTpHere))))
+        .then(
+            CommandNode::literal("tphere")
+                .execute(FactionExecutor(Action::AdminTpHere))
+                .then(str_node("faction").execute(FactionExecutor(Action::AdminTpHere))),
+        )
         .then(CommandNode::literal("friendlyfire").execute(FactionExecutor(Action::FriendlyFire)))
         .then(CommandNode::literal("ff").execute(FactionExecutor(Action::FriendlyFire)))
-        .then(CommandNode::literal("uninvite").then(str_node("player").execute(FactionExecutor(Action::Uninvite))))
-        .then(CommandNode::literal("uninv").then(str_node("player").execute(FactionExecutor(Action::Uninvite))))
+        .then(
+            CommandNode::literal("uninvite")
+                .execute(FactionExecutor(Action::Uninvite))
+                .then(str_node("player").execute(FactionExecutor(Action::Uninvite))),
+        )
+        .then(
+            CommandNode::literal("uninv")
+                .execute(FactionExecutor(Action::Uninvite))
+                .then(str_node("player").execute(FactionExecutor(Action::Uninvite))),
+        )
         .then(CommandNode::literal("autorevive").execute(FactionExecutor(Action::AutoRevive)))
         .then(CommandNode::literal("claimchunk").execute(FactionExecutor(Action::ClaimChunk)))
         .then(CommandNode::literal("rally").execute(FactionExecutor(Action::Rally)))
         .then(CommandNode::literal("setrally").execute(FactionExecutor(Action::Rally)))
         .then(CommandNode::literal("removerally").execute(FactionExecutor(Action::RemoveRally)))
-        .then(CommandNode::literal("focus").then(str_node("faction").execute(FactionExecutor(Action::Focus))))
+        .then(
+            CommandNode::literal("focus")
+                .execute(FactionExecutor(Action::Focus))
+                .then(str_node("faction").execute(FactionExecutor(Action::Focus))),
+        )
         .then(CommandNode::literal("unfocus").execute(FactionExecutor(Action::Unfocus)))
-        .then(CommandNode::literal("lives").then(str_node("faction").execute(FactionExecutor(Action::Lives))))
-        .then(CommandNode::literal("lives").execute(FactionExecutor(Action::Lives)))
-        .then(CommandNode::literal("livesdeposit").then(str_node("amount").execute(FactionExecutor(Action::LivesDeposit))))
-        .then(CommandNode::literal("depositlives").then(str_node("amount").execute(FactionExecutor(Action::LivesDeposit))))
-        .then(CommandNode::literal("liveswithdraw").then(str_node("amount").execute(FactionExecutor(Action::LivesWithdraw))))
-        .then(CommandNode::literal("withdrawlives").then(str_node("amount").execute(FactionExecutor(Action::LivesWithdraw))))
-        .then(CommandNode::literal("livesrevive").then(str_node("player").execute(FactionExecutor(Action::LivesRevive))))
-        .then(CommandNode::literal("revive").then(str_node("player").execute(FactionExecutor(Action::LivesRevive))));
+        .then(
+            CommandNode::literal("lives")
+                .execute(FactionExecutor(Action::Lives))
+                .then(str_node("faction").execute(FactionExecutor(Action::Lives))),
+        )
+        .then(
+            CommandNode::literal("livesdeposit")
+                .execute(FactionExecutor(Action::LivesDeposit))
+                .then(str_node("amount").execute(FactionExecutor(Action::LivesDeposit))),
+        )
+        .then(
+            CommandNode::literal("depositlives")
+                .execute(FactionExecutor(Action::LivesDeposit))
+                .then(str_node("amount").execute(FactionExecutor(Action::LivesDeposit))),
+        )
+        .then(
+            CommandNode::literal("liveswithdraw")
+                .execute(FactionExecutor(Action::LivesWithdraw))
+                .then(str_node("amount").execute(FactionExecutor(Action::LivesWithdraw))),
+        )
+        .then(
+            CommandNode::literal("withdrawlives")
+                .execute(FactionExecutor(Action::LivesWithdraw))
+                .then(str_node("amount").execute(FactionExecutor(Action::LivesWithdraw))),
+        )
+        .then(
+            CommandNode::literal("livesrevive")
+                .execute(FactionExecutor(Action::LivesRevive))
+                .then(str_node("player").execute(FactionExecutor(Action::LivesRevive))),
+        )
+        .then(
+            CommandNode::literal("revive")
+                .execute(FactionExecutor(Action::LivesRevive))
+                .then(str_node("player").execute(FactionExecutor(Action::LivesRevive))),
+        );
 
     context.register_command(root, "lazarus:command.faction");
     Ok(())
 }
 
 fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    // Console handling: only the original's console-capable subcommands run
+    // without a player (`SubCommand#forPlayersOnly`); the rest get the same
+    // `COMMANDS.FOR_PLAYERS_ONLY` message the original dispatcher sends.
+    if sender.as_player().is_none() {
+        if console_capable(&action) {
+            run_console(action, sender, server, args);
+        } else {
+            for_players_only(sender);
+        }
+        return;
+    }
+
     let Some(player) = sender.as_player() else {
-        reply(sender, "&cThis command is for players only.");
         return;
     };
     let uuid = core::uuid_of(&player);
@@ -338,12 +585,23 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::Stuck => stuck(sender, server, &player, &uuid),
         Action::Open => toggle_open(sender, server, &uuid),
         Action::ShowSelf => show(sender, server, &uuid, None),
-        Action::ShowNamed => show(sender, server, &uuid, string_arg(args, "faction")),
-        Action::List => list(sender),
-        Action::TopDefault => top(sender, "points"),
-        Action::TopMetric => top(sender, &string_arg(args, "metric").unwrap_or_else(|| "points".into())),
-        Action::Deposit => transfer_balance(sender, &uuid, args, true),
-        Action::Withdraw => transfer_balance(sender, &uuid, args, false),
+        Action::ShowNamed => show(sender, server, &uuid, present_string_arg(args, "faction")),
+        Action::List => list(sender, server, &uuid, 1),
+        Action::ListPage => {
+            // `StringUtils.isInteger(args[0]) ? max(1, parse) : 1`.
+            let page = present_string_arg(args, "page")
+                .and_then(|raw| raw.trim().parse::<i64>().ok())
+                .map(|value| value.max(1) as u32)
+                .unwrap_or(1);
+            list(sender, server, &uuid, page);
+        }
+        Action::TopDefault => top_usage(sender),
+        Action::TopMetric => match present_string_arg(args, "metric") {
+            Some(metric) => top(sender, server, &uuid, &metric),
+            None => top_usage(sender),
+        },
+        Action::Deposit => transfer_balance(sender, server, &uuid, args, true),
+        Action::Withdraw => transfer_balance(sender, server, &uuid, args, false),
         Action::Ally => ally(sender, server, &uuid, args, true),
         Action::Unally => ally(sender, server, &uuid, args, false),
         Action::AdminSetDtr => admin_set_dtr(sender, server, args),
@@ -351,7 +609,7 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::AdminRemoveDtr => admin_change_dtr(sender, server, args, false),
         Action::AdminRemove => admin_remove(sender, server, args),
         Action::AdminClearClaims => admin_clear_claims(sender, server, args),
-        Action::AdminSetKills => admin_set_kills(sender, server, args),
+        Action::AdminSetKills => admin_set_int(sender, server, args, AdminField::Kills),
         Action::AdminForcePromote => admin_force_role(sender, server, args, true),
         Action::AdminForceDemote => admin_force_role(sender, server, args, false),
         Action::AdminForceJoin => admin_force_join(sender, server, args),
@@ -385,8 +643,8 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
         Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
         Action::AdminForceKick => admin_force_kick(sender, server, args),
         Action::AdminForceLeader => admin_force_leader(sender, server, args),
-        Action::AdminFreeze => admin_freeze(sender, server, args, true),
-        Action::AdminThaw => admin_freeze(sender, server, args, false),
+        Action::AdminFreeze => admin_set_freeze(sender, server, args),
+        Action::AdminThaw => admin_thaw(sender, server, args),
         Action::AdminSave => admin_save(sender, server),
     }
 }
@@ -395,8 +653,108 @@ fn run(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedA
 // Individual subcommands
 // ---------------------------------------------------------------------------
 
+/// `SubCommand#forPlayersOnly` counterpart: whether console may run `action`.
+fn console_capable(action: &Action) -> bool {
+    matches!(
+        action,
+        Action::ShowNamed
+            | Action::List
+            | Action::ListPage
+            | Action::TopDefault
+            | Action::TopMetric
+            | Action::Lives
+            | Action::AdminSetDtr
+            | Action::AdminAddDtr
+            | Action::AdminRemoveDtr
+            | Action::AdminRemove
+            | Action::AdminClearClaims
+            | Action::AdminSetKills
+            | Action::AdminForcePromote
+            | Action::AdminForceDemote
+            | Action::AdminForceRename
+            | Action::AdminSystemCreate
+            | Action::AdminSystemList
+            | Action::AdminSystemRename
+            | Action::AdminSafezone
+            | Action::AdminEnderpearls
+            | Action::AdminAbilities
+            | Action::AdminColor
+            | Action::AdminDeathban
+            | Action::AdminSetPoints
+            | Action::AdminSetBalance
+            | Action::AdminSetLives
+            | Action::AdminForceKick
+            | Action::AdminForceLeader
+            | Action::AdminFreeze
+            | Action::AdminThaw
+            | Action::AdminSave
+    )
+}
+
+/// `FACTION_PREFIX + COMMANDS.FOR_PLAYERS_ONLY` (the dispatcher message).
+fn for_players_only(sender: &CommandSender) {
+    let (prefix, template) = {
+        let guard = state().read().unwrap();
+        (
+            guard.raw.language.string("FACTION_PREFIX"),
+            guard.raw.language.string("COMMANDS.FOR_PLAYERS_ONLY"),
+        )
+    };
+    reply(sender, format!("{prefix}{template}"));
+}
+
+/// Dispatches the console-capable subcommands (no player context available).
+fn run_console(action: Action, sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    match action {
+        Action::ShowNamed => show(sender, server, "", present_string_arg(args, "faction")),
+        Action::List => list(sender, server, "", 1),
+        Action::ListPage => {
+            // `StringUtils.isInteger(args[0]) ? max(1, parse) : 1`.
+            let page = present_string_arg(args, "page")
+                .and_then(|raw| raw.trim().parse::<i64>().ok())
+                .map(|value| value.max(1) as u32)
+                .unwrap_or(1);
+            list(sender, server, "", page);
+        }
+        Action::TopDefault => top_usage(sender),
+        Action::TopMetric => match present_string_arg(args, "metric") {
+            Some(metric) => top(sender, server, "", &metric),
+            None => top_usage(sender),
+        },
+        Action::Lives => lives(sender, args),
+        Action::AdminSetDtr => admin_set_dtr(sender, server, args),
+        Action::AdminAddDtr => admin_change_dtr(sender, server, args, true),
+        Action::AdminRemoveDtr => admin_change_dtr(sender, server, args, false),
+        Action::AdminRemove => admin_remove(sender, server, args),
+        Action::AdminClearClaims => admin_clear_claims(sender, server, args),
+        Action::AdminSetKills => admin_set_int(sender, server, args, AdminField::Kills),
+        Action::AdminForcePromote => admin_force_role(sender, server, args, true),
+        Action::AdminForceDemote => admin_force_role(sender, server, args, false),
+        Action::AdminForceRename => admin_force_rename(sender, server, args),
+        Action::AdminSystemCreate => admin_system_create(sender, server, args),
+        Action::AdminSystemList => admin_system_list(sender),
+        Action::AdminSystemRename => admin_system_rename(sender, server, args),
+        Action::AdminSafezone => admin_toggle_system_flag(sender, server, args, SystemFlag::Safezone),
+        Action::AdminEnderpearls => {
+            admin_toggle_system_flag(sender, server, args, SystemFlag::Enderpearls)
+        }
+        Action::AdminAbilities => admin_toggle_system_flag(sender, server, args, SystemFlag::Abilities),
+        Action::AdminColor => admin_color(sender, server, args),
+        Action::AdminDeathban => admin_deathban(sender, server, args),
+        Action::AdminSetPoints => admin_set_int(sender, server, args, AdminField::Points),
+        Action::AdminSetBalance => admin_set_int(sender, server, args, AdminField::Balance),
+        Action::AdminSetLives => admin_set_int(sender, server, args, AdminField::Lives),
+        Action::AdminForceKick => admin_force_kick(sender, server, args),
+        Action::AdminForceLeader => admin_force_leader(sender, server, args),
+        Action::AdminFreeze => admin_set_freeze(sender, server, args),
+        Action::AdminThaw => admin_thaw(sender, server, args),
+        Action::AdminSave => admin_save(sender, server),
+        _ => {}
+    }
+}
+
 fn create(sender: &CommandSender, _player: &Player, uuid: &str, name: &str, args: &ConsumedArgs) {
-    let Some(faction_name) = string_arg(args, "name") else {
+    let Some(faction_name) = present_string_arg(args, "name") else {
         reply(sender, &state().read().unwrap().lang.usage_create);
         return;
     };
@@ -486,7 +844,7 @@ fn disband(sender: &CommandSender, server: &Server, uuid: &str) {
 }
 
 fn invite(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs) {
-    let Some(target_name) = string_arg(args, "player") else {
+    let Some(target_name) = present_string_arg(args, "player") else {
         reply(sender, &state().read().unwrap().lang.usage_invite);
         return;
     };
@@ -541,7 +899,7 @@ fn invite(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedAr
 }
 
 fn join(sender: &CommandSender, server: &Server, player: &Player, uuid: &str, name: &str, args: &ConsumedArgs) {
-    let Some(faction_name) = string_arg(args, "name") else {
+    let Some(faction_name) = present_string_arg(args, "name") else {
         reply(sender, &state().read().unwrap().lang.usage_join);
         return;
     };
@@ -557,7 +915,7 @@ fn join(sender: &CommandSender, server: &Server, player: &Player, uuid: &str, na
             return;
         }
 
-        let Some(faction_id) = guard.factions.by_name(&faction_name).filter(|f| f.is_player()).map(|f| f.id.clone()) else {
+        let Some(faction_id) = search_player_faction(&guard, &faction_name) else {
             reply(sender, util::replace(&lang.faction_doesnt_exist, "<argument>", &faction_name));
             return;
         };
@@ -653,7 +1011,7 @@ fn leave(sender: &CommandSender, server: &Server, player: &Player, uuid: &str, n
 }
 
 fn kick(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs) {
-    let Some(target_name) = string_arg(args, "player") else {
+    let Some(target_name) = present_string_arg(args, "player") else {
         reply(sender, &state().read().unwrap().lang.usage_kick);
         return;
     };
@@ -704,7 +1062,7 @@ fn kick(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs
 }
 
 fn change_role(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs, promote: bool) {
-    let Some(target_name) = string_arg(args, "player") else {
+    let Some(target_name) = present_string_arg(args, "player") else {
         let usage = if promote {
             state().read().unwrap().lang.usage_promote.clone()
         } else {
@@ -766,7 +1124,7 @@ fn change_role(sender: &CommandSender, server: &Server, uuid: &str, args: &Consu
 }
 
 fn transfer_leader(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs) {
-    let Some(target_name) = string_arg(args, "player") else {
+    let Some(target_name) = present_string_arg(args, "player") else {
         reply(sender, &state().read().unwrap().lang.usage_leader);
         return;
     };
@@ -815,7 +1173,7 @@ fn transfer_leader(sender: &CommandSender, server: &Server, uuid: &str, args: &C
 }
 
 fn rename(sender: &CommandSender, uuid: &str, args: &ConsumedArgs) {
-    let Some(new_name) = string_arg(args, "name") else {
+    let Some(new_name) = present_string_arg(args, "name") else {
         reply(sender, &state().read().unwrap().lang.usage_rename);
         return;
     };
@@ -1437,120 +1795,424 @@ fn show(sender: &CommandSender, server: &Server, uuid: &str, name: Option<String
     reply(sender, &sep);
 }
 
-fn list(sender: &CommandSender) {
-    let guard = state().read().unwrap();
-    reply(sender, "&3=== &bFactions&3 ===");
-    for faction in guard.factions.player_factions() {
+/// One line of a paginated/leaderboard listing: either plain chat text or a
+/// clickable entry ("/f show <name>" with the show-hover).
+enum ListLine {
+    Plain(String),
+    Entry { line: String, hover: String, command: String },
+}
+
+/// Port of `ListCommand`: factions with online members, 10 per page, sorted by
+/// online count (descending). Entries carry the original hover/click events.
+fn list(sender: &CommandSender, server: &Server, uuid: &str, page: u32) {
+    // `SubCommand#forPlayersOnly` (console gets `COMMANDS.FOR_PLAYERS_ONLY`).
+    let Some(player) = sender.as_player() else {
+        let (prefix, template) = {
+            let guard = state().read().unwrap();
+            (
+                guard.raw.language.string("FACTION_PREFIX"),
+                guard.raw.language.string("COMMANDS.FOR_PLAYERS_ONLY"),
+            )
+        };
+        reply(sender, format!("{prefix}{template}"));
+        return;
+    };
+
+    // Host calls (online list) must happen before taking the state lock.
+    let online_uuids: Vec<String> = server
+        .get_all_players()
+        .iter()
+        .map(core::uuid_of)
+        .collect();
+
+    // Online count per faction; vanished players the viewer cannot see are
+    // skipped (`!player.canSee(online) && vanishManager.isVanished(online)`).
+    let (counts, viewer_faction) = {
+        let guard = state().read().unwrap();
+        let viewer_is_staff = guard.staff.is_staff(uuid);
+
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+        for other in &online_uuids {
+            if !viewer_is_staff && guard.staff.is_vanished(other) {
+                continue;
+            }
+            if let Some(faction) = guard.factions.by_member(other) {
+                *counts.entry(faction.id.clone()).or_default() += 1;
+            }
+        }
+
+        (counts, guard.factions.by_member(uuid).map(|f| f.id.clone()))
+    };
+
+    let page_total = counts.len().div_ceil(10).max(1) as u32;
+
+    if page > page_total {
+        let (prefix, template) = {
+            let guard = state().read().unwrap();
+            (
+                guard.raw.language.string("FACTION_PREFIX"),
+                guard
+                    .raw
+                    .language
+                    .string("FACTIONS.LIST_COMMAND.PAGE_NOT_FOUND"),
+            )
+        };
         reply(
             sender,
-            format!("&f{} &7- &e{} members &7- &c{:.2} DTR", faction.name, faction.members.len(), faction.dtr),
+            format!("{prefix}{}", util::replace(&template, "<number>", &page_total.to_string())),
         );
+        return;
+    }
+
+    let mut sorted: Vec<(String, usize)> = counts.into_iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+
+    // Snapshot every line under a single lock; components are built afterwards
+    // (creating text components is a host call).
+    let lines = {
+        let guard = state().read().unwrap();
+        let mut lines: Vec<ListLine> = Vec::new();
+
+        for template in guard.raw.language.string_list("FACTIONS.LIST_COMMAND.HEADER") {
+            lines.push(ListLine::Plain(util::replace(
+                &util::replace(&template, "<page>", &page.to_string()),
+                "<pageTotal>",
+                &page_total.to_string(),
+            )));
+        }
+
+        let format = guard
+            .raw
+            .language
+            .string("FACTIONS.LIST_COMMAND.FACTION_FORMAT");
+        let hover_template = guard
+            .raw
+            .language
+            .string("FACTIONS.SHOW_COMMAND.HOVER_TEXT");
+
+        let start = (page as usize - 1) * 10;
+        for index in start..start + 10 {
+            let Some((faction_id, online_count)) = sorted.get(index) else {
+                break;
+            };
+            let Some(faction) = guard.factions.get(faction_id) else {
+                continue;
+            };
+
+            let name = core::faction_display_name_guard(
+                &guard,
+                faction,
+                viewer_faction.as_deref(),
+                &guard.config.relation_colors,
+            );
+            let dtr = faction.dtr_string(&guard.config, guard.timers.is_frozen(faction_id));
+            let max_dtr = faction.max_dtr_string(&guard.config);
+
+            let line = util::replace_all(
+                &format,
+                &[
+                    ("<number>", &(index + 1).to_string()),
+                    ("<name>", &name),
+                    ("<online-count>", &online_count.to_string()),
+                    ("<faction-size>", &faction.members.len().to_string()),
+                    ("<dtr>", &dtr),
+                    ("<maxDtr>", &max_dtr),
+                ],
+            );
+
+            lines.push(ListLine::Entry {
+                line,
+                hover: util::replace(&hover_template, "<faction>", &faction.name),
+                command: format!("/f show {}", faction.name),
+            });
+        }
+
+        for template in guard.raw.language.string_list("FACTIONS.LIST_COMMAND.FOOTER") {
+            lines.push(ListLine::Plain(template));
+        }
+
+        lines
+    };
+
+    for line in lines {
+        match line {
+            ListLine::Plain(text) => reply(sender, text),
+            ListLine::Entry { line, hover, command } => {
+                let component = util::text(&line)
+                    .click_run_command(&command)
+                    .hover_show_text(util::text(&hover));
+                core::send_component(&player, component);
+            }
+        }
     }
 }
 
-fn top(sender: &CommandSender, metric: &str) {
-    let guard = state().read().unwrap();
-    let mut factions: Vec<&Faction> = guard.factions.player_factions().collect();
-    factions.sort_by(|a, b| match metric.to_lowercase().as_str() {
-        "kills" => b.kills.cmp(&a.kills),
-        "balance" => b.balance.cmp(&a.balance),
-        "koths" => b.koths_capped.cmp(&a.koths_capped),
-        _ => b.points.cmp(&a.points),
-    });
+/// `/f top` without a type prints the usage (`LEADERBOARDS.FACTION_COMMAND_USAGE`).
+fn top_usage(sender: &CommandSender) {
+    let (prefix, usage) = {
+        let guard = state().read().unwrap();
+        (
+            guard.raw.language.string("PREFIX"),
+            guard
+                .raw
+                .language
+                .string("LEADERBOARDS.FACTION_COMMAND_USAGE"),
+        )
+    };
 
-    reply(sender, format!("&3=== &bTop factions ({metric})&3 ==="));
-    for (index, faction) in factions.into_iter().take(10).enumerate() {
-        let value = match metric.to_lowercase().as_str() {
+    reply(sender, format!("{prefix}{usage}"));
+}
+
+/// Port of `TopCommand`: `kills|points|balance|koths` faction leaderboards.
+/// The original reads a 10-entry cache filled by faction data changes; the port
+/// sorts the live faction values and skips zero entries (a faction only shows up
+/// in the original after its value changed).
+fn top(sender: &CommandSender, _server: &Server, uuid: &str, metric: &str) {
+    let (title_key, format_key) = match metric.to_lowercase().as_str() {
+        "kills" => (
+            "LEADERBOARDS.FACTION_TOP_KILLS.TITLE",
+            "LEADERBOARDS.FACTION_TOP_KILLS.LINE_FORMAT",
+        ),
+        "points" => (
+            "LEADERBOARDS.FACTION_TOP_POINTS.TITLE",
+            "LEADERBOARDS.FACTION_TOP_POINTS.LINE_FORMAT",
+        ),
+        "balance" => (
+            "LEADERBOARDS.FACTION_TOP_BALANCE.TITLE",
+            "LEADERBOARDS.FACTION_TOP_BALANCE.LINE_FORMAT",
+        ),
+        "koths" => (
+            "LEADERBOARDS.FACTION_TOP_KOTHS_CAPPED.TITLE",
+            "LEADERBOARDS.FACTION_TOP_KOTHS_CAPPED.LINE_FORMAT",
+        ),
+        _ => {
+            let (prefix, template) = {
+                let guard = state().read().unwrap();
+                (
+                    guard.raw.language.string("PREFIX"),
+                    guard
+                        .raw
+                        .language
+                        .string("LEADERBOARDS.TYPE_DOESNT_EXIST"),
+                )
+            };
+            reply(sender, format!("{prefix}{}", util::replace(&template, "<type>", metric)));
+            return;
+        }
+    };
+
+    let value_of = |faction: &Faction| -> i64 {
+        match metric.to_lowercase().as_str() {
             "kills" => faction.kills as i64,
             "balance" => faction.balance,
             "koths" => faction.koths_capped as i64,
             _ => faction.points as i64,
+        }
+    };
+
+    // Snapshot the entries + display names under one lock.
+    let (header, title, line_format, footer, hover_template, entries) = {
+        let guard = state().read().unwrap();
+        let viewer_faction = guard.factions.by_member(uuid).map(|f| f.id.clone());
+
+        let mut factions: Vec<&Faction> = guard
+            .factions
+            .player_factions()
+            .filter(|faction| value_of(faction) != 0)
+            .collect();
+        factions.sort_by(|a, b| value_of(b).cmp(&value_of(a)).then_with(|| a.name.cmp(&b.name)));
+
+        let entries: Vec<(String, String, i64)> = factions
+            .into_iter()
+            .take(10)
+            .map(|faction| {
+                (
+                    core::faction_display_name_guard(
+                        &guard,
+                        faction,
+                        viewer_faction.as_deref(),
+                        &guard.config.relation_colors,
+                    ),
+                    faction.name.clone(),
+                    value_of(faction),
+                )
+            })
+            .collect();
+
+        (
+            guard.raw.language.string("LEADERBOARDS.COMMAND_HEADER"),
+            guard.raw.language.string(title_key),
+            guard.raw.language.string(format_key),
+            guard.raw.language.string("LEADERBOARDS.COMMAND_FOOTER"),
+            guard.raw.language.string("FACTIONS.SHOW_COMMAND.HOVER_TEXT"),
+            entries,
+        )
+    };
+
+    if entries.is_empty() {
+        let (prefix, template) = {
+            let guard = state().read().unwrap();
+            (
+                guard.raw.language.string("PREFIX"),
+                guard.raw.language.string("LEADERBOARDS.NO_LEADERBOARDS"),
+            )
         };
-        reply(sender, format!("&f{}. &e{} &7- &c{value}", index + 1, faction.name));
+        reply(sender, format!("{prefix}{template}"));
+        return;
     }
+
+    reply(sender, header);
+    reply(sender, title);
+
+    let player = sender.as_player();
+    for (index, (display, raw_name, value)) in entries.into_iter().enumerate() {
+        let line = util::replace_all(
+            &line_format,
+            &[
+                ("<number>", &(index + 1).to_string()),
+                ("<faction>", &display),
+                ("<value>", &value.to_string()),
+            ],
+        );
+
+        match &player {
+            Some(player) => {
+                let component = util::text(&line)
+                    .click_run_command(&format!("/f show {raw_name}"))
+                    .hover_show_text(util::text(&util::replace(&hover_template, "<faction>", &display)));
+                core::send_component(player, component);
+            }
+            // Console fallback: the original casts the sender to `Player` to
+            // build the clickable line; from console the plain line is printed.
+            None => reply(sender, line),
+        }
+    }
+
+    reply(sender, footer);
 }
 
-fn transfer_balance(sender: &CommandSender, uuid: &str, args: &ConsumedArgs, deposit: bool) {
-    let raw = string_arg(args, "amount").unwrap_or_default();
+/// `DepositCommand` / `WithdrawCommand`: FACTION_PREFIX + `DEPOSIT_COMMAND` /
+/// `WITHDRAW_COMMAND` messages from the raw language; the result is broadcast
+/// to the whole faction (the sender is a member, so it is included).
+fn transfer_balance(
+    sender: &CommandSender,
+    server: &Server,
+    uuid: &str,
+    args: &ConsumedArgs,
+    deposit: bool,
+) {
+    let amount_raw = present_string_arg(args, "amount").unwrap_or_default();
 
     let messages;
     {
         let mut guard = state().write().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
 
-        // Destructure so the borrow checker sees disjoint fields (DerefMut would
-        // otherwise borrow the whole guard through `guard.userdata`).
-        let crate::state::AppState { userdata, factions, config, lang, .. } = &mut *guard;
-
-        let max_balance = config.economy.max_balance;
-
-        let Some(faction_id) = factions.by_member(uuid).map(|f| f.id.clone()) else {
-            reply(sender, &lang.faction_not_in);
-            return;
-        };
-        let faction = factions.get(&faction_id).cloned().unwrap();
-
-        if !deposit
-            && faction.member(uuid).map(|m| m.role).is_none_or(|role| !role.is_at_least(Role::Captain))
-        {
-            reply(sender, &lang.faction_leader_only);
-            return;
+        if amount_raw.is_empty() {
+            let usage = guard.raw.language.string(if deposit {
+                "FACTIONS.DEPOSIT_COMMAND.USAGE"
+            } else {
+                "FACTIONS.WITHDRAW_COMMAND.USAGE"
+            });
+            drop(guard);
+            return reply(sender, format!("{prefix}{usage}"));
         }
 
-        let Some(user) = userdata.get_mut(uuid) else {
-            return;
+        let Some(id) = guard.factions.by_member(uuid).map(|f| f.id.clone()) else {
+            let msg = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
         };
 
-        // Support `/f deposit all` / `/f withdraw all` like the original.
-        let amount = if raw.eq_ignore_ascii_case("all") {
-            if deposit { user.balance } else { faction.balance }
+        if !deposit {
+            let role = guard.factions.get(&id).and_then(|f| f.member(uuid)).map(|m| m.role);
+            if role.map(|r| r.is_at_least(Role::Captain)) != Some(true) {
+                let tpl = guard.raw.language.string("FACTIONS.NO_PERMISSION");
+                let msg = util::replace(&tpl, "<role>", Role::Captain.name());
+                drop(guard);
+                return reply(sender, format!("{prefix}{msg}"));
+            }
+        }
+
+        let user_balance = guard.userdata.get(uuid).map(|user| user.balance).unwrap_or(0);
+        let faction_balance = guard.factions.get(&id).map(|f| f.balance).unwrap_or(0);
+
+        // `all` -> the full balance; otherwise `Math.abs(isInteger ? parse : -)`.
+        let amount = if amount_raw.eq_ignore_ascii_case("all") {
+            if deposit { user_balance } else { faction_balance }
         } else {
-            raw.parse::<i64>().unwrap_or(0)
+            match amount_raw.trim().parse::<i64>() {
+                Ok(value) => value.abs(),
+                Err(_) => {
+                    let invalid = guard.raw.language.string("COMMANDS.INVALID_NUMBER");
+                    drop(guard);
+                    return reply(sender, format!("{prefix}{invalid}"));
+                }
+            }
         };
 
-        if amount <= 0 {
-            let usage = if deposit { lang.usage_deposit.clone() } else { lang.usage_withdraw.clone() };
-            reply(sender, usage);
-            return;
-        }
+        let max_balance = guard.config.economy.max_balance;
 
         if deposit {
-            if user.balance < amount {
-                reply(sender, &lang.faction_not_enough_money);
-                return;
+            if amount > user_balance {
+                let tpl = guard.raw.language.string("FACTIONS.DEPOSIT_COMMAND.NOT_ENOUGH_MONEY");
+                let msg = util::replace(&tpl, "<amount>", &user_balance.to_string());
+                drop(guard);
+                return reply(sender, format!("{prefix}{msg}"));
             }
-            user.balance -= amount;
-            if let Some(faction) = factions.get_mut(&faction_id) {
+            if amount == 0 {
+                let msg = guard
+                    .raw
+                    .language
+                    .string("FACTIONS.DEPOSIT_COMMAND.CAN_NOT_DEPOSIT_ZERO");
+                drop(guard);
+                return reply(sender, format!("{prefix}{msg}"));
+            }
+
+            if let Some(user) = guard.userdata.get_mut(uuid) {
+                user.balance -= amount;
+            }
+            if let Some(faction) = guard.factions.get_mut(&id) {
                 faction.balance = (faction.balance + amount).min(max_balance);
             }
-            messages = util::replace(
-                &util::replace(&lang.faction_deposit_deposited, "<player>", &sender.get_name()),
-                "<amount>",
-                &amount.to_string(),
+
+            messages = format!(
+                "{prefix}{}",
+                util::replace_all(
+                    &guard.raw.language.string("FACTIONS.DEPOSIT_COMMAND.DEPOSITED"),
+                    &[("<player>", &sender.get_name()), ("<amount>", &amount.to_string())],
+                )
             );
         } else {
-            if faction.balance < amount {
-                reply(
-                    sender,
-                    util::replace(&lang.faction_withdraw_not_enough, "<amount>", &faction.balance.to_string()),
-                );
-                return;
+            if amount > faction_balance {
+                let tpl = guard.raw.language.string("FACTIONS.WITHDRAW_COMMAND.NOT_ENOUGH_MONEY");
+                let msg = util::replace(&tpl, "<amount>", &faction_balance.to_string());
+                drop(guard);
+                return reply(sender, format!("{prefix}{msg}"));
             }
-            if let Some(faction) = factions.get_mut(&faction_id) {
+
+            if let Some(faction) = guard.factions.get_mut(&id) {
                 faction.balance -= amount;
             }
-            user.balance = (user.balance + amount).min(max_balance);
-            messages = util::replace(
-                &util::replace(&lang.faction_withdraw_withdrawn, "<player>", &sender.get_name()),
-                "<amount>",
-                &amount.to_string(),
+            if let Some(user) = guard.userdata.get_mut(uuid) {
+                user.balance = (user.balance + amount).min(max_balance);
+            }
+
+            messages = format!(
+                "{prefix}{}",
+                util::replace_all(
+                    &guard.raw.language.string("FACTIONS.WITHDRAW_COMMAND.WITHDRAWN"),
+                    &[("<player>", &sender.get_name()), ("<amount>", &amount.to_string())],
+                )
             );
         }
+
+        broadcast_to_faction(server, &guard, &id, &messages);
     }
-    reply(sender, messages);
 }
 
 fn ally(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs, add: bool) {
-    let Some(name) = string_arg(args, "faction") else {
+    let Some(name) = present_string_arg(args, "faction") else {
         let usage = if add {
             state().read().unwrap().lang.usage_ally.clone()
         } else {
@@ -1570,7 +2232,7 @@ fn ally(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs
             reply(sender, &lang.faction_not_in);
             return;
         };
-        let Some(other_id) = guard.factions.by_name(&name).filter(|f| f.is_player()).map(|f| f.id.clone()) else {
+        let Some(other_id) = search_player_faction(&guard, &name) else {
             reply(sender, util::replace(&lang.faction_doesnt_exist, "<argument>", &name));
             return;
         };
@@ -1645,6 +2307,7 @@ enum AdminField {
     Points,
     Balance,
     Lives,
+    Kills,
 }
 
 #[derive(Clone, Copy)]
@@ -1664,22 +2327,67 @@ fn require_permission(sender: &CommandSender, server: &Server, node: &str) -> bo
     false
 }
 
+/// `AddDtrCommand` / `RemoveDtrCommand`: usage, `searchForFaction`,
+/// `isDouble`, then `setDtr(current ± value)`; messages carry `getDtrString()`.
 fn admin_change_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs, add: bool) {
     if !require_permission(sender, server, "lazarus:factions.dtr") {
         return;
     }
-    let Some(name) = string_arg(args, "faction") else {
-        return;
-    };
-    let Some(value) = double_arg(args, "value") else {
-        let message = state().read().unwrap().raw.language.string("COMMANDS.INVALID_NUMBER");
-        reply(sender, message);
-        return;
-    };
 
     let mut guard = state().write().unwrap();
-    let config = guard.config.clone();
     let prefix = guard.raw.language.string("FACTION_PREFIX");
+
+    let (Some(name), Some(value_raw)) = (
+        present_string_arg(args, "faction"),
+        present_string_arg(args, "value"),
+    ) else {
+        let usage = guard.raw.language.string(if add {
+            "FACTIONS.ADD_DTR_COMMAND.USAGE"
+        } else {
+            "FACTIONS.REMOVE_DTR_COMMAND.USAGE"
+        });
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
+    };
+
+    let Some(id) = search_player_faction(&guard, &name) else {
+        let tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
+        let msg = util::replace(&tpl, "<argument>", &name);
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    };
+
+    let value = match value_raw.trim().parse::<f64>() {
+        Ok(value) if value.is_finite() => value,
+        _ => {
+            let invalid = guard.raw.language.string("COMMANDS.INVALID_NUMBER");
+            drop(guard);
+            return reply(sender, format!("{prefix}{invalid}"));
+        }
+    };
+
+    let config = guard.config.clone();
+    let (faction_name, members) = {
+        let Some(faction) = guard.factions.get_mut(&id) else {
+            return;
+        };
+        let amount = if add {
+            faction.dtr + value
+        } else {
+            faction.dtr - value
+        };
+        faction.set_dtr(&config, amount);
+        (
+            faction.name.clone(),
+            faction.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
+        )
+    };
+    let frozen = guard.timers.is_frozen(&id);
+    let dtr_string = guard
+        .factions
+        .get(&id)
+        .map(|faction| faction.dtr_string(&config, frozen))
+        .unwrap_or_default();
     let sender_tpl = guard.raw.language.string(if add {
         "FACTIONS.ADD_DTR_COMMAND.CHANGED_SENDER"
     } else {
@@ -1690,70 +2398,37 @@ fn admin_change_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs
     } else {
         "FACTIONS.REMOVE_DTR_COMMAND.CHANGED_FACTION"
     });
-    let missing_tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
+    drop(guard);
 
-    let Some(id) = guard
-        .factions
-        .by_name(&name)
-        .filter(|f| f.is_player())
-        .map(|f| f.id.clone())
-    else {
-        let message = util::replace(&missing_tpl, "<argument>", &name);
-        reply(sender, format!("{prefix}{message}"));
-        return;
-    };
-
-    let (faction_name, members, current) = {
-        let faction = guard.factions.get(&id).unwrap();
-        (
-            faction.name.clone(),
-            faction.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
-            faction.dtr,
-        )
-    };
-
-    let amount = if add { current + value } else { current - value };
-    let new_dtr = guard
-        .factions
-        .get_mut(&id)
-        .map(|faction| faction.set_dtr(&config, amount))
-        .unwrap_or(amount);
-
-    let frozen = guard.timers.is_frozen(&id);
-    let dtr_string = guard
-        .factions
-        .get(&id)
-        .map(|faction| faction.dtr_string(&config, frozen))
-        .unwrap_or_else(|| util::java_double(new_dtr));
-
-    let sender_message = format!(
-        "{prefix}{}",
-        util::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<value>", &dtr_string)])
+    reply(
+        sender,
+        format!(
+            "{prefix}{}",
+            util::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<value>", &dtr_string)])
+        ),
     );
-    let faction_message = format!(
+
+    let message = format!(
         "{prefix}{}",
         util::replace_all(
             &faction_tpl,
             &[("<player>", &sender.get_name()), ("<dtr>", &dtr_string)]
         )
     );
-
     for uuid in members {
         if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
             && let Some(player) = server.get_player_by_uuid(id)
         {
-            core::send(&player, &faction_message);
+            core::send(&player, &message);
         }
     }
-
-    reply(sender, sender_message);
 }
 
 fn admin_force_role(sender: &CommandSender, server: &Server, args: &ConsumedArgs, promote: bool) {
     if !require_permission(sender, server, if promote { "lazarus:factions.forcepromote" } else { "lazarus:factions.forcedemote" }) {
         return;
     }
-    let Some(target_name) = string_arg(args, "player") else {
+    let Some(target_name) = present_string_arg(args, "player") else {
         return;
     };
 
@@ -1877,8 +2552,12 @@ fn admin_force_join(sender: &CommandSender, server: &Server, args: &ConsumedArgs
     if !require_permission(sender, server, "lazarus:factions.forcejoin") {
         return;
     }
-    let Some(faction_name) = string_arg(args, "faction") else {
-        return;
+    let Some(faction_name) = present_string_arg(args, "faction") else {
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let usage = guard.raw.language.string("FACTIONS.FORCE_JOIN_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
     };
     let Some(player) = sender.as_player() else {
         return;
@@ -1889,10 +2568,8 @@ fn admin_force_join(sender: &CommandSender, server: &Server, args: &ConsumedArgs
     let (prefix, missing_tpl, already_tpl, joined_tpl, already, found) = {
         let guard = state().read().unwrap();
         let lang = &guard.raw.language;
-        let found = guard
-            .factions
-            .by_name(&faction_name)
-            .filter(|f| f.is_player())
+        let found = search_player_faction(&guard, &faction_name)
+            .and_then(|id| guard.factions.get(&id))
             .map(|f| {
                 (
                     f.id.clone(),
@@ -1944,11 +2621,19 @@ fn admin_force_rename(sender: &CommandSender, server: &Server, args: &ConsumedAr
     if !require_permission(sender, server, "lazarus:factions.forcerename") {
         return;
     }
-    let Some(old_arg) = string_arg(args, "faction") else {
-        return;
+    let Some(old_arg) = present_string_arg(args, "faction") else {
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let usage = guard.raw.language.string("FACTIONS.FORCE_RENAME_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
     };
-    let Some(new_name) = string_arg(args, "name") else {
-        return;
+    let Some(new_name) = present_string_arg(args, "name") else {
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let usage = guard.raw.language.string("FACTIONS.FORCE_RENAME_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
     };
 
     let mut guard = state().write().unwrap();
@@ -1971,12 +2656,7 @@ fn admin_force_rename(sender: &CommandSender, server: &Server, args: &ConsumedAr
     };
     let _ = usage;
 
-    let Some(id) = guard
-        .factions
-        .by_name(&old_arg)
-        .filter(|f| f.is_player())
-        .map(|f| f.id.clone())
-    else {
+    let Some(id) = search_player_faction(&guard, &old_arg) else {
         let message = util::replace(&missing_tpl, "<argument>", &old_arg);
         reply(sender, format!("{prefix}{message}"));
         return;
@@ -2033,8 +2713,12 @@ fn admin_system_create(sender: &CommandSender, server: &Server, args: &ConsumedA
     if !require_permission(sender, server, "lazarus:factions.systemcreate") {
         return;
     }
-    let Some(name) = string_arg(args, "name") else {
-        return;
+    let Some(name) = present_string_arg(args, "name") else {
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let usage = guard.raw.language.string("FACTIONS.SYSTEM_CREATE_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
     };
 
     let mut guard = state().write().unwrap();
@@ -2117,11 +2801,19 @@ fn admin_system_rename(sender: &CommandSender, server: &Server, args: &ConsumedA
     if !require_permission(sender, server, "lazarus:factions.systemrename") {
         return;
     }
-    let Some(old_arg) = string_arg(args, "faction") else {
-        return;
+    let Some(old_arg) = present_string_arg(args, "faction") else {
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let usage = guard.raw.language.string("FACTIONS.SYSTEM_RENAME_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
     };
-    let Some(new_name) = string_arg(args, "name") else {
-        return;
+    let Some(new_name) = present_string_arg(args, "name") else {
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let usage = guard.raw.language.string("FACTIONS.SYSTEM_RENAME_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
     };
 
     let mut guard = state().write().unwrap();
@@ -2197,7 +2889,7 @@ fn admin_toggle_system_flag(
     if !require_permission(sender, server, node) {
         return;
     }
-    let Some(name) = string_arg(args, "faction") else {
+    let Some(name) = present_string_arg(args, "faction") else {
         return;
     };
 
@@ -2279,11 +2971,19 @@ fn admin_color(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
     if !require_permission(sender, server, "lazarus:factions.color") {
         return;
     }
-    let Some(name) = string_arg(args, "faction") else {
-        return;
+    let Some(name) = present_string_arg(args, "faction") else {
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let usage = guard.raw.language.string("FACTIONS.COLOR_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
     };
-    let Some(color) = string_arg(args, "color") else {
-        return;
+    let Some(color) = present_string_arg(args, "color") else {
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let usage = guard.raw.language.string("FACTIONS.COLOR_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
     };
 
     let mut guard = state().write().unwrap();
@@ -2352,8 +3052,12 @@ fn admin_deathban(sender: &CommandSender, server: &Server, args: &ConsumedArgs) 
     if !require_permission(sender, server, "lazarus:factions.deathban") {
         return;
     }
-    let Some(name) = string_arg(args, "faction") else {
-        return;
+    let Some(name) = present_string_arg(args, "faction") else {
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let usage = guard.raw.language.string("FACTIONS.DEATHBAN_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
     };
 
     let mut guard = state().write().unwrap();
@@ -2423,8 +3127,12 @@ fn admin_tp_here(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
     if !require_permission(sender, server, "lazarus:factions.tphere") {
         return;
     }
-    let Some(name) = string_arg(args, "faction") else {
-        return;
+    let Some(name) = present_string_arg(args, "faction") else {
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let usage = guard.raw.language.string("FACTIONS.TP_HERE_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
     };
     let Some(player) = sender.as_player() else {
         return;
@@ -2433,12 +3141,14 @@ fn admin_tp_here(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
     let (prefix, missing_tpl, faction_tpl, sender_tpl, members, faction_name) = {
         let guard = state().read().unwrap();
         let lang = &guard.raw.language;
-        let found = guard.factions.by_name(&name).filter(|f| f.is_player()).map(|f| {
-            (
-                f.name.clone(),
-                f.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
-            )
-        });
+        let found = search_player_faction(&guard, &name)
+            .and_then(|id| guard.factions.get(&id))
+            .map(|f| {
+                (
+                    f.name.clone(),
+                    f.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
+                )
+            });
         let (faction_name, members) = found.unwrap_or_default();
         (
             lang.string("FACTION_PREFIX"),
@@ -2572,8 +3282,12 @@ fn admin_claim_for(sender: &CommandSender, server: &Server, args: &ConsumedArgs)
     if !require_permission(sender, server, "lazarus:factions.claimfor") {
         return;
     }
-    let Some(name) = string_arg(args, "faction") else {
-        return;
+    let Some(name) = present_string_arg(args, "faction") else {
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let usage = guard.raw.language.string("FACTIONS.CLAIM_FOR_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
     };
     let Some(player) = sender.as_player() else {
         return;
@@ -2721,7 +3435,7 @@ fn uninvite(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         return reply(sender, format!("{prefix}{not_in_faction}"));
     };
 
-    let Some(target) = string_arg(args, "player") else {
+    let Some(target) = present_string_arg(args, "player") else {
         drop(guard);
         return reply(sender, format!("{prefix}{usage}"));
     };
@@ -2956,10 +3670,13 @@ fn lives(sender: &CommandSender, args: &ConsumedArgs) {
     let guard = state().read().unwrap();
     let prefix = guard.raw.language.string("FACTION_PREFIX");
 
-    match string_arg(args, "faction") {
+    match present_string_arg(args, "faction") {
         None => {
+            // `checkConsoleSender(sender)`.
             let Some(player) = sender.as_player() else {
-                return;
+                let template = guard.raw.language.string("COMMANDS.FOR_PLAYERS_ONLY");
+                drop(guard);
+                return reply(sender, format!("{prefix}{template}"));
             };
             let uuid = core::uuid_of(&player);
             let Some(id) = guard.factions.by_member(&uuid).map(|f| f.id.clone()) else {
@@ -2977,7 +3694,7 @@ fn lives(sender: &CommandSender, args: &ConsumedArgs) {
             reply(sender, format!("{prefix}{msg}"));
         }
         Some(name) => {
-            let Some(faction) = guard.factions.by_name(&name).filter(|f| f.is_player()) else {
+            let Some(faction_id) = search_player_faction(&guard, &name) else {
                 let msg = util::replace(
                     &guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST"),
                     "<argument>",
@@ -2986,7 +3703,20 @@ fn lives(sender: &CommandSender, args: &ConsumedArgs) {
                 drop(guard);
                 return reply(sender, format!("{prefix}{msg}"));
             };
-            let display = format!("{}{}", faction.color, faction.name);
+            let Some(faction) = guard.factions.get(&faction_id) else {
+                return;
+            };
+            // `faction.getName(sender)`: relation colour (enemy for console).
+            let viewer_faction = sender
+                .as_player()
+                .map(|player| core::uuid_of(&player))
+                .and_then(|uuid| guard.factions.by_member(&uuid).map(|f| f.id.clone()));
+            let display = core::faction_display_name_guard(
+                &guard,
+                faction,
+                viewer_faction.as_deref(),
+                &guard.config.relation_colors,
+            );
             let msg = util::replace_all(
                 &guard.raw.language.string("FACTIONS.LIVES_COMMAND.LIVES_OTHERS"),
                 &[("<faction>", &display), ("<amount>", &faction.lives.to_string())],
@@ -3028,10 +3758,16 @@ fn lives_transfer(
         )
     };
 
-    let Some(amount) = string_arg(args, "amount").and_then(|a| a.trim().parse::<i64>().ok()) else {
+    let Some(amount_raw) = present_string_arg(args, "amount") else {
         let usage = guard.raw.language.string(usage_key);
         drop(guard);
         return reply(sender, format!("{prefix}{usage}"));
+    };
+    // `SubCommand#checkNumber`: invalid input uses `COMMANDS.INVALID_NUMBER`.
+    let Some(amount) = amount_raw.trim().parse::<i64>().ok() else {
+        let invalid = guard.raw.language.string("COMMANDS.INVALID_NUMBER");
+        drop(guard);
+        return reply(sender, format!("{prefix}{invalid}"));
     };
     let amount = amount.abs() as i32;
 
@@ -3105,7 +3841,7 @@ fn lives_revive(sender: &CommandSender, server: &Server, uuid: &str, args: &Cons
     let not_in = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
     let no_perm_tpl = guard.raw.language.string("FACTIONS.NO_PERMISSION");
 
-    let Some(target_name) = string_arg(args, "player") else {
+    let Some(target_name) = present_string_arg(args, "player") else {
         let usage = guard
             .raw
             .language
@@ -3140,7 +3876,13 @@ fn lives_revive(sender: &CommandSender, server: &Server, uuid: &str, args: &Cons
         return reply(sender, format!("{prefix}{msg}"));
     };
 
-    if !crate::deathban::is_death_banned(&target_uuid) {
+    // (state lock is already held — inline the deathban checks instead of the
+    // locking `deathban::` helpers.)
+    if !guard
+        .userdata
+        .get(&target_uuid)
+        .is_some_and(|user| user.is_deathbanned())
+    {
         let msg = util::replace(
             &guard
                 .raw
@@ -3165,7 +3907,10 @@ fn lives_revive(sender: &CommandSender, server: &Server, uuid: &str, args: &Cons
     if let Some(faction) = guard.factions.get_mut(&id) {
         faction.lives -= 1;
     }
-    crate::deathban::revive_player(&target_uuid);
+    // (`DeathbanManager#revivePlayer`, inlined while the lock is held.)
+    if let Some(user) = guard.userdata.get_mut(&target_uuid) {
+        user.revive();
+    }
 
     let message = format!(
         "{prefix}{}",
@@ -3176,6 +3921,24 @@ fn lives_revive(sender: &CommandSender, server: &Server, uuid: &str, args: &Cons
     );
     broadcast_to_faction(server, &guard, &id, &message);
     drop(guard);
+}
+
+/// `FactionsManager#searchForFaction`: a player faction by name, falling back
+/// to the faction of the player with that name (`getPlayerFaction(String)`
+/// resolves the name to the player's uuid).
+fn search_player_faction(guard: &crate::state::AppState, name: &str) -> Option<String> {
+    if let Some(faction) = guard.factions.by_name(name) {
+        return faction.is_player().then(|| faction.id.clone());
+    }
+
+    let uuid = guard
+        .userdata
+        .users
+        .values()
+        .find(|user| user.name.eq_ignore_ascii_case(name))
+        .map(|user| user.uuid.clone())?;
+
+    guard.factions.by_member(&uuid).map(|faction| faction.id.clone())
 }
 
 fn broadcast_to_faction(server: &Server, guard: &crate::state::AppState, id: &str, message: &str) {
@@ -3282,7 +4045,7 @@ fn focus(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArg
         .language
         .string_list("FACTIONS.FOCUS_COMMAND.FOCUSED");
 
-    let Some(target_name) = string_arg(args, "faction") else {
+    let Some(target_name) = present_string_arg(args, "faction") else {
         drop(guard);
         return reply(sender, format!("{prefix}{usage}"));
     };
@@ -3297,23 +4060,23 @@ fn focus(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArg
         return reply(sender, format!("{prefix}{msg}"));
     }
 
-    let Some((target_id, target_name_real, is_ally)) = guard
+    let Some(target_id) = search_player_faction(&guard, &target_name) else {
+        let msg = util::replace(&missing_tpl, "<argument>", &target_name);
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    };
+    let (target_name_real, is_ally) = guard
         .factions
-        .by_name(&target_name)
-        .filter(|f| f.is_player())
+        .get(&target_id)
         .map(|f| {
             let is_ally = guard
                 .factions
                 .get(&id)
                 .map(|own| own.is_ally(&f.id))
                 .unwrap_or(false);
-            (f.id.clone(), f.name.clone(), is_ally)
+            (f.name.clone(), is_ally)
         })
-    else {
-        let msg = util::replace(&missing_tpl, "<argument>", &target_name);
-        drop(guard);
-        return reply(sender, format!("{prefix}{msg}"));
-    };
+        .unwrap_or_default();
 
     if target_id == id || is_ally {
         drop(guard);
@@ -3340,7 +4103,7 @@ fn focus(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArg
     drop(guard);
 }
 
-fn unfocus(sender: &CommandSender, server: &Server, uuid: &str) {
+fn unfocus(sender: &CommandSender, _server: &Server, uuid: &str) {
     let mut guard = state().write().unwrap();
     let prefix = guard.raw.language.string("FACTION_PREFIX");
     let not_in = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
@@ -3401,7 +4164,7 @@ fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
     let (prefix, usage, missing_tpl, invalid_type, sender_tpl, faction_tpl, found) = {
         let guard = state().read().unwrap();
         let lang = &guard.raw.language;
-        let found = guard.factions.by_name(&string_arg(args, "faction").unwrap_or_default()).map(|f| {
+        let found = guard.factions.by_name(&present_string_arg(args, "faction").unwrap_or_default()).map(|f| {
             (
                 f.id.clone(),
                 f.name.clone(),
@@ -3420,7 +4183,7 @@ fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         )
     };
 
-    let Some(name) = string_arg(args, "faction") else {
+    let Some(name) = present_string_arg(args, "faction") else {
         reply(sender, format!("{prefix}{usage}"));
         return;
     };
@@ -3466,7 +4229,7 @@ fn admin_clear_claims(sender: &CommandSender, server: &Server, args: &ConsumedAr
     let (prefix, usage, missing_tpl, sender_tpl, faction_tpl, home_tpl, found) = {
         let guard = state().read().unwrap();
         let lang = &guard.raw.language;
-        let found = guard.factions.by_name(&string_arg(args, "faction").unwrap_or_default()).map(|f| {
+        let found = guard.factions.by_name(&present_string_arg(args, "faction").unwrap_or_default()).map(|f| {
             (
                 f.id.clone(),
                 f.name.clone(),
@@ -3485,7 +4248,7 @@ fn admin_clear_claims(sender: &CommandSender, server: &Server, args: &ConsumedAr
         )
     };
 
-    let Some(name) = string_arg(args, "faction") else {
+    let Some(name) = present_string_arg(args, "faction") else {
         reply(sender, format!("{prefix}{usage}"));
         return;
     };
@@ -3528,56 +4291,171 @@ fn admin_clear_claims(sender: &CommandSender, server: &Server, args: &ConsumedAr
     }
 }
 
-fn admin_set_kills(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
-    if !require_permission(sender, server, "lazarus:factions.setkills") {
+
+/// `SetDtrCommand`: usage, `searchForFaction`, `isDouble`, then `setDtr`
+/// (clamped to min/max and rounded); messages carry `getDtrString()`.
+fn admin_set_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    if !require_permission(sender, server, "lazarus:factions.dtr") {
         return;
     }
 
-    let (prefix, usage, missing_tpl, invalid, sender_tpl, faction_tpl, found) = {
-        let guard = state().read().unwrap();
-        let lang = &guard.raw.language;
-        let found = guard
-            .factions
-            .by_name(&string_arg(args, "faction").unwrap_or_default())
-            .filter(|f| f.is_player())
-            .map(|f| {
-                (
-                    f.id.clone(),
-                    f.name.clone(),
-                    f.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
-                )
-            });
+    let mut guard = state().write().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+
+    let (Some(name), Some(value_raw)) = (
+        present_string_arg(args, "faction"),
+        present_string_arg(args, "value"),
+    ) else {
+        let usage = guard.raw.language.string("FACTIONS.SET_DTR_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
+    };
+
+    let Some(id) = search_player_faction(&guard, &name) else {
+        let tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
+        let msg = util::replace(&tpl, "<argument>", &name);
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    };
+
+    let value = match value_raw.trim().parse::<f64>() {
+        Ok(value) if value.is_finite() => value,
+        _ => {
+            let invalid = guard.raw.language.string("COMMANDS.INVALID_NUMBER");
+            drop(guard);
+            return reply(sender, format!("{prefix}{invalid}"));
+        }
+    };
+
+    let config = guard.config.clone();
+    let (faction_name, members) = {
+        let Some(faction) = guard.factions.get_mut(&id) else {
+            return;
+        };
+        faction.set_dtr(&config, value);
         (
-            lang.string("FACTION_PREFIX"),
-            lang.string("FACTIONS.SET_KILLS_COMMAND.USAGE"),
-            lang.string("FACTIONS.FACTION_DOESNT_EXIST"),
-            lang.string("COMMANDS.INVALID_NUMBER"),
-            lang.string("FACTIONS.SET_KILLS_COMMAND.CHANGED_SENDER"),
-            lang.string("FACTIONS.SET_KILLS_COMMAND.CHANGED_FACTION"),
-            found,
+            faction.name.clone(),
+            faction.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
+        )
+    };
+    let frozen = guard.timers.is_frozen(&id);
+    let dtr_string = guard
+        .factions
+        .get(&id)
+        .map(|faction| faction.dtr_string(&config, frozen))
+        .unwrap_or_default();
+    let sender_tpl = guard.raw.language.string("FACTIONS.SET_DTR_COMMAND.CHANGED_SENDER");
+    let faction_tpl = guard.raw.language.string("FACTIONS.SET_DTR_COMMAND.CHANGED_FACTION");
+    drop(guard);
+
+    reply(
+        sender,
+        format!(
+            "{prefix}{}",
+            util::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<value>", &dtr_string)])
+        ),
+    );
+
+    let message = format!(
+        "{prefix}{}",
+        util::replace_all(
+            &faction_tpl,
+            &[("<player>", &sender.get_name()), ("<dtr>", &dtr_string)]
+        )
+    );
+    for uuid in members {
+        if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
+            && let Some(player) = server.get_player_by_uuid(id)
+        {
+            core::send(&player, &message);
+        }
+    }
+}
+
+fn admin_set_int(sender: &CommandSender, server: &Server, args: &ConsumedArgs, field: AdminField) {
+    if !require_permission(
+        sender,
+        server,
+        match field {
+            AdminField::Points => "lazarus:factions.setpoints",
+            AdminField::Balance => "lazarus:factions.setbalance",
+            AdminField::Lives => "lazarus:factions.setlives",
+            AdminField::Kills => "lazarus:factions.setkills",
+        },
+    ) {
+        return;
+    }
+
+    let mut guard = state().write().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+    let usage_key = match field {
+        AdminField::Points => "FACTIONS.SET_POINTS_COMMAND.USAGE",
+        AdminField::Balance => "FACTIONS.SET_BALANCE_COMMAND.USAGE",
+        AdminField::Lives => "FACTIONS.SET_LIVES_COMMAND.USAGE",
+        AdminField::Kills => "FACTIONS.SET_KILLS_COMMAND.USAGE",
+    };
+
+    // `args.length < 2`.
+    let (Some(name), Some(value_raw)) = (
+        present_string_arg(args, "faction"),
+        present_string_arg(args, "value"),
+    ) else {
+        let usage = guard.raw.language.string(usage_key);
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
+    };
+
+    let Some(id) = search_player_faction(&guard, &name) else {
+        let tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
+        let msg = util::replace(&tpl, "<argument>", &name);
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    };
+
+    let Ok(value) = value_raw.trim().parse::<i64>() else {
+        let invalid = guard.raw.language.string("COMMANDS.INVALID_NUMBER");
+        drop(guard);
+        return reply(sender, format!("{prefix}{invalid}"));
+    };
+
+    // `Math.abs` for balance/lives/kills; points keep their sign.
+    let amount = match field {
+        AdminField::Points => value,
+        _ => value.abs(),
+    };
+
+    let allow_negative = guard.config.factions.allow_negative_points;
+    let (faction_name, members) = {
+        let Some(faction) = guard.factions.get_mut(&id) else {
+            return;
+        };
+        match field {
+            AdminField::Points => faction.change_points(amount as i32, allow_negative),
+            AdminField::Balance => faction.balance = amount,
+            AdminField::Lives => faction.lives = amount as i32,
+            AdminField::Kills => faction.kills = amount as i32,
+        }
+        (
+            faction.name.clone(),
+            faction.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
         )
     };
 
-    let Some(name) = string_arg(args, "faction") else {
-        reply(sender, format!("{prefix}{usage}"));
-        return;
-    };
-    let Some(amount) = int_arg(args, "amount") else {
-        reply(sender, format!("{prefix}{invalid}"));
-        return;
-    };
-    let Some((id, faction_name, members)) = found else {
-        let message = util::replace(&missing_tpl, "<argument>", &name);
-        reply(sender, format!("{prefix}{message}"));
-        return;
-    };
-
-    let amount = amount.abs();
-    if let Some(faction) = state().write().unwrap().factions.get_mut(&id) {
-        faction.kills = amount as i32;
-    }
-
     let amount = amount.to_string();
+    let sender_tpl = guard.raw.language.string(match field {
+        AdminField::Points => "FACTIONS.SET_POINTS_COMMAND.CHANGED_SENDER",
+        AdminField::Balance => "FACTIONS.SET_BALANCE_COMMAND.CHANGED_SENDER",
+        AdminField::Lives => "FACTIONS.SET_LIVES_COMMAND.CHANGED_SENDER",
+        AdminField::Kills => "FACTIONS.SET_KILLS_COMMAND.CHANGED_SENDER",
+    });
+    let faction_tpl = guard.raw.language.string(match field {
+        AdminField::Points => "FACTIONS.SET_POINTS_COMMAND.CHANGED_FACTION",
+        AdminField::Balance => "FACTIONS.SET_BALANCE_COMMAND.CHANGED_FACTION",
+        AdminField::Lives => "FACTIONS.SET_LIVES_COMMAND.CHANGED_FACTION",
+        AdminField::Kills => "FACTIONS.SET_KILLS_COMMAND.CHANGED_FACTION",
+    });
+    drop(guard);
+
     reply(
         sender,
         format!(
@@ -3602,178 +4480,326 @@ fn admin_set_kills(sender: &CommandSender, server: &Server, args: &ConsumedArgs)
     }
 }
 
-fn admin_set_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
-    if !require_permission(sender, server, "lazarus:factions.dtr") {
+/// `ForceKickCommand`: usage, then force-kick an online member (the original
+/// resolves offline players too; the port keeps the online-only resolution).
+fn admin_force_kick(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    if !require_permission(sender, server, "lazarus:factions.forcekick") {
         return;
     }
-    let Some(name) = string_arg(args, "faction") else {
-        return;
-    };
-    let Some(value) = double_arg(args, "value") else {
-        reply(sender, "&cInvalid number.");
-        return;
+
+    let Some(name) = present_string_arg(args, "player") else {
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let usage = guard.raw.language.string("FACTIONS.FORCE_KICK_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
     };
 
-    let mut guard = state().write().unwrap();
-    let config = guard.config.clone();
-    let prefix = guard.raw.language.string("FACTION_PREFIX");
-    let sender_tpl = guard.raw.language.string("FACTIONS.SET_DTR_COMMAND.CHANGED_SENDER");
-    let faction_tpl = guard.raw.language.string("FACTIONS.SET_DTR_COMMAND.CHANGED_FACTION");
-    let Some(id) = guard.factions.by_name(&name).map(|f| f.id.clone()) else {
-        reply(sender, util::replace(&guard.lang.faction_doesnt_exist, "<argument>", &name));
+    let Some(target) = server.get_player_by_name(&name) else {
+        reply(sender, util::replace(&state().read().unwrap().lang.player_not_online, "<player>", &name));
         return;
     };
+    let uuid = core::uuid_of(&target);
+    let player_name = core::name_of(&target);
+
+    let messages;
+    {
+        let mut guard = state().write().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+
+        let Some(faction_id) = guard.factions.by_member(&uuid).map(|f| f.id.clone()) else {
+            let tpl = guard.raw.language.string("FACTIONS.NOT_IN_FACTION");
+            let msg = util::replace(&tpl, "<player>", &player_name);
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        };
+
+        let (faction_name, role, members) = {
+            let Some(faction) = guard.factions.get(&faction_id) else {
+                return;
+            };
+            (
+                faction.name.clone(),
+                faction.member(&uuid).map(|m| m.role),
+                faction.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
+            )
+        };
+
+        if role == Some(Role::Leader) {
+            let msg = guard
+                .raw
+                .language
+                .string("FACTIONS.FORCE_KICK_COMMAND.CANNOT_KICK_LEADER");
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        }
+
+        guard.factions.remove_member(&faction_id, &uuid);
+        if guard
+            .factions
+            .get(&faction_id)
+            .is_some_and(|f| f.members.is_empty())
+        {
+            guard.claims.remove_all(&faction_id);
+            guard.factions.disband(&faction_id);
+        }
+
+        messages = (
+            prefix.clone(),
+            util::replace_all(
+                &guard.raw.language.string("FACTIONS.FORCE_KICK_COMMAND.KICKED_SENDER"),
+                &[("<player>", &player_name), ("<faction>", &faction_name)],
+            ),
+            util::replace(
+                &guard.raw.language.string("FACTIONS.FORCE_KICK_COMMAND.KICKED_SELF"),
+                "<name>",
+                &faction_name,
+            ),
+            util::replace(
+                &guard.raw.language.string("FACTIONS.FORCE_KICK_COMMAND.KICKED_OTHERS"),
+                "<player>",
+                &player_name,
+            ),
+            members
+                .into_iter()
+                .filter(|member_uuid| member_uuid != &uuid)
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    let (prefix, sender_msg, self_msg, others_msg, members) = messages;
+    reply(sender, format!("{prefix}{sender_msg}"));
+    core::send(&target, format!("{prefix}{self_msg}"));
+    for member_uuid in members {
+        if let Some(uuid) = pumpkin_plugin_api::uuid::parse(&member_uuid)
+            && let Some(online) = server.get_player_by_uuid(uuid)
+        {
+            core::send(&online, format!("{prefix}{others_msg}"));
+        }
+    }
+}
+
+/// `ForceLeaderCommand`: usage, then promote an online member to leader
+/// (old leaders become co-leaders). The original resolves offline players
+/// too; the port keeps the online-only resolution.
+fn admin_force_leader(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    if !require_permission(sender, server, "lazarus:factions.forceleader") {
+        return;
+    }
+
+    let Some(name) = present_string_arg(args, "player") else {
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+        let usage = guard.raw.language.string("FACTIONS.FORCE_LEADER_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
+    };
+
+    let Some(target) = server.get_player_by_name(&name) else {
+        reply(sender, util::replace(&state().read().unwrap().lang.player_not_online, "<player>", &name));
+        return;
+    };
+    let uuid = core::uuid_of(&target);
+    let player_name = core::name_of(&target);
+    let sender_name = sender.get_name();
+
+    let messages;
+    {
+        let mut guard = state().write().unwrap();
+        let prefix = guard.raw.language.string("FACTION_PREFIX");
+
+        let Some(faction_id) = guard.factions.by_member(&uuid).map(|f| f.id.clone()) else {
+            let tpl = guard.raw.language.string("FACTIONS.NOT_IN_FACTION");
+            let msg = util::replace(&tpl, "<player>", &player_name);
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        };
+
+        let (faction_name, already_leader, members) = {
+            let Some(faction) = guard.factions.get(&faction_id) else {
+                return;
+            };
+            (
+                faction.name.clone(),
+                faction.member(&uuid).map(|m| m.role) == Some(Role::Leader),
+                faction.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
+            )
+        };
+
+        if already_leader {
+            let tpl = guard.raw.language.string("FACTIONS.FORCE_LEADER_COMMAND.ALREADY_LEADER");
+            let msg = util::replace(&tpl, "<player>", &player_name);
+            drop(guard);
+            return reply(sender, format!("{prefix}{msg}"));
+        }
+
+        // `faction.getLeader().setRole(CO_LEADER); targetPlayer.setRole(LEADER);`
+        if let Some(faction) = guard.factions.get_mut(&faction_id) {
+            for member in faction.members.values_mut() {
+                if member.role == Role::Leader {
+                    member.role = Role::CoLeader;
+                }
+            }
+            if let Some(member) = faction.members.get_mut(&uuid) {
+                member.role = Role::Leader;
+            }
+        }
+
+        messages = (
+            prefix,
+            util::replace_all(
+                &guard.raw.language.string("FACTIONS.FORCE_LEADER_COMMAND.CHANGED_SENDER"),
+                &[("<player>", &player_name), ("<faction>", &faction_name)],
+            ),
+            util::replace_all(
+                &guard.raw.language.string("FACTIONS.FORCE_LEADER_COMMAND.CHANGED_FACTION"),
+                &[("<sender>", &sender_name), ("<player>", &player_name)],
+            ),
+            members,
+        );
+    }
+
+    let (prefix, sender_msg, faction_msg, members) = messages;
+    reply(sender, format!("{prefix}{sender_msg}"));
+    let message = format!("{prefix}{faction_msg}");
+    for member_uuid in members {
+        if let Some(uuid) = pumpkin_plugin_api::uuid::parse(&member_uuid)
+            && let Some(online) = server.get_player_by_uuid(uuid)
+        {
+            core::send(&online, &message);
+        }
+    }
+}
+
+fn admin_set_freeze(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    if !require_permission(sender, server, "lazarus:factions.setfreeze") {
+        return;
+    }
+
+    let mut guard = state().write().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+
+    let (Some(name), Some(time_raw)) = (
+        present_string_arg(args, "faction"),
+        present_string_arg(args, "time"),
+    ) else {
+        let usage = guard.raw.language.string("FACTIONS.SET_FREEZE_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
+    };
+
+    let Some(id) = search_player_faction(&guard, &name) else {
+        let tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
+        let msg = util::replace(&tpl, "<argument>", &name);
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    };
+
+    let Some(duration) = util::parse_seconds(&time_raw) else {
+        let invalid = guard.raw.language.string("COMMANDS.INVALID_DURATION");
+        drop(guard);
+        return reply(sender, format!("{prefix}{invalid}"));
+    };
+
     let (faction_name, members) = {
-        let faction = guard.factions.get(&id).unwrap();
+        let Some(faction) = guard.factions.get(&id) else {
+            return;
+        };
         (
             faction.name.clone(),
             faction.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
         )
     };
-    if let Some(faction) = guard.factions.get_mut(&id) {
-        faction.set_dtr(&config, value);
+
+    // `timer.cancel(faction)`; a zero duration thaws immediately.
+    guard.timers.unfreeze_faction(&id);
+    if duration > 0 {
+        guard.timers.freeze_faction(&id, duration as u64);
     }
-    let frozen = guard.timers.is_frozen(&id);
-    let dtr_string = guard
-        .factions
-        .get(&id)
-        .map(|faction| faction.dtr_string(&config, frozen))
-        .unwrap_or_default();
 
-    let sender_message = format!(
-        "{prefix}{}",
-        util::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<value>", &dtr_string)])
-    );
-    let faction_message = format!(
-        "{prefix}{}",
-        util::replace_all(
-            &faction_tpl,
-            &[("<player>", &sender.get_name()), ("<dtr>", &dtr_string)]
-        )
+    let time = util::format_duration_words(duration * 1000);
+    let sender_tpl = guard.raw.language.string("FACTIONS.SET_FREEZE_COMMAND.CHANGED_SENDER");
+    let faction_tpl = guard.raw.language.string("FACTIONS.SET_FREEZE_COMMAND.CHANGED_FACTION");
+    drop(guard);
+
+    reply(
+        sender,
+        format!(
+            "{prefix}{}",
+            util::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<time>", &time)])
+        ),
     );
 
+    let message = format!(
+        "{prefix}{}",
+        util::replace_all(&faction_tpl, &[("<player>", &sender.get_name()), ("<time>", &time)])
+    );
     for uuid in members {
         if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
             && let Some(player) = server.get_player_by_uuid(id)
         {
-            core::send(&player, &faction_message);
+            core::send(&player, &message);
         }
     }
-    reply(sender, sender_message);
 }
 
-fn admin_set_int(sender: &CommandSender, server: &Server, args: &ConsumedArgs, field: AdminField) {
-    if !require_permission(sender, server, match field { AdminField::Points => "lazarus:factions.setpoints", AdminField::Balance => "lazarus:factions.setbalance", AdminField::Lives => "lazarus:factions.setlives" }) {
+/// `ThawCommand`: usage, `searchForFaction`, cancel the freeze timer and
+/// restart DTR regen immediately.
+fn admin_thaw(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
+    if !require_permission(sender, server, "lazarus:factions.thaw") {
         return;
     }
-    let Some(name) = string_arg(args, "faction") else {
-        return;
-    };
-    let Some(value) = int_arg(args, "value") else {
-        reply(sender, "&cInvalid number.");
-        return;
-    };
 
     let mut guard = state().write().unwrap();
-    let Some(id) = guard.factions.by_name(&name).map(|f| f.id.clone()) else {
-        reply(sender, util::replace(&guard.lang.faction_doesnt_exist, "<argument>", &name));
-        return;
-    };
-    if let Some(faction) = guard.factions.get_mut(&id) {
-        match field {
-            AdminField::Points => faction.points = value as i32,
-            AdminField::Balance => faction.balance = value,
-            AdminField::Lives => faction.lives = value as i32,
-        }
-    }
-    reply(sender, format!("&eUpdated &c{name} &e({value})."));
-}
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
 
-fn admin_force_kick(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
-    if !require_permission(sender, server, "lazarus:factions.forcekick") {
-        return;
-    }
-    let Some(name) = string_arg(args, "player") else {
-        return;
+    let Some(name) = present_string_arg(args, "faction") else {
+        let usage = guard.raw.language.string("FACTIONS.THAW_COMMAND.USAGE");
+        drop(guard);
+        return reply(sender, format!("{prefix}{usage}"));
     };
-    let Some(target) = server.get_player_by_name(&name) else {
-        reply(sender, util::replace(&state().read().unwrap().lang.player_not_online, "<player>", &name));
-        return;
-    };
-    let uuid = core::uuid_of(&target);
 
-    let message;
-    {
-        let mut guard = state().write().unwrap();
-        let Some(faction_id) = guard.factions.by_member(&uuid).map(|f| f.id.clone()) else {
-            reply(sender, util::replace(&guard.lang.faction_not_in, "<player>", &name));
+    let Some(id) = search_player_faction(&guard, &name) else {
+        let tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
+        let msg = util::replace(&tpl, "<argument>", &name);
+        drop(guard);
+        return reply(sender, format!("{prefix}{msg}"));
+    };
+
+    let (faction_name, members) = {
+        let Some(faction) = guard.factions.get(&id) else {
             return;
         };
-        guard.factions.remove_member(&faction_id, &uuid);
-        if guard.factions.get(&faction_id).is_some_and(|f| f.members.is_empty()) {
-            guard.claims.remove_all(&faction_id);
-            guard.factions.disband(&faction_id);
+        (
+            faction.name.clone(),
+            faction.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
+        )
+    };
+
+    guard.timers.unfreeze_faction(&id);
+
+    let sender_tpl = guard.raw.language.string("FACTIONS.THAW_COMMAND.CHANGED_SENDER");
+    let faction_tpl = guard.raw.language.string("FACTIONS.THAW_COMMAND.CHANGED_FACTION");
+    drop(guard);
+
+    reply(
+        sender,
+        format!(
+            "{prefix}{}",
+            util::replace_all(&sender_tpl, &[("<faction>", &faction_name)])
+        ),
+    );
+
+    let message = format!(
+        "{prefix}{}",
+        util::replace_all(&faction_tpl, &[("<player>", &sender.get_name())])
+    );
+    for uuid in members {
+        if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
+            && let Some(player) = server.get_player_by_uuid(id)
+        {
+            core::send(&player, &message);
         }
-        message = util::replace(&guard.lang.faction_admin_force_kicked, "<player>", &name);
-    }
-    reply(sender, message);
-}
-
-fn admin_force_leader(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
-    if !require_permission(sender, server, "lazarus:factions.forceleader") {
-        return;
-    }
-    let Some(name) = string_arg(args, "player") else {
-        return;
-    };
-    let Some(target) = server.get_player_by_name(&name) else {
-        reply(sender, util::replace(&state().read().unwrap().lang.player_not_online, "<player>", &name));
-        return;
-    };
-    let uuid = core::uuid_of(&target);
-
-    let mut guard = state().write().unwrap();
-    let Some(faction_id) = guard.factions.by_member(&uuid).map(|f| f.id.clone()) else {
-        reply(sender, util::replace(&guard.lang.faction_not_in, "<player>", &name));
-        return;
-    };
-    if let Some(faction) = guard.factions.get_mut(&faction_id) {
-        for member in faction.members.values_mut() {
-            if member.role == Role::Leader {
-                member.role = Role::CoLeader;
-            }
-        }
-        if let Some(member) = faction.members.get_mut(&uuid) {
-            member.role = Role::Leader;
-        }
-    }
-    reply(sender, format!("&eTransferred leadership to &c{name}&e."));
-}
-
-fn admin_freeze(sender: &CommandSender, server: &Server, args: &ConsumedArgs, freeze: bool) {
-    if !require_permission(sender, server, if freeze { "lazarus:factions.setfreeze" } else { "lazarus:factions.thaw" }) {
-        return;
-    }
-    let Some(name) = string_arg(args, "faction") else {
-        return;
-    };
-
-    let mut guard = state().write().unwrap();
-    let (Some(id), Some(faction_name), duration) = (
-        guard.factions.by_name(&name).map(|f| f.id.clone()),
-        guard.factions.by_name(&name).map(|f| f.name.clone()),
-        guard.config.factions.freeze_duration_minutes,
-    ) else {
-        reply(sender, util::replace(&guard.lang.faction_doesnt_exist, "<argument>", &name));
-        return;
-    };
-
-    if freeze {
-        guard.timers.freeze_faction(&id, duration);
-        reply(sender, format!("&c{faction_name}&e has been &cfrozen&e."));
-    } else {
-        guard.timers.unfreeze_faction(&id);
-        reply(sender, format!("&c{faction_name}&e has been &athawed&e."));
     }
 }
 
@@ -3785,70 +4811,47 @@ fn admin_save(sender: &CommandSender, server: &Server) {
     reply(sender, "&aAll data saved.");
 }
 
-fn help(sender: &CommandSender, page: usize) {
-    let line = "&7&m                                                                                ";
+/// `HelpCommand`: pages come from `FACTIONS.HELP_COMMAND.PAGES.<page>` in the
+/// raw language config; a non-numeric page is `COMMANDS.INVALID_NUMBER` and a
+/// missing page is `FACTIONS.HELP_COMMAND.PAGE_NOT_FOUND`.
+fn help(sender: &CommandSender, requested: Option<String>) {
+    let guard = state().read().unwrap();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
 
-    let page_lines: [&[&str]; 4] = [
-        &[
-            " &6&lFaction Help &e(Page 1/4)",
-            "",
-            " &e/f join &f- &7Accept a join request from an faction.",
-            " &e/f chat &f- &7Toggle faction chat only mode on or off.",
-            " &e/f claim &f- &7Claim land in the Wilderness.",
-            " &e/f create &f- &7Create a faction.",
-            " &e/f disband &f- &7Disband your faction.",
-            " &e/f home &f- &7Teleport to the faction home.",
-            "",
-            " &6You are currently on &ePage 1/4.",
-            " &6To view other pages, use &e/f help <page>",
-        ],
-        &[
-            " &6&lFaction Help &e(Page 2/4)",
-            "",
-            " &e/f invite &f- &7Invite a player to the faction.",
-            " &e/f kick &f- &7Kick a player from the faction.",
-            " &e/f leader &f- &7Sets the new leader for your faction.",
-            " &e/f leave &f- &7Leave your current faction.",
-            " &e/f list &f- &7See a list of all factions.",
-            " &e/f map &f- &7View all claims around your location.",
-            "",
-            " &6You are currently on &ePage 2/4.",
-            " &6To view other pages, use &e/f help <page>",
-        ],
-        &[
-            " &6&lFaction Help &e(Page 3/4)",
-            "",
-            " &e/f rename &f- &7Change the name of your faction.",
-            " &e/f promote &f- &7Promotes a player to a higher role.",
-            " &e/f sethome &f- &7Sets the faction home location.",
-            " &e/f show &f- &7Get details about a faction.",
-            " &e/f unclaim &f- &7Unclaims land from your faction.",
-            " &e/f deinvite &f- &7Revoke an invitation to a player.",
-            "",
-            " &6You are currently on &ePage 3/4.",
-            " &6To view other pages, use &e/f help <page>",
-        ],
-        &[
-            " &6&lFaction Help &e(Page 4/4)",
-            "",
-            " &e/f demote &f- &7Demotes a player to a lower role.",
-            " &e/f deposit &f- &7Deposit money to your faction.",
-            " &e/f withdraw &f- &7Withdraw money from your faction.",
-            " &e/f stuck &f- &7Use it when stuck in enemy teritory.",
-            "",
-            " &6You are currently on &ePage 4/4.",
-            " &6To view other pages, use &e/f help <page>.",
-        ],
-    ];
-
-    let Some(lines) = page_lines.get(page.saturating_sub(1)) else {
-        reply(sender, util::replace("&ePage &c<page> &enot found.", "<page>", &page.to_string()));
-        return;
+    // `SubCommand#checkNumber` on the raw page argument.
+    let page: i64 = match &requested {
+        None => 1,
+        Some(raw) => match raw.trim().parse::<i64>() {
+            Ok(value) => value,
+            Err(_) => {
+                let invalid = guard.raw.language.string("COMMANDS.INVALID_NUMBER");
+                drop(guard);
+                return reply(sender, format!("{prefix}{invalid}"));
+            }
+        },
     };
 
-    reply(sender, line);
-    for entry in *lines {
-        reply(sender, *entry);
+    let lines = if page >= 1 {
+        guard
+            .raw
+            .language
+            .string_list(&format!("FACTIONS.HELP_COMMAND.PAGES.{page}"))
+    } else {
+        Vec::new()
+    };
+
+    if lines.is_empty() {
+        let template = guard
+            .raw
+            .language
+            .string("FACTIONS.HELP_COMMAND.PAGE_NOT_FOUND");
+        let display = requested.unwrap_or_else(|| page.to_string());
+        drop(guard);
+        return reply(sender, format!("{prefix}{}", util::replace(&template, "<page>", &display)));
     }
-    reply(sender, line);
+
+    drop(guard);
+    for line in lines {
+        reply(sender, line);
+    }
 }
