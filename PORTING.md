@@ -67,7 +67,7 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `factions.event.*` (Bukkit events) | ⬜ | replaced by direct calls; no custom Bukkit event bus in Pumpkin |
 | `userdata.Userdata`, `UserdataManager` | ✅ | JSON persistence (Mongo dropped; sandbox only exposes the data folder) |
 | `timer.*` (combat tag, apple, enderpearl, pvp prot, home, stuck, logout) | ✅ | timer storage, scoreboard + consumption hooks (pearl/apple) |
-| `timer.cooldown.DtrRegenTimer` | ✅ | DTR regen in the 1s task |
+| `timer.cooldown.DtrRegenTimer` | ✅ | one `REGEN_PER_MINUTE` step per minute; `setDtr` clamp + 2-decimal rounding |
 | `scoreboard.*` | ✅ | config template (`scoreboard.toml`) + placeholders + teams |
 | `tab.*` | ✅ | header/footer + per-player name/order/latency (`tab.toml`) |
 | `hologram.*` | ✅ | `TextDisplay` entities + `/hologram` commands |
@@ -110,13 +110,24 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   exist on Pumpkin.
 * **Time** is measured in unix milliseconds for timers, using Pumpkin's scheduler
   (20 ticks/second).
+* **Persistence is crash-safe.** Every store is written through an
+  atomic temp-file + rename (`state::atomic_write`), so a crash mid-write can
+  never truncate or corrupt a file. The gameplay-volatile stores
+  (`timers.json`, `factions.json`, `claims.json`, `userdata.json`) are flushed
+  every 30 seconds (`state::save_hot`) — bounding crash loss to half a minute —
+  while `kits.json`/`holograms.json` and the configured full pass
+  (`FACTIONS_AUTO_SAVE`, default 30 min) are written by `state::save_all`.
+  Timers persist as absolute epoch **milliseconds** (per-player, faction-freeze,
+  custom and the global SOTW remainder — downtime does not consume SOTW, so its
+  stored form is the remaining millis), and a store that fails to parse is moved
+  aside to `<name>.corrupt-<ts>` instead of being overwritten by the next save.
 * **PvP protection is banked, not ticking, inside safezones**: the full
   `PvpProtTimer` model is ported — `pvp_banked` holds the paused remainder,
   `is_active`/`remaining` report paused protection as active and every consumer
   (scoreboard, class gates, glass walls, claim entry) sees it.
 * **SOTW** keeps the original's runtime state in memory (`enabled_players`,
-  `hide_players`) and persists only the timer (`timers.json` → `sotw_until`),
-  matching `timers.yml` `SotwTimer`.
+  `hide_players`) and persists only the timer (`timers.json` →
+  `sotw_remaining_millis`), matching `timers.yml` `SotwTimer`.
 
 ### Incomplete ports caused by host API limits
 

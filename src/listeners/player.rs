@@ -309,23 +309,36 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
             // Death removes PvP protection entirely (port of `PvpProtHandler#onPlayerDeath`).
             guard.timers.cancel_pvp(&uuid);
 
-            // DTR loss for the victim's faction (port of the faction death handlers).
+            // DTR loss for the victim's faction (port of `sendMemberDeath`).
             let faction_id = guard.factions.by_member(&uuid).map(|f| f.id.clone());
-            if let Some(faction_id) = faction_id
-                && let Some(faction) = guard.factions.get_mut(&faction_id)
-            {
-                let loss = match core::dimension_of(&world) {
-                    core::Dimension::Overworld => config.factions.dtr_death_loss.overworld,
-                    core::Dimension::Nether => config.factions.dtr_death_loss.nether,
-                    core::Dimension::End => config.factions.dtr_death_loss.end,
-                };
-                faction.dtr = (faction.dtr - loss).max(config.factions.min_dtr);
+            if let Some(faction_id) = faction_id {
+                let frozen = guard.timers.is_frozen(&faction_id);
+                let template = guard.raw.language.string("FACTIONS.MEMBER_DEATH");
+                if let Some(faction) = guard.factions.get_mut(&faction_id) {
+                    let loss = match core::dimension_of(&world) {
+                        core::Dimension::Overworld => config.factions.dtr_death_loss.overworld,
+                        core::Dimension::Nether => config.factions.dtr_death_loss.nether,
+                        core::Dimension::End => config.factions.dtr_death_loss.end,
+                    };
+                    let amount = faction.dtr - loss;
+                    faction.set_dtr(&config, amount);
 
-                let dtr = faction.dtr;
-                messages.push((
-                    faction_id.clone(),
-                    format!("&cYour faction lost &e{loss} &cDTR. Now: &e{dtr:.2}"),
-                ));
+                    let loss_string = format!("-{}", crate::util::java_double(loss));
+                    let dtr_string = faction.dtr_string(&config, frozen);
+                    let max_dtr_string = faction.max_dtr_string(&config);
+                    messages.push((
+                        faction_id.clone(),
+                        crate::util::replace_all(
+                            &template,
+                            &[
+                                ("<player>", &name),
+                                ("<dtrLoss>", &loss_string),
+                                ("<dtr>", &dtr_string),
+                                ("<maxDtr>", &max_dtr_string),
+                            ],
+                        ),
+                    ));
+                }
             }
         }
 

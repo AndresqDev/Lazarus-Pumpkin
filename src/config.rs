@@ -80,6 +80,11 @@ pub struct FactionsConfig {
     pub solo_faction_dtr: f64,
     pub regen_per_minute: f64,
     pub freeze_duration_minutes: u64,
+    /// `FACTION_DTR.DTR_CHARACTERS` — appended to the DTR display
+    /// (full `&a◀` / regenerating `&e▲` / frozen `&c■`).
+    pub dtr_full_character: String,
+    pub dtr_regen_character: String,
+    pub dtr_frozen_character: String,
     pub dtr_death_loss: WorldRadiiF64,
 
     pub faction_limit: usize,
@@ -125,6 +130,9 @@ impl Default for FactionsConfig {
             solo_faction_dtr: 1.1,
             regen_per_minute: 0.1,
             freeze_duration_minutes: 45,
+            dtr_full_character: "&a◀".into(),
+            dtr_regen_character: "&e▲".into(),
+            dtr_frozen_character: "&c■".into(),
             dtr_death_loss: WorldRadiiF64 { overworld: 1.0, nether: 0.5, end: 1.0 },
             faction_limit: 15,
             max_allies: 0,

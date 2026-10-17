@@ -88,6 +88,73 @@ pub fn format_hms(seconds: u64) -> String {
     format!("{hours:02}:{minutes:02}:{secs:02}")
 }
 
+/// Formats a double the way Java's `String.valueOf(double)` does (`1.0`, `6.5`).
+/// Used by the DTR display, which prints the raw value (`1.1`) instead of a
+/// fixed number of decimals.
+pub fn java_double(value: f64) -> String {
+    if value == value.trunc() {
+        format!("{value:.1}")
+    } else {
+        format!("{value}")
+    }
+}
+
+/// Port of `StringUtils#formatDurationWords` =
+/// `DurationFormatUtils.formatDurationWords(millis, true, true)`: a pluralised
+/// "1 day 2 hours 3 minutes" string with leading/trailing zero elements
+/// suppressed ("45 minutes", "1 hour", "0 seconds").
+pub fn format_duration_words(millis: i64) -> String {
+    let millis = millis.max(0);
+    let days = millis / 86_400_000;
+    let rem = millis % 86_400_000;
+    let hours = rem / 3_600_000;
+    let rem = rem % 3_600_000;
+    let minutes = rem / 60_000;
+    let rem = rem % 60_000;
+    let seconds = rem / 1000;
+
+    let mut duration = format!("{days} days {hours} hours {minutes} minutes {seconds} seconds");
+
+    // `suppressLeadingZeroElements` (mirrors the nested chain in commons-lang3;
+    // note the original never strips " 0 seconds" here — its check is dead code
+    // because `duration` is reassigned right before it).
+    duration.insert(0, ' ');
+    let tmp = duration.replacen(" 0 days", "", 1);
+    if tmp.len() != duration.len() {
+        duration = tmp;
+        let tmp = duration.replacen(" 0 hours", "", 1);
+        if tmp.len() != duration.len() {
+            duration = tmp;
+            duration = duration.replacen(" 0 minutes", "", 1);
+        }
+    }
+    if !duration.is_empty() {
+        duration.remove(0);
+    }
+
+    // `suppressTrailingZeroElements`.
+    let tmp = duration.replacen(" 0 seconds", "", 1);
+    if tmp.len() != duration.len() {
+        duration = tmp;
+        let tmp = duration.replacen(" 0 minutes", "", 1);
+        if tmp.len() != duration.len() {
+            duration = tmp;
+            let tmp = duration.replacen(" 0 hours", "", 1);
+            if tmp.len() != duration.len() {
+                duration = tmp.replacen(" 0 days", "", 1);
+            }
+        }
+    }
+
+    // Pluralisation pass.
+    duration.insert(0, ' ');
+    duration = duration.replacen(" 1 seconds", " 1 second", 1);
+    duration = duration.replacen(" 1 minutes", " 1 minute", 1);
+    duration = duration.replacen(" 1 hours", " 1 hour", 1);
+    duration = duration.replacen(" 1 days", " 1 day", 1);
+    duration.trim().to_string()
+}
+
 /// Port of `StringUtils#parseSeconds`: accepts a plain integer (seconds) or a
 /// combination of `d`/`h`/`m`/`s` suffixes (`10`, `10s`, `5m`, `2h`, `1d2h30m`).
 /// Returns `None` for invalid input (the original returns `-1`).

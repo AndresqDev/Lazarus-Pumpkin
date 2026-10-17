@@ -46,6 +46,15 @@ pub fn start(context: &Context) {
     let period_ticks = minutes * 60 * 20;
     context.schedule_repeating_task(period_ticks, period_ticks, |_server| crate::state::save_all());
 
+    // Frequent flush of the gameplay-volatile stores (timers with millisecond
+    // precision, factions, claims, userdata): bounds data loss on a hard crash
+    // to half a minute while staying far too small to affect TPS.
+    context.schedule_repeating_task(600, 600, |_server| crate::state::save_hot());
+
+    // DTR regeneration (port of `DtrRegenTimer`): every non-frozen player
+    // faction below its maximum gains `REGEN_PER_MINUTE` once per minute.
+    context.schedule_repeating_task(1200, 1200, |_server| dtr_regen_tick());
+
     // Clear stale "infinite" class effects once the server is up.
     context.schedule_delayed_task(20, |server| {
         for player in server.get_all_players() {
@@ -71,23 +80,7 @@ pub fn start(context: &Context) {
 fn tick(server: &Server) {
     let expired: Vec<(String, TimerType)> = {
         let mut guard = state().write().unwrap();
-        let expired = guard.timers.purge_expired();
-
-        // DTR regeneration (port of DtrRegenTimer).
-        let config = guard.config.clone();
-        let per_second = config.factions.regen_per_minute / 60.0;
-        let frozen_ids: Vec<String> = guard.timers.faction_freeze.keys().cloned().collect();
-        for faction in guard.factions.player_factions_mut() {
-            if frozen_ids.contains(&faction.id) {
-                continue;
-            }
-            let max = faction.max_dtr(&config);
-            if faction.dtr < max {
-                faction.dtr = (faction.dtr + per_second).min(max);
-            }
-        }
-
-        expired
+        guard.timers.purge_expired()
     };
 
     announce_expired(server, &expired);
@@ -159,6 +152,28 @@ fn tick(server: &Server) {
 
     // Persist the tab state file once per tick (the native plugin diffs it).
     tab::flush();
+}
+
+/// Port of `DtrRegenTimer#handleDtrUpdate`: each minute, every non-frozen
+/// player faction below its maximum DTR regenerates `REGEN_PER_MINUTE` in one
+/// step (the original schedules the task at a one-minute fixed rate). The
+/// resulting value is rounded through [`crate::factions::Faction::set_dtr`] so
+/// the tab list never shows floating-point noise.
+fn dtr_regen_tick() {
+    let mut guard = state().write().unwrap();
+    let config = guard.config.clone();
+    let frozen_ids: Vec<String> = guard.timers.faction_freeze.keys().cloned().collect();
+
+    for faction in guard.factions.player_factions_mut() {
+        if frozen_ids.contains(&faction.id) {
+            continue;
+        }
+        let max = faction.max_dtr(&config);
+        if faction.dtr < max {
+            let amount = faction.dtr + config.factions.regen_per_minute;
+            faction.set_dtr(&config, amount);
+        }
+    }
 }
 
 /// Faster loop that only refreshes client-side block visuals.

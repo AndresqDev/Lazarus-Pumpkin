@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::config::Config;
+use crate::util;
 
 /// A serialisable location. Bukkit's `Location` is replaced by this plain struct
 /// because Pumpkin has no persistent location type — world is stored by name.
@@ -318,6 +319,56 @@ impl Faction {
             (config.factions.dtr_per_player * self.members.len() as f64)
                 .min(config.factions.max_dtr)
         }
+    }
+
+    /// Port of `PlayerFaction#setDtr`: clamps to `[MIN_DTR, maxDtr]` and rounds
+    /// to two decimals (`Math.round(v * 100) / 100.0`), which is what keeps the
+    /// displayed value free of floating-point noise. Returns the stored value.
+    pub fn set_dtr(&mut self, config: &Config, amount: f64) -> f64 {
+        let clamped = if amount < 0.0 {
+            amount.max(config.factions.min_dtr)
+        } else {
+            amount.min(self.max_dtr(config))
+        };
+        self.dtr = (clamped * 100.0).round() / 100.0;
+        self.dtr
+    }
+
+    /// `PlayerFaction#getDtrColor`: red at or below zero, yellow up to one.
+    pub fn dtr_color(&self) -> &'static str {
+        if self.dtr <= 0.0 {
+            "&c"
+        } else if self.dtr <= 1.0 {
+            "&e"
+        } else {
+            "&a"
+        }
+    }
+
+    /// `PlayerFaction#getDtrCharacter` (`frozen` = DTR freeze timer active).
+    pub fn dtr_character(&self, config: &Config, frozen: bool) -> String {
+        if self.dtr >= self.max_dtr(config) {
+            config.factions.dtr_full_character.clone()
+        } else if frozen {
+            config.factions.dtr_frozen_character.clone()
+        } else {
+            config.factions.dtr_regen_character.clone()
+        }
+    }
+
+    /// `PlayerFaction#getDtrString` = colour + raw double + character (`&a1.1◀`).
+    pub fn dtr_string(&self, config: &Config, frozen: bool) -> String {
+        format!(
+            "{}{}{}",
+            self.dtr_color(),
+            util::java_double(self.dtr),
+            self.dtr_character(config, frozen)
+        )
+    }
+
+    /// `PlayerFaction#getMaxDtrString` = maximum DTR rounded to one decimal.
+    pub fn max_dtr_string(&self, config: &Config) -> String {
+        util::java_double((self.max_dtr(config) * 10.0).round() / 10.0)
     }
 
     pub fn home_string(&self) -> String {

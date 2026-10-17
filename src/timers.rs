@@ -70,15 +70,20 @@ pub struct TimerManager {
     #[serde(default)]
     pub pvp_banked: BTreeMap<String, i64>,
     /// SOTW global timer expiry millis (`None` = timer not running). Not
-    /// serialised directly: the persisted form is `sotw_remaining_seconds`, so
-    /// server downtime does not consume the timer (port of
-    /// `SystemTimer#saveTimer`, which stores the remaining seconds).
+    /// serialised directly: the persisted form is the remaining milliseconds
+    /// (`sotw_remaining_millis`), so server downtime does not consume the timer
+    /// (port of `SystemTimer#saveTimer`, which stores the remaining time).
     #[serde(skip)]
     pub sotw_until: Option<i64>,
-    /// Remaining SOTW seconds as of the last save (see
-    /// [`TimerManager::sotw_capture_remaining`]).
+    /// Remaining SOTW millis as of the last save (see
+    /// [`TimerManager::sotw_capture_remaining`]). Millisecond precision keeps
+    /// the resumed countdown exact.
     #[serde(default)]
-    pub sotw_remaining_seconds: Option<u64>,
+    pub sotw_remaining_millis: i64,
+    /// Legacy pre-millisecond field (remaining **seconds**), read for
+    /// backwards compatibility but never written again.
+    #[serde(default, skip_serializing, rename = "sotw_remaining_seconds")]
+    pub sotw_remaining_seconds_legacy: Option<u64>,
 }
 
 impl TimerManager {
@@ -262,12 +267,11 @@ impl TimerManager {
         self.sotw_remaining() > 0
     }
 
-    /// Refreshes the serialised SOTW remaining seconds from the live expiry;
-    /// called by [`crate::state::save_all`] before writing `timers.json`.
+    /// Refreshes the serialised SOTW remaining millis from the live expiry;
+    /// called by [`crate::state::save_all`] / [`crate::state::save_hot`] before
+    /// writing `timers.json`.
     pub fn sotw_capture_remaining(&mut self) {
-        self.sotw_remaining_seconds = self
-            .sotw_until
-            .map(|until| ((until - crate::util::now_millis()).max(0) / 1000) as u64);
+        self.sotw_remaining_millis = self.sotw_remaining();
     }
 
     /// `SystemTimer#getCooldown` in millis (0 when not running).

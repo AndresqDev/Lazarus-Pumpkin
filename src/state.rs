@@ -151,11 +151,12 @@ pub fn init(data_folder: String) -> Result<(), String> {
 
     let userdata: UserdataManager = load_json(&data_folder, "userdata.json");
     let mut timers: TimerManager = load_json(&data_folder, "timers.json");
-    // Resume a persisted SOTW timer from its saved remaining seconds (the
-    // original `SystemTimer#loadTimer` reactivates from `timers.yml`).
-    if let Some(seconds) = timers.sotw_remaining_seconds
-        && seconds > 0
-    {
+    // Resume a persisted SOTW timer from its saved remaining milliseconds (the
+    // original `SystemTimer#loadTimer` reactivates from `timers.yml`). Old files
+    // stored whole seconds; both are accepted.
+    if timers.sotw_remaining_millis > 0 {
+        timers.sotw_until = Some(crate::util::now_millis() + timers.sotw_remaining_millis);
+    } else if let Some(seconds) = timers.sotw_remaining_seconds_legacy.filter(|seconds| *seconds > 0) {
         timers.sotw_until = Some(crate::util::now_millis() + seconds as i64 * 1000);
     }
     let holograms: std::collections::BTreeMap<String, Hologram> =
@@ -206,19 +207,71 @@ pub fn state() -> &'static RwLock<AppState> {
 }
 
 /// Persists every store to the data folder.
+///
+/// Stores are serialised under a short read lock and the files are written
+/// afterwards, outside the lock, through [`atomic_write`] — so gameplay is
+/// never blocked on file I/O and a crash mid-write can never leave a truncated
+/// store behind. `timers.json` (with millisecond precision), `factions.json`,
+/// `claims.json` and `userdata.json` are additionally flushed every 30 seconds
+/// by [`save_hot`], so a hard shutdown loses at most half a minute of state.
 pub fn save_all() {
-    let mut guard = state().write().unwrap();
-    // Store the SOTW timer as remaining seconds so downtime does not consume it.
-    guard.timers.sotw_capture_remaining();
+    persist(true);
+}
 
-    let folder = guard.data_folder.clone();
+/// Frequent flush of the gameplay-volatile stores: timers (per-player, faction
+/// freeze and the global SOTW timer, all stored as absolute epoch millis),
+/// factions, claims and userdata. The rarely-changed, admin-edited stores
+/// (`kits.json`, `holograms.json`) are only rewritten by [`save_all`].
+pub fn save_hot() {
+    persist(false);
+}
 
-    write_json(&folder, "factions.json", &guard.factions);
-    write_json(&folder, "claims.json", &guard.claims);
-    write_json(&folder, "userdata.json", &guard.userdata);
-    write_json(&folder, "timers.json", &guard.timers);
-    write_json(&folder, "holograms.json", &guard.holograms);
-    write_json(&folder, "kits.json", &guard.kits);
+fn persist(full: bool) {
+    // Refresh the persisted SOTW remainder from the live expiry first (small
+    // write-lock scope; the lock is never held across serialisation or I/O).
+    {
+        let mut guard = state().write().unwrap();
+        guard.timers.sotw_capture_remaining();
+    }
+
+    let (folder, payloads) = {
+        let guard = state().read().unwrap();
+        let folder = guard.data_folder.clone();
+
+        fn push<T: Serialize>(
+            payloads: &mut Vec<(&'static str, String)>,
+            name: &'static str,
+            value: &T,
+            pretty: bool,
+        ) {
+            let serialised = if pretty {
+                serde_json::to_string_pretty(value)
+            } else {
+                serde_json::to_string(value)
+            };
+            match serialised {
+                Ok(contents) => payloads.push((name, contents)),
+                Err(error) => tracing::warn!("failed to serialise {name}: {error}"),
+            }
+        }
+
+        let mut payloads: Vec<(&'static str, String)> = Vec::new();
+        push(&mut payloads, "timers.json", &guard.timers, false);
+        push(&mut payloads, "factions.json", &guard.factions, false);
+        push(&mut payloads, "claims.json", &guard.claims, false);
+        push(&mut payloads, "userdata.json", &guard.userdata, false);
+        if full {
+            // Compact JSON for the machine stores above; the kits/holograms
+            // files stay pretty-printed because admins hand-edit them.
+            push(&mut payloads, "kits.json", &guard.kits, true);
+            push(&mut payloads, "holograms.json", &guard.holograms, true);
+        }
+        (folder, payloads)
+    };
+
+    for (name, contents) in payloads {
+        atomic_write(&folder, name, &contents);
+    }
 }
 
 /// Reloads `config.toml` and `lang.toml` from disk.
@@ -254,6 +307,13 @@ pub fn sync_faction_yaml(config: &mut Config, raw: &RawConfigs) {
         config.factions.min_dtr = y.double("FACTION_DTR.MIN_DTR");
         config.factions.solo_faction_dtr = y.double("FACTION_DTR.SOLO_FACTION_DTR");
         config.factions.regen_per_minute = y.double("FACTION_DTR.REGEN_PER_MINUTE");
+        config.factions.freeze_duration_minutes = y.int("FACTION_DTR.FREEZE_DURATION").max(0) as u64;
+        config.factions.dtr_full_character = y.string("FACTION_DTR.DTR_CHARACTERS.FULL_DTR");
+        config.factions.dtr_regen_character = y.string("FACTION_DTR.DTR_CHARACTERS.REGENERATING");
+        config.factions.dtr_frozen_character = y.string("FACTION_DTR.DTR_CHARACTERS.FROZEN");
+    }
+    if y.has("FACTIONS_AUTO_SAVE") {
+        config.factions.auto_save_minutes = y.int("FACTIONS_AUTO_SAVE").max(1) as u64;
     }
     if y.has("FACTION_CLAIM") {
         config.factions.must_be_connected = y.bool("FACTION_CLAIM.MUST_BE_CONNECTED");
@@ -360,6 +420,7 @@ where
             Ok(value) => value,
             Err(error) => {
                 tracing::warn!("failed to parse {name}: {error}");
+                preserve_corrupt(folder, name);
                 T::default()
             }
         },
@@ -367,13 +428,44 @@ where
     }
 }
 
-fn write_json<T: Serialize>(folder: &str, name: &str, value: &T) {
-    match serde_json::to_string_pretty(value) {
-        Ok(contents) => {
-            if let Err(error) = std::fs::write(format!("{folder}/{name}"), contents) {
-                tracing::warn!("failed to write {name}: {error}");
+/// Renames a store that failed to parse out of the way (`<name>.corrupt-<ts>`)
+/// so the next save can never silently overwrite (and destroy) the bad file.
+fn preserve_corrupt(folder: &str, name: &str) {
+    let backup = format!("{folder}/{name}.corrupt-{}", crate::util::now_millis());
+    match std::fs::rename(format!("{folder}/{name}"), &backup) {
+        Ok(()) => tracing::warn!("corrupt {name} preserved as {backup}"),
+        Err(error) => tracing::warn!("failed to preserve corrupt {name}: {error}"),
+    }
+}
+
+/// Writes `contents` to `<folder>/<name>` atomically: a sibling `.tmp` file is
+/// written (and synced) first and then renamed over the target, which POSIX
+/// guarantees is atomic. A crash mid-write can therefore never truncate or
+/// corrupt an existing store.
+pub fn atomic_write(folder: &str, name: &str, contents: &str) {
+    use std::io::Write;
+
+    let path = format!("{folder}/{name}");
+    let tmp = format!("{path}.tmp");
+
+    let result = std::fs::File::create(&tmp).and_then(|mut file| {
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()
+    });
+
+    match result {
+        Ok(()) => {
+            if let Err(error) = std::fs::rename(&tmp, &path) {
+                // e.g. a filesystem without rename support: fall back to a
+                // plain write so saving still works.
+                tracing::warn!("atomic rename failed for {name}: {error}; writing directly");
+                let _ = std::fs::write(&path, contents);
+                let _ = std::fs::remove_file(&tmp);
             }
         }
-        Err(error) => tracing::warn!("failed to serialise {name}: {error}"),
+        Err(error) => {
+            tracing::warn!("failed to write {name}: {error}");
+            let _ = std::fs::remove_file(&tmp);
+        }
     }
 }

@@ -42,9 +42,10 @@ pub struct TabState {
     pub viewers: BTreeMap<String, BTreeMap<String, SlotSpec>>,
 }
 
-/// Writes the state to `<data_folder>/tab_state.json`.
+/// Writes the state to `<data_folder>/tab_state.json` (atomically, so the
+/// native companion never reads a half-written file).
 pub fn write(data_folder: &str, state: &TabState) {
     if let Ok(json) = serde_json::to_string(state) {
-        let _ = std::fs::write(format!("{data_folder}/tab_state.json"), json);
+        crate::state::atomic_write(data_folder, "tab_state.json", &json);
     }
 }

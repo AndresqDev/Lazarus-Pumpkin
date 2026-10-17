@@ -253,11 +253,16 @@ fn apply_faction_info(
                 .replace("<dtr>", "")
                 .replace("<home>", "");
 
-            let max = max_dtr(guard, faction);
+            let frozen = guard.timers.is_frozen(&faction.id);
             set(
                 lines,
                 start,
-                format!("{}{}&7/{}", first, dtr_string(guard, faction, max), java_double(max)),
+                format!(
+                    "{}{}&7/{}",
+                    first,
+                    faction.dtr_string(&guard.config, frozen),
+                    faction.max_dtr_string(&guard.config),
+                ),
             );
             set(lines, start + 1, format!("{second}{}", faction.home_string()));
         }
@@ -341,52 +346,4 @@ fn is_online(server: &Server, uuid: &str) -> bool {
     pumpkin_plugin_api::uuid::parse(uuid)
         .and_then(|id| server.get_player_by_uuid(id))
         .is_some()
-}
-
-/// `PlayerFaction.getMaxDtr()`.
-fn max_dtr(guard: &AppState, faction: &Faction) -> f64 {
-    let config = &guard.raw.config;
-    if faction.members.len() <= 1 {
-        config.double("FACTION_DTR.SOLO_FACTION_DTR")
-    } else {
-        (config.double("FACTION_DTR.DTR_PER_PLAYER") * faction.members.len() as f64)
-            .min(config.double("FACTION_DTR.MAX_DTR"))
-    }
-}
-
-/// `PlayerFaction.getDtrString()` = colour + dtr + character.
-fn dtr_string(guard: &AppState, faction: &Faction, max: f64) -> String {
-    let color = dtr_color(faction.dtr);
-    let character = dtr_character(guard, faction, max);
-    format!("{color}{}{character}", java_double(faction.dtr))
-}
-
-/// `PlayerFaction.getDtrColor()`.
-fn dtr_color(dtr: f64) -> &'static str {
-    if dtr <= 0.0 {
-        "&c"
-    } else if dtr <= 1.0 {
-        "&e"
-    } else {
-        "&a"
-    }
-}
-
-/// `PlayerFaction.getDtrCharacter()` (frozen state needs the freeze timer).
-fn dtr_character(guard: &AppState, faction: &Faction, max: f64) -> String {
-    let config = &guard.raw.config;
-    if faction.dtr >= max {
-        config.string("FACTION_DTR.DTR_CHARACTERS.FULL_DTR")
-    } else {
-        config.string("FACTION_DTR.DTR_CHARACTERS.REGENERATING")
-    }
-}
-
-/// Formats a double the way Java's `String.valueOf(double)` does (`1.0`, `6.5`).
-fn java_double(value: f64) -> String {
-    if value == value.trunc() {
-        format!("{value:.1}")
-    } else {
-        format!("{value}")
-    }
 }

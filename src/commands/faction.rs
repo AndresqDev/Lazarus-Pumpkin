@@ -1382,30 +1382,58 @@ fn show(sender: &CommandSender, server: &Server, uuid: &str, name: Option<String
         .iter()
         .filter_map(|id| guard.factions.get(id).map(|f| f.name.clone()))
         .collect();
-    let allies = if allies.is_empty() { lang.none.clone() } else { allies.join("&7, &f") };
 
-    let max_dtr = faction.max_dtr(&guard.config);
-    let dtr_color = if faction.dtr <= 0.0 { "&c" } else { "&a" };
+    // `showInformation` removes the announcement/auto-revive/lives lines for
+    // viewers outside the faction, and empty role/allies lines for everyone.
+    let is_same_faction = guard.factions.by_member(uuid).is_some_and(|f| f.id == faction.id);
+    let frozen = guard.timers.is_frozen(&faction.id);
+    let dtr_string = faction.dtr_string(&guard.config, frozen);
+    let max_dtr_string = faction.max_dtr_string(&guard.config);
     let raidable = if faction.is_raidable() { lang.yes.clone() } else { lang.no.clone() };
+    let has_role = |role: Role| faction.members.values().any(|m| m.role == role);
 
     let sep = format!("&7&m{}", " ".repeat(80));
 
     reply(sender, &sep);
     reply(sender, format!(" {display} &7[{online}/{}] &e- &eHome: &7{}", faction.members.len(), faction.home_string()));
-    reply(sender, format!(" &eAnnouncement: &7{}", faction.announcement.clone().unwrap_or_else(|| lang.none.clone())));
-    reply(sender, format!(" &eAuto revive: &7{}", if faction.auto_revive { lang.yes.clone() } else { lang.no.clone() }));
-    reply(sender, format!(" &eFaction lives: &7{}", faction.lives));
+    if is_same_faction
+        && let Some(announcement) =
+            faction.announcement.as_deref().filter(|announcement| !announcement.is_empty())
+    {
+        reply(sender, format!(" &eAnnouncement: &7{announcement}"));
+    }
+    if is_same_faction {
+        reply(sender, format!(" &eAuto revive: &7{}", if faction.auto_revive { lang.yes.clone() } else { lang.no.clone() }));
+        reply(sender, format!(" &eFaction lives: &7{}", faction.lives));
+    }
     reply(sender, format!(" &eTotal Kills: &7{}", faction.kills));
     reply(sender, format!(" &ePoints: &7{}", faction.points));
     reply(sender, format!(" &eKoTH captures: &7{}", faction.koths_capped));
     reply(sender, format!(" &eBalance: &7${}", faction.balance));
     reply(sender, format!(" &eLeader: {}", role_names(Role::Leader)));
-    reply(sender, format!(" &eCo-leaders: {}", role_names(Role::CoLeader)));
-    reply(sender, format!(" &eCaptains: {}", role_names(Role::Captain)));
-    reply(sender, format!(" &eMembers: {}", role_names(Role::Member)));
-    reply(sender, format!(" &eAllies: {allies}"));
-    reply(sender, format!(" &eRegenerating: &7{}", lang.none));
-    reply(sender, format!(" &eDTR: {dtr_color}{:.2}&7/&a{max_dtr:.2} &eRaidable: {raidable}", faction.dtr));
+    if has_role(Role::CoLeader) {
+        reply(sender, format!(" &eCo-leaders: {}", role_names(Role::CoLeader)));
+    }
+    if has_role(Role::Captain) {
+        reply(sender, format!(" &eCaptains: {}", role_names(Role::Captain)));
+    }
+    if has_role(Role::Member) {
+        reply(sender, format!(" &eMembers: {}", role_names(Role::Member)));
+    }
+    if !allies.is_empty() {
+        reply(sender, format!(" &eAllies: {}", allies.join("&7, &f")));
+    }
+    // The `<regen-time>` line only shows while the faction DTR is frozen.
+    if frozen {
+        reply(sender, format!(
+            " &eRegenerating: &7{}",
+            util::format_duration_words(guard.timers.freeze_remaining(&faction.id))
+        ));
+    }
+    reply(sender, format!(
+        " &eDTR: {dtr_string}&7/&a{max_dtr_string} &eRaidable: {}{raidable}",
+        faction.dtr_color()
+    ));
     reply(sender, &sep);
 }
 
@@ -1675,45 +1703,28 @@ fn admin_change_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs
         return;
     };
 
-    let (faction_name, members, max, current) = {
+    let (faction_name, members, current) = {
         let faction = guard.factions.get(&id).unwrap();
         (
             faction.name.clone(),
             faction.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
-            faction.max_dtr(&config),
             faction.dtr,
         )
     };
 
     let amount = if add { current + value } else { current - value };
-    let clamped = if amount < 0.0 {
-        amount.max(config.factions.min_dtr)
-    } else {
-        amount.min(max)
-    };
-    let new_dtr = (clamped * 100.0).round() / 100.0;
-    if let Some(faction) = guard.factions.get_mut(&id) {
-        faction.dtr = new_dtr;
-    }
+    let new_dtr = guard
+        .factions
+        .get_mut(&id)
+        .map(|faction| faction.set_dtr(&config, amount))
+        .unwrap_or(amount);
 
-    let color = if new_dtr <= 0.0 {
-        "&c"
-    } else if new_dtr <= 1.0 {
-        "&e"
-    } else {
-        "&a"
-    };
-    let character = if new_dtr >= max {
-        guard.raw.config.string("FACTION_DTR.DTR_CHARACTERS.FULL_DTR")
-    } else {
-        guard.raw.config.string("FACTION_DTR.DTR_CHARACTERS.REGENERATING")
-    };
-    let number = if new_dtr == new_dtr.trunc() {
-        format!("{new_dtr:.1}")
-    } else {
-        format!("{new_dtr}")
-    };
-    let dtr_string = format!("{color}{number}{character}");
+    let frozen = guard.timers.is_frozen(&id);
+    let dtr_string = guard
+        .factions
+        .get(&id)
+        .map(|faction| faction.dtr_string(&config, frozen))
+        .unwrap_or_else(|| util::java_double(new_dtr));
 
     let sender_message = format!(
         "{prefix}{}",
@@ -3605,14 +3616,50 @@ fn admin_set_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
 
     let mut guard = state().write().unwrap();
     let config = guard.config.clone();
+    let prefix = guard.raw.language.string("FACTION_PREFIX");
+    let sender_tpl = guard.raw.language.string("FACTIONS.SET_DTR_COMMAND.CHANGED_SENDER");
+    let faction_tpl = guard.raw.language.string("FACTIONS.SET_DTR_COMMAND.CHANGED_FACTION");
     let Some(id) = guard.factions.by_name(&name).map(|f| f.id.clone()) else {
         reply(sender, util::replace(&guard.lang.faction_doesnt_exist, "<argument>", &name));
         return;
     };
+    let (faction_name, members) = {
+        let faction = guard.factions.get(&id).unwrap();
+        (
+            faction.name.clone(),
+            faction.members.values().map(|m| m.uuid.clone()).collect::<Vec<_>>(),
+        )
+    };
     if let Some(faction) = guard.factions.get_mut(&id) {
-        faction.dtr = value.clamp(config.factions.min_dtr, config.factions.max_dtr);
+        faction.set_dtr(&config, value);
     }
-    reply(sender, format!("&eSet &c{name}&e's DTR to &c{value:.2}&e."));
+    let frozen = guard.timers.is_frozen(&id);
+    let dtr_string = guard
+        .factions
+        .get(&id)
+        .map(|faction| faction.dtr_string(&config, frozen))
+        .unwrap_or_default();
+
+    let sender_message = format!(
+        "{prefix}{}",
+        util::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<value>", &dtr_string)])
+    );
+    let faction_message = format!(
+        "{prefix}{}",
+        util::replace_all(
+            &faction_tpl,
+            &[("<player>", &sender.get_name()), ("<dtr>", &dtr_string)]
+        )
+    );
+
+    for uuid in members {
+        if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
+            && let Some(player) = server.get_player_by_uuid(id)
+        {
+            core::send(&player, &faction_message);
+        }
+    }
+    reply(sender, sender_message);
 }
 
 fn admin_set_int(sender: &CommandSender, server: &Server, args: &ConsumedArgs, field: AdminField) {
