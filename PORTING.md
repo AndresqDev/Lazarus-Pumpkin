@@ -74,7 +74,7 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `hologram.*` | ✅ | `TextDisplay` entities + `/hologram` commands |
 | `handlers.chat.*` | 🟡 | faction/ally chat + format; blocked commands handled |
 | `handlers.timer.*` | ✅ | combat tag, pvp protection (banked/paused in safezones), SOTW timer + hide-players |
-| `handlers.block.*` (auto-smelt, cobweb, crowbar, filter, subclaim, found ore) | ⬜ | |
+| `handlers.block.*` (auto-smelt, cobweb, counter, crowbar, filter, subclaim, found ore) | 🟡 | auto-smelt (ingot replacement in the host drop event), cobweb remover (1s task, 50/cycle), disabled block placement, found ore (vein count capped at 50, per-player setting + `lazarus.foundore.receive`) ported; subclaim + crowbar next; filter needs a player pickup event the host does not fire |
 | `handlers.death.*` (death messages, death signs, head drop, stattrak) | ⬜ | |
 | `handlers.limiter.*` (enchant/potion/entity limits) | ⬜ | |
 | `handlers.logger.*` (combat logger) | ⬜ | |

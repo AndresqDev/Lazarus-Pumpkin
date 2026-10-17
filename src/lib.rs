@@ -18,6 +18,7 @@ mod classes;
 mod commands;
 mod config;
 mod core;
+mod blockhandlers;
 mod deathban;
 mod factions;
 mod glass;
@@ -92,7 +93,9 @@ impl Plugin for LazarusPlugin {
         Ok(())
     }
 
-    fn on_unload(&self, _context: Context) -> pumpkin_plugin_api::Result<()> {
+    fn on_unload(&self, context: Context) -> pumpkin_plugin_api::Result<()> {
+        // `CobwebRemoveHandler#disable`: put every tracked cobweb back to air.
+        blockhandlers::clear_cobwebs(&context.get_server());
         state::save_all();
         tracing::info!("Lazarus HCF core disabled; data saved.");
         Ok(())

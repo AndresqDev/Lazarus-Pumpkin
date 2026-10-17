@@ -256,6 +256,12 @@ impl EventHandler<BlockPlaceEvent> for BlockPlaceListener {
             event.block_pos.z,
         );
 
+        // `ignoreCancelled`: the disabled-placement listener (LOWEST priority in
+        // the original) already denied this placement with its own message.
+        if event.cancelled {
+            return event;
+        }
+
         if !check_player_build(player, &world, event.block_pos.x, event.block_pos.z, None) {
             event.cancelled = true;
             let message = deny_message(player, &world, event.block_pos.x, event.block_pos.z, false);

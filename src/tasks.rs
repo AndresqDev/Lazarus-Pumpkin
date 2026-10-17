@@ -26,6 +26,9 @@ pub fn start(context: &Context) {
     });
     // Client-side glass walls refresh a bit faster, like the original 100ms loop.
     context.schedule_repeating_task(10, 10, |server| glass_tick(&server));
+    // Block gameplay handlers (`handlers.block`): one second passes of the
+    // cobweb remover and the autosmel replacement queue.
+    context.schedule_repeating_task(20, 20, |server| crate::blockhandlers::tick_second(&server));
     // Re-send all active fake blocks frequently (fast resync of the render).
     context.schedule_repeating_task(2, 2, |server| {
         state().write().unwrap().glass.refresh_all(&server);

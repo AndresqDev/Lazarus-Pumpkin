@@ -151,4 +151,20 @@ impl ConfigFile {
     pub fn value(&self, path: &str) -> Option<&Value> {
         self.lookup(path)
     }
+
+    /// Keys of the top-level mapping (`items.yml` name -> id lookups).
+    pub fn root_keys(&self) -> Vec<String> {
+        match &self.value {
+            Value::Mapping(map) => map
+                .keys()
+                .filter_map(|k| match k {
+                    Value::String(s) => Some(s.clone()),
+                    Value::Number(n) => Some(n.to_string()),
+                    Value::Bool(b) => Some(b.to_string()),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
 }

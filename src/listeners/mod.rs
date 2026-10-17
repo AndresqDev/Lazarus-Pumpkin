@@ -13,6 +13,8 @@ pub mod player;
 use pumpkin_plugin_api::events::EventPriority;
 use pumpkin_plugin_api::Context;
 
+use crate::blockhandlers;
+
 /// Registers every ported event handler.
 pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(player::JoinListener, EventPriority::Normal, true)?;
@@ -40,7 +42,19 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(entity::PotionSplashListener, EventPriority::High, true)?;
 
     context.register_event_handler(block::BlockBreakListener, EventPriority::High, true)?;
+    // Disabled block placement used LOWEST priority in the original: it runs
+    // before the territory listener so the build denial is skipped
+    // (`ignoreCancelled`) and the player only sees this message.
+    context.register_event_handler(blockhandlers::DisabledPlacementListener, EventPriority::Normal, true)?;
     context.register_event_handler(block::BlockPlaceListener, EventPriority::High, true)?;
+    // Block gameplay handlers (`handlers.block.*`), all `ignoreCancelled` in the
+    // original: they run after the territory listeners and skip denied actions.
+    context.register_event_handler(blockhandlers::AutoSmeltBreakListener, EventPriority::Normal, true)?;
+    context.register_event_handler(blockhandlers::AutoSmeltDropListener, EventPriority::Normal, true)?;
+    context.register_event_handler(blockhandlers::CobwebBreakListener, EventPriority::Normal, true)?;
+    context.register_event_handler(blockhandlers::CobwebPlaceListener, EventPriority::Normal, true)?;
+    context.register_event_handler(blockhandlers::FoundOrePlaceListener, EventPriority::Normal, true)?;
+    context.register_event_handler(blockhandlers::FoundOreBreakListener, EventPriority::Normal, true)?;
     // Use protection must run before the wand listener (see `BlockInteractListener`).
     context.register_event_handler(block::BlockInteractListener, EventPriority::High, true)?;
     context.register_event_handler(block::BucketEmptyListener, EventPriority::High, true)?;

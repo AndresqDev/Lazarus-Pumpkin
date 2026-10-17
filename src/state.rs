@@ -124,6 +124,18 @@ pub struct AppState {
     /// Transient: players whose respawn landed in the wrong world (legacy
     /// respawn point in another dimension) to teleport to the spawn next tick.
     pub respawn_fixes: std::collections::BTreeSet<String>,
+    /// Transient: placed cobwebs awaiting the remover (`handlers.block`,
+    /// key -> expiry millis).
+    pub cobwebs: std::collections::BTreeMap<(String, i32, i32, i32), i64>,
+    /// Transient: diamond ores marked as placed or already counted
+    /// (`FoundOreHandler`).
+    pub found_ore_marks: std::collections::BTreeSet<(String, i32, i32, i32)>,
+    /// Transient: autosmel drop replacements awaiting the host drop event
+    /// (key -> (ingot key, expiry millis)).
+    pub autosmel_pending: std::collections::BTreeMap<(String, i32, i32, i32), (String, i64)>,
+    /// `ChatControlHandler#isShowFoundOre` (default on; the chat-control command
+    /// lands with the chat sector).
+    pub chat_control_show_found_ore: bool,
     /// Transient: players kicked with the deathban message at 1s after death
     /// (port of `Tasks.syncLater(() -> kickPlayer(...), 20L)`).
     pub pending_kicks: Vec<PendingKick>,
@@ -219,6 +231,10 @@ pub fn init(data_folder: String) -> Result<(), String> {
             spawn_centers: std::collections::BTreeMap::new(),
             protection_ejects: std::collections::BTreeSet::new(),
             respawn_fixes: std::collections::BTreeSet::new(),
+            cobwebs: std::collections::BTreeMap::new(),
+            found_ore_marks: std::collections::BTreeSet::new(),
+            autosmel_pending: std::collections::BTreeMap::new(),
+            chat_control_show_found_ore: true,
             pending_kicks: Vec::new(),
             deathban_confirm: std::collections::BTreeSet::new(),
             last_damagers: std::collections::BTreeMap::new(),
