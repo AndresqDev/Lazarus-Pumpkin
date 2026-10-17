@@ -1,6 +1,7 @@
 //! Command registration.
 
 pub mod base;
+pub mod customtimer;
 pub mod economy;
 pub mod faction;
 pub mod hologram;
@@ -40,6 +41,7 @@ pub fn register_op_permission(context: &Context, node: &str, description: &str) 
 /// Registers every command tree.
 pub fn register(context: &Context) -> Result<(), String> {
     base::register(context)?;
+    customtimer::register(context)?;
     economy::register(context)?;
     faction::register(context)?;
     lives::register(context)?;

@@ -68,6 +68,7 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `userdata.Userdata`, `UserdataManager` | ✅ | JSON persistence (Mongo dropped; sandbox only exposes the data folder) |
 | `timer.*` (combat tag, apple, enderpearl, pvp prot, home, stuck, logout) | ✅ | timer storage, scoreboard + consumption hooks (pearl/apple) |
 | `timer.cooldown.DtrRegenTimer` | ✅ | one `REGEN_PER_MINUTE` step per minute; `setDtr` clamp + 2-decimal rounding |
+| `timer.custom.CustomTimer` | ✅ | `/customtimer start/cancel/list` + sidebar lines; stored as expiry millis (the original was memory-only) |
 | `scoreboard.*` | ✅ | config template (`scoreboard.toml`) + placeholders + teams |
 | `tab.*` | ✅ | header/footer + per-player name/order/latency (`tab.toml`) |
 | `hologram.*` | ✅ | `TextDisplay` entities + `/hologram` commands |
@@ -156,8 +157,9 @@ context):
 Recently completed: client-side block render (`glass.rs`), selection wand,
 scoreboard placeholders, tab list, enderpearl/gapple cooldowns, deathbans + lives,
 admin faction subcommands, vanish/staff mode, holograms, kits, PvP protection
-phase timers (safe-time banking, `/pvp`, attacker-side denial, `/f home` gate)
-and the SOTW system (`/sotw`, damage immunity, safezone hiding, scoreboard line).
+phase timers (safe-time banking, `/pvp`, attacker-side denial, `/f home` gate),
+the SOTW system (`/sotw`, damage immunity, safezone hiding, scoreboard line)
+and custom timers (`/customtimer`, sidebar lines).
 
 Still to port (in rough priority order):
 
@@ -201,6 +203,7 @@ src/
 ├── commands/
 │   ├── mod.rs          registration helpers
 │   ├── base.rs         /lazarus + setting toggles
+│   ├── customtimer.rs  /customtimer (start/cancel/list)
 │   ├── faction.rs      /f command tree (+ admin subcommands)
 │   ├── lives.rs        /lives
 │   ├── staff.rs        /vanish, /staffmode

@@ -269,6 +269,20 @@ fn build_lines(guard: &AppState, player: &Player, server: &Server, uuid: &str) -
         b.add_line("&5");
     }
 
+    // ---- Custom timers (port of `CustomTimer#handleScoreboardUpdate`; the
+    // original applies them right after the claim line) ----
+    {
+        let now = crate::util::now_millis();
+        for timer in &guard.timers.custom {
+            let remaining = timer.expiry - now;
+            if remaining > 0 {
+                // The stored placeholder already carries its trailing space
+                // (`placeholder + " "` in the original).
+                b.add(&timer.placeholder, &util::format_clock(remaining));
+            }
+        }
+    }
+
     // ---- Timers (applyScoreboardTimerPlaceholders), in TimerManager order ----
     for (placeholder, timer_type) in [
         (&s.pvp_protection, TimerType::PvpProtection),

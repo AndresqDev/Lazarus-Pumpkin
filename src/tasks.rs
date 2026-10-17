@@ -80,6 +80,9 @@ pub fn start(context: &Context) {
 fn tick(server: &Server) {
     let expired: Vec<(String, TimerType)> = {
         let mut guard = state().write().unwrap();
+        // Expired custom timers are removed by their scheduled task in the
+        // original (`CustomTimer#scheduleExpiry`).
+        guard.timers.purge_expired_custom();
         guard.timers.purge_expired()
     };
 

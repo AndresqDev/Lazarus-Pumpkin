@@ -221,6 +221,21 @@ lang! {
     sotw_player_usage_enable = " &c/sotw enable &f- &7Disable SOTW protection";
     sotw_player_usage_time = " &c/sotw time &f- &7Check SOTW time left";
     sotw_player_usage_footer = "&7&m                                                           ";
+
+    // ---- Custom timers (port of `CUSTOM_TIMER_COMMAND`) ----
+    custom_timer_usage_header = "&7&m                                                                ";
+    custom_timer_usage_title = " &6&lCustom timer management";
+    custom_timer_usage_start = "  &e/customtimer start <name> <placeholder> <time>";
+    custom_timer_usage_cancel = "  &e/customtimer cancel <name>";
+    custom_timer_usage_list = "  &e/customtimer list";
+    custom_timer_usage_footer = "&7&m                                                                ";
+    custom_timer_list_header = "&7&m                                                           ";
+    custom_timer_list_title = " &6&lActive custom timers";
+    custom_timer_list_footer = "&7&m                                                           ";
+    custom_timer_list_format = " &f<id>. &7<timerName> &e- <placeholder>";
+    custom_timer_not_running = "&eTimer with name &c<name> &eis not running!";
+    custom_timer_started = "<timerName> &etimer has been started by &a<player>&e.";
+    custom_timer_stopped = "<timerName> &etimer has been stopped by &c<player>&e.";
     home_warmup = "&eTeleporting to your faction home in &c<time>&e.";
     home_warmup_cancelled = "&cTeleport cancelled.";
     stuck_warmup = "&eYou will be teleported to &csafe location &ein &b<time>&e.";

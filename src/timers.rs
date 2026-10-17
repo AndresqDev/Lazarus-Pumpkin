@@ -54,6 +54,21 @@ pub struct PendingAction {
     pub target: Option<Location>,
 }
 
+/// A running custom (global) timer — port of `CustomTimer.CustomTimerData`
+/// (`name` + scoreboard `placeholder` + scheduled expiry). The original kept a
+/// `ScheduledFuture`; we store the absolute expiry millis so the timer can be
+/// persisted and survive a restart.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomTimer {
+    /// Internal id (`/customtimer start <name> ...`); `cancel`/`list` use it.
+    pub name: String,
+    /// Scoreboard text, stored with a trailing space exactly like the
+    /// original's `placeholder + " "`; the line renders `placeholder + time`.
+    pub placeholder: String,
+    /// Expiry in unix milliseconds.
+    pub expiry: i64,
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct TimerManager {
     /// uuid -> (timer -> expiry millis)
@@ -62,8 +77,12 @@ pub struct TimerManager {
     pub pending: BTreeMap<String, PendingAction>,
     /// faction id -> DTR freeze expiry millis
     pub faction_freeze: BTreeMap<String, i64>,
-    /// custom timer name -> (uuid -> expiry millis)
-    pub custom: BTreeMap<String, BTreeMap<String, i64>>,
+    /// Running custom timers, in insertion order (original
+    /// `List<CustomTimerData>`). The legacy (never-populated)
+    /// `{name: {uuid: expiry}}` map shape is discarded on load by
+    /// [`de_custom_timers`].
+    #[serde(default, deserialize_with = "de_custom_timers")]
+    pub custom: Vec<CustomTimer>,
     /// PvP protection paused/banked (uuid -> remaining millis). Port of
     /// `PvpProtTimer#paused`: while inside a safezone (or offline) protection
     /// time does not tick.
@@ -178,17 +197,31 @@ impl TimerManager {
             .unwrap_or(0)
     }
 
-    pub fn activate_custom(&mut self, name: &str, uuid: &str, seconds: u64) {
+    /// `CustomTimer#activate`: registers a custom timer, storing its
+    /// scoreboard text with a trailing space (original `placeholder + " "`).
+    /// Unlike the original (which stacked a duplicate entry) restarting the
+    /// same name replaces the previous timer.
+    pub fn activate_custom(&mut self, name: &str, placeholder: &str, seconds: u64) {
         let expiry = crate::util::now_millis() + (seconds as i64 * 1000);
-        self.custom.entry(name.to_string()).or_default().insert(uuid.to_string(), expiry);
+        self.custom.retain(|timer| !timer.name.eq_ignore_ascii_case(name));
+        self.custom.push(CustomTimer {
+            name: name.to_string(),
+            placeholder: format!("{placeholder} "),
+            expiry,
+        });
     }
 
-    pub fn custom_remaining(&self, name: &str, uuid: &str) -> i64 {
-        self.custom
-            .get(name)
-            .and_then(|map| map.get(uuid))
-            .map(|expiry| (expiry - crate::util::now_millis()).max(0))
-            .unwrap_or(0)
+    /// `CustomTimer#removeByName(name, true)`: removes the first timer matching
+    /// `name` (case-insensitively); `None` when it is not running.
+    pub fn cancel_custom(&mut self, name: &str) -> Option<CustomTimer> {
+        let index = self.custom.iter().position(|timer| timer.name.eq_ignore_ascii_case(name))?;
+        Some(self.custom.remove(index))
+    }
+
+    /// `CustomTimer#scheduleExpiry`: drops every timer whose delay ran out.
+    pub fn purge_expired_custom(&mut self) {
+        let now = crate::util::now_millis();
+        self.custom.retain(|timer| timer.expiry > now);
     }
 
     // -----------------------------------------------------------------------
@@ -303,4 +336,27 @@ impl TimerManager {
         self.faction_freeze.retain(|_, expiry| *expiry > now);
         expired
     }
+}
+
+/// Tolerant loader for [`TimerManager::custom`]: reads the current array shape
+/// and discards the legacy (never-populated) `{name: {uuid: expiry}}` map so
+/// pre-port `timers.json` files keep loading. Malformed entries are dropped
+/// individually instead of failing the whole timer store.
+fn de_custom_timers<'de, D>(deserializer: D) -> Result<Vec<CustomTimer>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let serde_json::Value::Array(items) = value else {
+        return Ok(Vec::new());
+    };
+
+    let mut timers = Vec::with_capacity(items.len());
+    for item in items {
+        match serde_json::from_value(item) {
+            Ok(timer) => timers.push(timer),
+            Err(error) => tracing::warn!("dropping malformed custom timer: {error}"),
+        }
+    }
+    Ok(timers)
 }
