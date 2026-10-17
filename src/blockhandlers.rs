@@ -1,23 +1,26 @@
 //! Block gameplay handlers — port of `me.qiooip.lazarus.handlers.block`.
 //!
 //! Covered here: auto smelt (`AutoSmeltHandler`), the cobweb remover
-//! (`CobwebRemoveHandler`), disabled block placement (`DisabledBlocksHandler`)
-//! and the found-ore announcements (`FoundOreHandler`). Subclaims
-//! (`SubclaimHandler`) and the crowbar (`CrowbarHandler`) belong to the same
-//! original package and follow in this module.
+//! (`CobwebRemoveHandler`), disabled block placement (`DisabledBlocksHandler`),
+//! the found-ore announcements (`FoundOreHandler`) and subclaims
+//! (`SubclaimHandler`). The crowbar (`CrowbarHandler`) belongs to the same
+//! original package and follows in this module.
 
 use std::collections::BTreeSet;
 
+use pumpkin_plugin_api::block_entity::BlockEntityType;
 use pumpkin_plugin_api::common::{BlockPos, GameMode, Hand};
 use pumpkin_plugin_api::enchantments_wit::Enchantment;
 use pumpkin_plugin_api::events::{
     BlockBreakEvent, BlockDropItemEvent, BlockPlaceEvent, EventData, EventHandler,
+    HopperInventorySearchEvent, InteractAction, PlayerInteractEvent, SignChangeEvent,
 };
 use pumpkin_plugin_api::permission::PermissionLevel;
 use pumpkin_plugin_api::world::BlockFlags;
-use pumpkin_plugin_api::{ItemStack, Player, Server};
+use pumpkin_plugin_api::{ItemStack, Player, Server, World};
 
-use crate::core;
+use crate::core::{self, Territory};
+use crate::factions::types::Role;
 use crate::state::state;
 use crate::util;
 
@@ -570,3 +573,605 @@ fn count_diamonds(
 
     count
 }
+
+// ---------------------------------------------------------------------------
+// Subclaims (`SubclaimHandler`).
+// ---------------------------------------------------------------------------
+//
+// Deviation from the original: the host ignores `SignChangeEvent#line` edits
+// and has no way to broadcast a server-side sign rewrite back to clients
+// (`set_front_text` changes the block entity but sends no update packet, and
+// the edit packet's lines are applied verbatim after the event). The port
+// therefore keeps the text the player typed: the title/role checks accept the
+// typed `[subclaim]`/`[s]` titles and the plain `leader`/`coleader`/`captain`/
+// `officer` keywords next to the configured values, and an empty second line is
+// emulated with a creator registry instead of being filled with the name.
+
+/// Subclaim signs carry a role keyword (or player names) on their second line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SubclaimRole {
+    Leader,
+    CoLeader,
+    Captain,
+    Named,
+}
+
+fn is_subclaimable(name: &str) -> bool {
+    matches!(name, "minecraft:chest" | "minecraft:trapped_chest")
+}
+
+fn is_standing_sign(name: &str) -> bool {
+    name.starts_with("minecraft:")
+        && name.ends_with("_sign")
+        && !name.ends_with("_wall_sign")
+        && !name.contains("hanging")
+}
+
+fn is_wall_sign(name: &str) -> bool {
+    name.starts_with("minecraft:") && name.ends_with("_wall_sign") && !name.contains("hanging")
+}
+
+/// Plain text of a JSON text component (the client sends sign lines as
+/// components, e.g. `{"text":"[subclaim]"}`).
+fn component_text(raw: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return raw.to_string();
+    };
+
+    let mut out = String::new();
+    collect_component_text(&value, &mut out);
+    out
+}
+
+fn collect_component_text(value: &serde_json::Value, out: &mut String) {
+    match value {
+        serde_json::Value::String(text) => out.push_str(text),
+        serde_json::Value::Array(parts) => {
+            for part in parts {
+                collect_component_text(part, out);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::String(text)) = map.get("text") {
+                out.push_str(text);
+            }
+            if let Some(extra) = map.get("extra") {
+                collect_component_text(extra, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Strips legacy formatting codes and lowercases: the original compared the
+/// `§`-translated stored lines with the translated config values.
+fn normalized(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars();
+
+    while let Some(c) = chars.next() {
+        if c == '§' || c == '&' {
+            chars.next();
+            continue;
+        }
+        out.extend(c.to_lowercase());
+    }
+
+    out
+}
+
+/// `ItemUtils#shortenName`: sign lines only fit 15 characters.
+fn shorten_name(name: &str) -> &str {
+    if name.chars().count() > 15 {
+        let end = name.char_indices().nth(15).map(|(index, _)| index).unwrap_or(name.len());
+        &name[..end]
+    } else {
+        name
+    }
+}
+
+/// `SubclaimHandler#getSign`: the *first* sign attached to the chest (top, then
+/// north/east/south/west). The caller checks the title, so a decoration sign
+/// hides the side faces exactly like in the original.
+fn attached_sign(world: &World, chest: BlockPos) -> Option<(BlockPos, Vec<String>)> {
+    let up = BlockPos { x: chest.x, y: chest.y + 1, z: chest.z };
+    if is_standing_sign(&world.get_block_state(up).block_name)
+        && let Some(lines) = sign_lines(world, up)
+    {
+        return Some((up, lines));
+    }
+
+    // A wall sign's `facing` points at the block it is mounted on.
+    for (dx, dz, facing) in [
+        (0i32, -1i32, "north"),
+        (1, 0, "east"),
+        (0, 1, "south"),
+        (-1, 0, "west"),
+    ] {
+        let pos = BlockPos { x: chest.x + dx, y: chest.y, z: chest.z + dz };
+        if wall_sign_faces(world, pos, facing)
+            && let Some(lines) = sign_lines(world, pos)
+        {
+            return Some((pos, lines));
+        }
+    }
+
+    None
+}
+
+fn wall_sign_faces(world: &World, pos: BlockPos, facing: &str) -> bool {
+    let state = world.get_block_state(pos);
+
+    is_wall_sign(&state.block_name)
+        && state
+            .properties
+            .iter()
+            .any(|(key, value)| key == "facing" && value == facing)
+}
+
+/// Front text of the sign at `pos` (only signs carry one here).
+fn sign_lines(world: &World, pos: BlockPos) -> Option<Vec<String>> {
+    match world.get_block_entity(pos)? {
+        BlockEntityType::SignBlockEntity(sign) => Some(
+            sign.get_front_text()
+                .messages
+                .iter()
+                .map(|message| component_text(message))
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+fn is_subclaim_title(line: &str) -> bool {
+    let value = normalized(line);
+    if value == "[subclaim]" || value == "[s]" {
+        return true;
+    }
+
+    let title = state().read().unwrap().raw.config.string("SUBCLAIMS.SIGN_TITLE");
+    value == normalized(&title)
+}
+
+/// `SubclaimHandler#getSubclaim`: the lines of the first attached sign when it
+/// carries the title. Double chests also look at the neighbouring half.
+fn get_subclaim(world: &World, chest_pos: BlockPos) -> Option<(BlockPos, Vec<String>)> {
+    if !is_subclaimable(&world.get_block_state(chest_pos).block_name) {
+        return None;
+    }
+
+    let mut halves = vec![chest_pos];
+    let name = world.get_block_state(chest_pos).block_name;
+    for (dx, dz) in [(0i32, 1i32), (0, -1), (1, 0), (-1, 0)] {
+        let pos = BlockPos { x: chest_pos.x + dx, y: chest_pos.y, z: chest_pos.z + dz };
+        if world.get_block_state(pos).block_name == name {
+            halves.push(pos);
+            break;
+        }
+    }
+
+    for half in halves {
+        let Some((sign_pos, lines)) = attached_sign(world, half) else {
+            continue;
+        };
+
+        if lines.first().is_some_and(|line| is_subclaim_title(line)) {
+            return Some((sign_pos, lines));
+        }
+    }
+
+    None
+}
+
+/// `SubclaimHandler#getBlockAttachedTo`: the block a sign hangs on (below for
+/// standing signs, `facing` for wall signs).
+fn attached_block(world: &World, sign_pos: BlockPos) -> BlockPos {
+    let state = world.get_block_state(sign_pos);
+
+    if is_standing_sign(&state.block_name) {
+        return BlockPos { x: sign_pos.x, y: sign_pos.y - 1, z: sign_pos.z };
+    }
+
+    if is_wall_sign(&state.block_name)
+        && let Some(facing) = state
+            .properties
+            .iter()
+            .find(|(key, _)| key == "facing")
+            .map(|(_, value)| value.as_str())
+    {
+        let (dx, dz) = match facing {
+            "north" => (0, -1),
+            "south" => (0, 1),
+            "east" => (1, 0),
+            "west" => (-1, 0),
+            _ => (0, 0),
+        };
+
+        return BlockPos { x: sign_pos.x + dx, y: sign_pos.y, z: sign_pos.z + dz };
+    }
+
+    // The original's fallback for non-`Attachable` sign data.
+    BlockPos { x: sign_pos.x, y: sign_pos.y - 1, z: sign_pos.z }
+}
+
+fn subclaim_config() -> (String, String, String) {
+    let guard = state().read().unwrap();
+    (
+        guard.raw.config.string("SUBCLAIMS.LEADER_ONLY"),
+        guard.raw.config.string("SUBCLAIMS.CO_LEADERS_ONLY"),
+        guard.raw.config.string("SUBCLAIMS.CAPTAINS_ONLY"),
+    )
+}
+
+/// Which restriction the sign asks for (second line).
+fn subclaim_role(line1: &str, config: &(String, String, String)) -> SubclaimRole {
+    let value = normalized(line1);
+
+    if value == normalized(&config.0) {
+        SubclaimRole::Leader
+    } else if value == normalized(&config.1) || value == "coleader" {
+        SubclaimRole::CoLeader
+    } else if value == normalized(&config.2) || value == "captain" || value == "officer" {
+        SubclaimRole::Captain
+    } else {
+        SubclaimRole::Named
+    }
+}
+
+/// The role/name check (`containsName` + the per-role comparisons). `creator`
+/// emulates the original's auto-filled second line (an empty line stores the
+/// creator through the sign registry).
+fn subclaim_allows(
+    lines: &[String],
+    viewer_role: Role,
+    viewer_name: &str,
+    creator: Option<&str>,
+) -> bool {
+    let line1 = lines.get(1).map(String::as_str).unwrap_or("");
+    let config = subclaim_config();
+
+    match subclaim_role(line1, &config) {
+        SubclaimRole::Leader => viewer_role == Role::Leader,
+        SubclaimRole::CoLeader => viewer_role.is_at_least(Role::CoLeader),
+        SubclaimRole::Captain => viewer_role.is_at_least(Role::Captain),
+        SubclaimRole::Named => {
+            let short = normalized(shorten_name(viewer_name));
+
+            for index in 1..=3 {
+                if let Some(line) = lines.get(index)
+                    && !line.is_empty()
+                    && normalized(line) == short
+                {
+                    return true;
+                }
+            }
+
+            if line1.is_empty()
+                && let Some(creator) = creator
+                && normalized(shorten_name(creator)) == short
+            {
+                return true;
+            }
+
+            viewer_role.is_at_least(Role::Captain)
+        }
+    }
+}
+
+/// Access check shared by the open and break handlers: `true` when the viewer
+/// is denied. Factionless players, foreign or raidable claims and an active
+/// EOTW event leave the chest unprotected, like the original.
+fn subclaim_denied(
+    world_name: &str,
+    pos: BlockPos,
+    viewer: &Player,
+    lines: &[String],
+    sign_pos: BlockPos,
+) -> bool {
+    let uuid = core::uuid_of(viewer);
+
+    let (role, creator) = {
+        let guard = state().read().unwrap();
+
+        if guard.eotw_active {
+            return false;
+        }
+
+        let Some(player_faction) = guard.factions.by_member(&uuid) else {
+            return false;
+        };
+        let faction_id = player_faction.id.clone();
+        let role = player_faction.members.get(&uuid).map(|member| member.role).unwrap_or_default();
+
+        match core::territory_at_guard(&guard, world_name, pos.x, pos.z) {
+            Territory::Faction(owner_id) if owner_id == faction_id => {
+                let raidable = guard
+                    .factions
+                    .get(&owner_id)
+                    .map(|faction| faction.is_raidable())
+                    .unwrap_or(false);
+
+                if raidable {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+
+        let creator = guard
+            .subclaim_creators
+            .get(&(world_name.to_string(), sign_pos.x, sign_pos.y, sign_pos.z))
+            .cloned();
+
+        (role, creator)
+    };
+
+    !subclaim_allows(lines, role, &core::name_of(viewer), creator.as_deref())
+}
+
+fn send_subclaim_message(player: &Player, key: &str) {
+    let guard = state().read().unwrap();
+    let prefix = guard.raw.language.string("PREFIX");
+    let message = guard.raw.language.string(key);
+    drop(guard);
+
+    core::send(player, &format!("{prefix}{message}"));
+}
+
+/// Port of `SubclaimHandler#onSignChange`. The success paths leave the event
+/// untouched (the host applies the typed lines; see the deviation note above).
+pub struct SubclaimSignChangeListener;
+
+impl EventHandler<SignChangeEvent> for SubclaimSignChangeListener {
+    fn handle(&self, server: Server, mut event: EventData<SignChangeEvent>) -> EventData<SignChangeEvent> {
+        if event.cancelled {
+            return event;
+        }
+
+        let player = &event.player;
+        let world = player.get_world();
+        let sign_pos = event.block_pos;
+
+        let chest_pos = attached_block(&world, sign_pos);
+        if !is_subclaimable(&world.get_block_state(chest_pos).block_name) {
+            return event;
+        }
+
+        let lines: Vec<String> = event.lines.iter().map(|line| component_text(line)).collect();
+        let first = normalized(lines.first().map(String::as_str).unwrap_or(""));
+        if first != "[subclaim]" && first != "[s]" {
+            return event;
+        }
+
+        let uuid = core::uuid_of(player);
+        let world_name = world.get_name();
+
+        let (faction, role) = {
+            let guard = state().read().unwrap();
+
+            let Some(player_faction) = guard.factions.by_member(&uuid) else {
+                drop(guard);
+                send_subclaim_message(player, "FACTIONS.NOT_IN_FACTION_SELF");
+                return event;
+            };
+
+            let role = player_faction
+                .members
+                .get(&uuid)
+                .map(|member| member.role)
+                .unwrap_or_default();
+
+            let own_claim = matches!(
+                core::territory_at_guard(&guard, &world_name, chest_pos.x, chest_pos.z),
+                Territory::Faction(owner_id) if owner_id == player_faction.id
+            );
+
+            if !own_claim {
+                drop(guard);
+                event.cancelled = true;
+                send_subclaim_message(player, "SUBCLAIMS.NOT_IN_OWN_CLAIM");
+                return event;
+            }
+
+            (player_faction.clone(), role)
+        };
+
+        if get_subclaim(&world, chest_pos).is_some() {
+            event.cancelled = true;
+            send_subclaim_message(player, "SUBCLAIMS.ALREADY_EXISTS");
+            return event;
+        }
+
+        let second = lines.get(1).cloned().unwrap_or_default();
+
+        match second.to_lowercase().as_str() {
+            "leader" if role != Role::Leader => {
+                event.cancelled = true;
+                send_subclaim_message(player, "SUBCLAIMS.MUST_BE_LEADER");
+                return event;
+            }
+            "coleader" if !role.is_at_least(Role::CoLeader) => {
+                event.cancelled = true;
+                send_subclaim_message(player, "SUBCLAIMS.MUST_BE_CO_LEADER");
+                return event;
+            }
+            "officer" | "captain" if !role.is_at_least(Role::Captain) => {
+                event.cancelled = true;
+                send_subclaim_message(player, "SUBCLAIMS.MUST_BE_CAPTAIN");
+                return event;
+            }
+            "leader" | "coleader" | "officer" | "captain" => {}
+            _ => {
+                if !role.is_at_least(Role::Captain) {
+                    return event;
+                }
+
+                // The original fills an empty second line with the creator's
+                // name; the port remembers them instead (see the top note).
+                if second.is_empty() {
+                    state().write().unwrap().subclaim_creators.insert(
+                        (world_name, sign_pos.x, sign_pos.y, sign_pos.z),
+                        core::name_of(player),
+                    );
+                }
+            }
+        }
+
+        let guard = state().read().unwrap();
+        let prefix = guard.raw.language.string("PREFIX");
+        let message = guard.raw.language.string("SUBCLAIMS.SUCCESSFULLY_CREATED");
+        drop(guard);
+
+        let loc = event.block_pos;
+        let message = util::replace(
+            &util::replace(
+                &util::replace(
+                    &util::replace(&message, "<player>", &core::name_of(player)),
+                    "<x>",
+                    &loc.x.to_string(),
+                ),
+                "<y>",
+                &loc.y.to_string(),
+            ),
+            "<z>",
+            &loc.z.to_string(),
+        );
+        core::faction_message(&server, &faction, &format!("{prefix}{message}"));
+
+        event
+    }
+}
+
+/// Port of `SubclaimHandler#onPlayerInteract` (`RIGHT_CLICK_BLOCK` chests).
+pub struct SubclaimInteractListener;
+
+impl EventHandler<PlayerInteractEvent> for SubclaimInteractListener {
+    fn handle(&self, _server: Server, mut event: EventData<PlayerInteractEvent>) -> EventData<PlayerInteractEvent> {
+        if event.cancelled || event.action != InteractAction::RightClickBlock {
+            return event;
+        }
+
+        let Some(pos) = event.clicked_pos else {
+            return event;
+        };
+
+        let player = &event.player;
+        let world = player.get_world();
+
+        let Some((sign_pos, lines)) = get_subclaim(&world, pos) else {
+            return event;
+        };
+
+        if player.has_permission("lazarus.subclaim.bypass") {
+            return event;
+        }
+
+        let uuid = core::uuid_of(player);
+        if subclaim_denied(&world.get_name(), pos, player, &lines, sign_pos) {
+            event.cancelled = true;
+
+            if !crate::listeners::interact::is_duplicate(&format!("subclaim:{uuid}:{pos:?}")) {
+                send_subclaim_message(player, "SUBCLAIMS.CAN_NOT_OPEN");
+            }
+        }
+
+        event
+    }
+}
+
+/// Port of `SubclaimHandler#onBlockBreak` + `#onSignBreakEvent`.
+pub struct SubclaimBreakListener;
+
+impl EventHandler<BlockBreakEvent> for SubclaimBreakListener {
+    fn handle(&self, _server: Server, mut event: EventData<BlockBreakEvent>) -> EventData<BlockBreakEvent> {
+        if event.cancelled {
+            return event;
+        }
+
+        let Some(player) = event.player.as_ref() else {
+            return event;
+        };
+
+        if player.has_permission("lazarus.subclaim.bypass") {
+            return event;
+        }
+
+        let world = player.get_world();
+        let world_name = world.get_name();
+        let pos = event.block_pos;
+
+        if is_subclaimable(&event.block) {
+            let Some((sign_pos, lines)) = get_subclaim(&world, pos) else {
+                return event;
+            };
+
+            if subclaim_denied(&world_name, pos, player, &lines, sign_pos) {
+                let uuid = core::uuid_of(player);
+                event.cancelled = true;
+
+                if !crate::listeners::interact::is_duplicate(&format!("subclaim-break:{uuid}:{pos:?}")) {
+                    send_subclaim_message(player, "SUBCLAIMS.CAN_NOT_DESTROY_SUBCLAIM");
+                }
+            }
+
+            return event;
+        }
+
+        if !is_standing_sign(&event.block) && !is_wall_sign(&event.block) {
+            return event;
+        }
+
+        let Some(lines) = sign_lines(&world, pos) else {
+            return event;
+        };
+        if !lines.first().is_some_and(|line| is_subclaim_title(line)) {
+            return event;
+        }
+
+        if subclaim_denied(&world_name, pos, player, &lines, pos) {
+            let uuid = core::uuid_of(player);
+            event.cancelled = true;
+
+            if !crate::listeners::interact::is_duplicate(&format!("subclaim-sign:{uuid}:{pos:?}")) {
+                send_subclaim_message(player, "SUBCLAIMS.CAN_NOT_DESTROY_SIGN");
+            }
+            return event;
+        }
+
+        // The sign is gone: drop the emulated creator of an empty second line.
+        state()
+            .write()
+            .unwrap()
+            .subclaim_creators
+            .remove(&(world_name, pos.x, pos.y, pos.z));
+
+        event
+    }
+}
+
+/// Hopper protection. The original cancelled `InventoryMoveItemEvent` when a
+/// hopper pulled out of a subclaimed chest; the host fires that event only for
+/// hopper *pushes* and signals pulls with `HopperInventorySearchEvent` instead
+/// (the hopper searching the container above it), which is the equivalent hook.
+/// The event carries no world, so every loaded world is probed.
+pub struct SubclaimHopperListener;
+
+impl EventHandler<HopperInventorySearchEvent> for SubclaimHopperListener {
+    fn handle(&self, server: Server, mut event: EventData<HopperInventorySearchEvent>) -> EventData<HopperInventorySearchEvent> {
+        if event.cancelled {
+            return event;
+        }
+
+        let search_pos = event.search_pos;
+
+        for world in server.get_all_worlds() {
+            if get_subclaim(&world, search_pos).is_some() {
+                event.cancelled = true;
+                break;
+            }
+        }
+
+        event
+    }
+}
+

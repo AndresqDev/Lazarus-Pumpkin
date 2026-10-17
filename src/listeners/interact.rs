@@ -27,7 +27,7 @@ use crate::util;
 static LAST_INTERACT: std::sync::Mutex<Option<std::collections::HashMap<String, i64>>> =
     std::sync::Mutex::new(None);
 
-fn is_duplicate(key: &str) -> bool {
+pub(crate) fn is_duplicate(key: &str) -> bool {
     let now = crate::util::now_millis();
     let mut guard = LAST_INTERACT.lock().unwrap();
     let map = guard.get_or_insert_with(std::collections::HashMap::new);

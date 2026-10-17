@@ -136,6 +136,11 @@ pub struct AppState {
     /// `ChatControlHandler#isShowFoundOre` (default on; the chat-control command
     /// lands with the chat sector).
     pub chat_control_show_found_ore: bool,
+    /// `EotwHandler#isActive` (the EOTW handler itself is not ported yet).
+    pub eotw_active: bool,
+    /// Emulates the subclaim signs whose second line the original fills with the
+    /// creator name (sign key -> creator name).
+    pub subclaim_creators: std::collections::BTreeMap<(String, i32, i32, i32), String>,
     /// Transient: players kicked with the deathban message at 1s after death
     /// (port of `Tasks.syncLater(() -> kickPlayer(...), 20L)`).
     pub pending_kicks: Vec<PendingKick>,
@@ -235,6 +240,8 @@ pub fn init(data_folder: String) -> Result<(), String> {
             found_ore_marks: std::collections::BTreeSet::new(),
             autosmel_pending: std::collections::BTreeMap::new(),
             chat_control_show_found_ore: true,
+            eotw_active: false,
+            subclaim_creators: std::collections::BTreeMap::new(),
             pending_kicks: Vec::new(),
             deathban_confirm: std::collections::BTreeSet::new(),
             last_damagers: std::collections::BTreeMap::new(),

@@ -55,6 +55,12 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(blockhandlers::CobwebPlaceListener, EventPriority::Normal, true)?;
     context.register_event_handler(blockhandlers::FoundOrePlaceListener, EventPriority::Normal, true)?;
     context.register_event_handler(blockhandlers::FoundOreBreakListener, EventPriority::Normal, true)?;
+    // Subclaims (`SubclaimHandler`): creation signs, chest opens, chest/sign
+    // breaks and hopper pulls out of subclaimed chests.
+    context.register_event_handler(blockhandlers::SubclaimSignChangeListener, EventPriority::Normal, true)?;
+    context.register_event_handler(blockhandlers::SubclaimInteractListener, EventPriority::Normal, true)?;
+    context.register_event_handler(blockhandlers::SubclaimBreakListener, EventPriority::Normal, true)?;
+    context.register_event_handler(blockhandlers::SubclaimHopperListener, EventPriority::Normal, true)?;
     // Use protection must run before the wand listener (see `BlockInteractListener`).
     context.register_event_handler(block::BlockInteractListener, EventPriority::High, true)?;
     context.register_event_handler(block::BucketEmptyListener, EventPriority::High, true)?;
