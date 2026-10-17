@@ -63,6 +63,9 @@ pub struct Userdata {
     /// Death message stored with the deathban (`Deathban#getReason`).
     #[serde(default)]
     pub deathban_reason: Option<String>,
+    /// `StringUtils#getLocationNameWithWorld` of the death location.
+    #[serde(default)]
+    pub deathban_location: Option<String>,
 
     pub ignoring: Vec<String>,
     pub notes: Vec<String>,
@@ -88,6 +91,7 @@ impl Userdata {
             settings: Settings::default(),
             deathban_until: None,
             deathban_reason: None,
+            deathban_location: None,
             ignoring: Vec::new(),
             notes: Vec::new(),
             last_kills: Vec::new(),
@@ -140,19 +144,25 @@ impl Userdata {
     }
 
     /// Applies a deathban of `millis` from now, storing the death-message
-    /// reason (`Deathban#setReason`).
-    pub fn deathban(&mut self, millis: i64, reason: String) {
+    /// reason and the death location (`Deathban#setReason`/`#setLocation`).
+    pub fn deathban(&mut self, millis: i64, reason: String, location: String) {
         self.deathban_until = Some(crate::util::now_millis() + millis);
         self.deathban_reason = Some(reason);
+        self.deathban_location = Some(location);
     }
 
     pub fn deathban_reason(&self) -> String {
         self.deathban_reason.clone().unwrap_or_default()
     }
 
+    pub fn deathban_location(&self) -> String {
+        self.deathban_location.clone().unwrap_or_default()
+    }
+
     pub fn revive(&mut self) {
         self.deathban_until = None;
         self.deathban_reason = None;
+        self.deathban_location = None;
     }
 
     pub fn toggle_ignoring(&mut self, uuid: &str) {
@@ -197,6 +207,14 @@ impl UserdataManager {
         if let Some(user) = self.users.get_mut(uuid) {
             user.name = name;
         }
+    }
+
+    /// Looks a user up by name (offline lookups for `/deathban check|revive`,
+    /// port of `Bukkit.getOfflinePlayer` + `hasPlayedBefore`).
+    pub fn find_by_name(&self, name: &str) -> Option<&Userdata> {
+        self.users
+            .values()
+            .find(|user| user.name.eq_ignore_ascii_case(name))
     }
 
     /// Top players by a numeric metric, descending.

@@ -9,6 +9,10 @@ crate-type = ["cdylib"]
 [dependencies]
 # Official Pumpkin plugin API (WebAssembly Component Model).
 pumpkin-plugin-api = "0.2.0"
+# Date formatting + timezone database for `DATE_FORMAT`/`TIMEZONE`
+# (the original uses Apache Commons `FastDateFormat`).
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono-tz = "0.10"
 # Serialization for our own persistence (factions/userdata) and TOML config.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

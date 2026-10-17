@@ -77,7 +77,8 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `handlers.block.*` (auto-smelt, cobweb, counter, crowbar, filter, subclaim, found ore) | 🟡 | auto-smelt (ingot replacement in the host drop event), cobweb remover (1s task, 50/cycle), disabled block placement, found ore (vein count capped at 50, per-player setting + `lazarus.foundore.receive`), subclaim (creation sign, open/break denial, hopper pull block), crowbar (`/crowbar give`, lore-counted spawner/portal-frame extraction with spawner-type restore) ported; filter needs a player pickup event the host does not fire |
 | ↳ subclaim deviations | | host applies the packet's sign lines verbatim and ignores `SignChangeEvent#line` edits (`set_front_text` updates the block entity but sends no client update), so signs keep what the player typed: the checks accept the typed `[subclaim]`/`[s]` titles and the plain `leader`/`coleader`/`captain`/`officer` keywords next to the configured values, and an empty second line is emulated with an in-memory creator registry instead of being filled with the creator's name; hopper pulls are blocked through the host's `HopperInventorySearchEvent` (the host fires `InventoryMoveItemEvent` only for hopper pushes, where the original never cancelled) |
 | ↳ crowbar deviations | | extracted spawners/portal frames go straight to the inventory (no item-spawn API): the extracted spawner's `block_entity_data` is queued as pending block-entity NBT on `BlockPlaceEvent` (the host never applies the item component to the placed spawner), so the mob type survives while the client shows its predicted empty spawner until the chunk reloads; `Effect.STEP_SOUND` is the block break sound only (no block-state particle payload in the host API); numeric `CROWBAR.MATERIAL_ID` values use the small 1.8 id table, registry keys pass through |
-| `handlers.death.*` (death messages, death signs, head drop, stattrak) | ⬜ | |
+| `handlers.death.*` (death messages, death signs, head drop, stattrak) | ✅ | full `DeathMessageHandler#getDeathMessage` resolver (player/killer name formats with `kills`/`kills + 1`, item/projectile/entity attack variants, explosion-TNT branch, fall/void killer branches, `StringUtils#getEntityName`), targeted delivery (victim + killer + `death_messages` setting), stattrak counter (insert/rotate lore logic over the configured item list), head drop for `lazarus.headdrop` holders + placed-head protection, death sign item + fill + edit/break protection; `datetime.rs` ports the `FastDateFormat` subset + timezone resolution of `DATE_FORMAT`/`TIMEZONE` |
+| ↳ death deviations | | the vanilla broadcast is turned off (`showDeathMessages=false`, one shared level data for all dimensions) because the host cannot suppress a per-death message; the plugin replicates the original's targeted delivery and sets `death_message` for the death screen; head/death signs go straight to the killer's inventory (no item-entity spawns); placed heads are tracked from the placing item's `profile` component (no owner on `SkullBlockEntity`); death signs are filled at placement (`sign.update()` equivalent) but the client only sees it after a chunk reload and the editor cannot be closed (a `DEATH_SIGN.LORE` shorter than four lines fills what it has, where the original throws); item names are title-cased registry keys without NMS localization and custom names lose their colors; unknown entity-branch causes fall back to `REASON_CUSTOM` instead of the original's empty message; `lazarus.headdrop`/`lazarus.staff` also accept the registered op-default `lazarus:headdrop`/`lazarus:staff` (the host does not grant undefined nodes to operators) |
 | `handlers.limiter.*` (enchant/potion/entity limits) | ⬜ | |
 | `handlers.logger.*` (combat logger) | ⬜ | |
 | `handlers.kitmap.*` (KitmapHandler, KillstreakHandler) | 🟡 | kitmap mode fully wired: config sync from raw `config.yml`, deathban/DTR-loss skips, safezone drop denial, item-clear task, kill reward + killstreaks (console commands + broadcast), PvP-timer clearing/gating, first-join spawn teleport, `KITMAP_STATS` sidebar block, KITMAP-only kits restricted to safezones; `/spawn` teleport, `/topkillstreaks` and the Miner kitmap renames pending (below) |
@@ -87,7 +88,7 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `kits.*` | ✅ | inventory capture/give incl. lore + vanilla enchantments (`kits.json`) |
 | `games.*` (Koth, Conquest, DTC, Dragon, King, Mountain, Loot, Schedule) | ⬜ | |
 | `economy.*` + `integration.vault` | 🟡 | internal balance implemented; Vault has no Pumpkin equivalent |
-| `deathban.*` | ✅ | faithful prelogin flow (first join with lives = join-again prompt, second join consumes a life), per-permission `BAN_TIMES`, faction auto-revive, `deathban_until` + `deathban_reason` on userdata, `/lives` (+ `/f livesrevive`, deposit/withdraw) |
+| `deathban.*` | ✅ | faithful prelogin flow (first join with lives = join-again prompt, second join consumes a life, EOTW lockout for stored bans), per-permission `BAN_TIMES`, faction auto-revive, `deathban_until` + `deathban_reason` + `deathban_location` on userdata, `/lives` (+ `/f livesrevive`, deposit/withdraw), `/deathban check|revive` (offline lookups through `userdata.json`) |
 | `staffmode.*`, `VanishManager` | 🟡 | vanish via `hide_player/show_player`; staff-mode flag |
 | `glass.*`, claim pillars, `/f map` visuals | ✅ | client-side `send_block_change` engine |
 | `selection.*` (WorldEdit-style wand) | ✅ | `/f claim` wand with sneak-purchase |
@@ -193,9 +194,37 @@ context):
   killer is the last player recorded by the combat-tag handler (`last_damagers`,
   5-second window, the same window Bukkit's combat tracker uses). A death by
   environment right after PvP therefore still credits the last attacker.
-* `event.getDeathMessage()` (`DeathMessageHandler`) — not ported; deathban
-  reasons and userdata kill/death messages use `"<player> was slain by <killer>"`
-  or `"<player> died"`.
+* Death-message broadcast — the host has no per-death "silent" flag (an empty
+  `death_message` would still be sent), so the vanilla broadcast is turned off
+  (`showDeathMessages=false` on the shared level data of all dimensions) and the
+  plugin delivers the message itself to the same targeted list as the original
+  (victim + killer + everyone with the death-messages setting); the message is
+  also stored on the event, so the victim's death screen shows it (a nicety the
+  original's `setDeathMessage(null)` suppressed).
+* Head-drop / death-sign drops — `PlayerDeathEvent` has no drops list and the
+  WIT cannot spawn item entities, so the killer's head and the death sign go
+  straight into the killer's inventory instead of dropping at the death
+  location.
+* Placed-head ownership — `SkullBlockEntity` exposes no owner through the WIT,
+  so heads placed from the plugin's item are tracked in memory from the placing
+  item's `profile` component; heads without a tracked owner (creative menu, mob
+  skulls) keep vanilla break/interact behaviour.
+* Death-sign editor — the host cannot close the sign editor nor broadcast a
+  `set_front_text` write: the fill happens at placement like the original's
+  `sign.setLine` + `sign.update()`, but the client only sees the lines after a
+  chunk reload and the editor stays open (later edits are discarded, like the
+  original cancels them). With fewer than four `DEATH_SIGN.LORE` lines the
+  original throws and aborts the fill; the port fills the lines it has.
+* Item names in death messages (`NmsUtils#getItemName`) — no NMS localized
+  names: the port title-cases the registry key (matches the common items) and
+  strips the colors of custom names (the original kept the `§` codes).
+* Unknown damage causes in the entity branch — the original leaves the message
+  empty (nothing is sent, the host cannot replicate that); the port falls back
+  to `REASON_CUSTOM`.
+* `lazarus.headdrop` / `lazarus.staff` — the host rejects dot-namespaced
+  registrations and grants undefined nodes to nobody (no Bukkit `isOp()`
+  fallback), so the op default lives on the registered `lazarus:headdrop` /
+  `lazarus:staff` variants, checked together with the original nodes.
 * Offline player lookup (`/lives check|revive|send|add|set`) is limited to the
   players present in `userdata.json` (online + everyone seen before), since the
   port has no Bukkit profile cache.
@@ -263,7 +292,10 @@ spawn faction), and block *use* protection landed: using a clickable block
 outside your territory is denied with the original's `DENY_INTERACT` message
 (chests, doors, buttons, ... — with the safezone allow-list, the sneak bypass
 and the kitmap warzone clickables), and the claim wand skips denied interacts
-like the original `SelectionManager`.
+like the original `SelectionManager`. The death sector is now complete: the full
+`DeathMessageHandler` resolver + targeted delivery, stattrak, head drops, death
+signs, `/lastdeaths` + `/lastkills`, `/deathban check|revive` with the stored
+ban location, and `datetime.rs` for `DATE_FORMAT`/`TIMEZONE`.
 
 Still to port (in rough priority order):
 
@@ -273,10 +305,9 @@ Still to port (in rough priority order):
    Loot, Schedule) using boss bars + the world API.
 4. Block handlers (auto-smelt, cobweb remover, crowbar, filter, subclaim signs,
    found-ore, elevators, mob stacking).
-5. Death handlers (death messages, death signs, head drops, stattrak).
-6. Limiters (enchant/potion/entity limits), custom recipes, sign shops.
-7. World border, portals/end-exit, safezone food/potion rules.
-8. Leaderboard holograms.
+5. Limiters (enchant/potion/entity limits), custom recipes, sign shops.
+6. World border, portals/end-exit, safezone food/potion rules.
+7. Leaderboard holograms.
 
 ## 6. Files
 
@@ -297,6 +328,8 @@ src/
 ├── sotw.rs             Start-Of-The-World timer, immunity + safezone hiding
 ├── hologram.rs         TextDisplay holograms
 ├── kits.rs             inventory kits (lore + enchantments)
+├── datetime.rs         `DATE_FORMAT`/`TIMEZONE` formatter (FastDateFormat subset)
+├── death.rs            death messages, stattrak, head drops, death signs
 ├── deathban.rs         deathban / lives handling
 ├── tasks.rs            repeating tick (timers, DTR, teleports, glass, sidebar, tab)
 ├── userdata.rs         Userdata + UserdataManager
@@ -308,6 +341,8 @@ src/
 │   ├── mod.rs          registration helpers
 │   ├── base.rs         /lazarus + setting toggles
 │   ├── customtimer.rs  /customtimer (start/cancel/list)
+│   ├── deathban.rs     /deathban check|revive
+│   ├── lastdeaths.rs   /lastdeaths + /lastkills
 │   ├── faction.rs      /f command tree (+ admin subcommands)
 │   ├── lives.rs        /lives
 │   ├── staff.rs        /vanish, /staffmode

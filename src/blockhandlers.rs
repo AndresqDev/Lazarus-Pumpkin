@@ -39,7 +39,7 @@ const AUTOSMEL_TTL_MILLIS: i64 = 5_000;
 
 /// Air writes from the handler tasks: update neighbours and clients, no drops
 /// (Bukkit's `Block#setType(AIR)` had the same effect).
-fn air_flags() -> BlockFlags {
+pub(crate) fn air_flags() -> BlockFlags {
     BlockFlags::NOTIFY_NEIGHBORS | BlockFlags::NOTIFY_LISTENERS | BlockFlags::SKIP_DROPS
 }
 
@@ -649,7 +649,7 @@ fn is_wall_sign(name: &str) -> bool {
 
 /// Plain text of a JSON text component (the client sends sign lines as
 /// components, e.g. `{"text":"[subclaim]"}`).
-fn component_text(raw: &str) -> String {
+pub(crate) fn component_text(raw: &str) -> String {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
         return raw.to_string();
     };
@@ -746,7 +746,7 @@ fn wall_sign_faces(world: &World, pos: BlockPos, facing: &str) -> bool {
 }
 
 /// Front text of the sign at `pos` (only signs carry one here).
-fn sign_lines(world: &World, pos: BlockPos) -> Option<Vec<String>> {
+pub(crate) fn sign_lines(world: &World, pos: BlockPos) -> Option<Vec<String>> {
     match world.get_block_entity(pos)? {
         BlockEntityType::SignBlockEntity(sign) => Some(
             sign.get_front_text()

@@ -21,6 +21,8 @@ use crate::util;
 /// when the language file is missing the key.
 const BAN_MESSAGE_FALLBACK: &str = "&eYou are &cdeathbanned &efor: &c<time>&7. \n\n &eReason: <reason>&e";
 const JOIN_AGAIN_FALLBACK: &str = "&eYou have &b<amount> &elive(s). Please join again to use life.";
+const EOTW_MESSAGE_FALLBACK: &str =
+    "&eYou died while &4EOTW &ewas running! Therefore you cannot join until next map!";
 
 fn ban_message(guard: &AppState) -> String {
     let message = guard.raw.language.string("DEATHBAN.BAN_MESSAGE");
@@ -30,6 +32,11 @@ fn ban_message(guard: &AppState) -> String {
 fn join_again_message(guard: &AppState) -> String {
     let message = guard.raw.language.string("DEATHBAN.JOIN_AGAIN_FOR_REVIVE");
     if message.is_empty() { JOIN_AGAIN_FALLBACK.to_string() } else { message }
+}
+
+fn eotw_message(guard: &AppState) -> String {
+    let message = guard.raw.language.string("DEATHBAN.EOTW_MESSAGE");
+    if message.is_empty() { EOTW_MESSAGE_FALLBACK.to_string() } else { message }
 }
 
 fn kick(player: &Player, message: &str) {
@@ -52,53 +59,65 @@ pub fn enforce_on_join(player: &Player) -> bool {
     let outcome = {
         let mut guard = state().write().unwrap();
 
-        let banned = guard
-            .userdata
-            .get(&uuid)
-            .filter(|user| user.is_deathbanned())
-            .map(|user| (user.deathban_remaining(), user.deathban_reason(), user.lives));
+        // `onAsyncPlayerPreLoginEvent`: during EOTW every stored deathban record
+        // (active or already expired) keeps the player out until the next map.
+        let eotw_lockout = guard.eotw_active
+            && guard
+                .userdata
+                .get(&uuid)
+                .is_some_and(|user| user.deathban_until.is_some());
 
-        match banned {
-            None => {
-                // A clean join clears any stale confirmation. (The original only
-                // removed it on a successful revive; clearing here avoids
-                // consuming a life silently for a previous, expired ban.)
-                guard.deathban_confirm.remove(&uuid);
-                Outcome::Allow
-            }
-            Some((remaining, reason, lives)) if lives <= 0 => Outcome::Kick(util::replace(
-                &util::replace(
-                    &ban_message(&guard),
-                    "<time>",
-                    &util::format_duration_words(remaining),
-                ),
-                "<reason>",
-                &reason,
-            )),
-            Some(_) if guard.deathban_confirm.contains(&uuid) => {
-                if let Some(user) = guard.userdata.get_mut(&uuid) {
-                    user.lives -= 1;
-                    user.revive();
+        if eotw_lockout {
+            Outcome::Kick(eotw_message(&guard))
+        } else {
+            let banned = guard
+                .userdata
+                .get(&uuid)
+                .filter(|user| user.is_deathbanned())
+                .map(|user| (user.deathban_remaining(), user.deathban_reason(), user.lives));
+
+            match banned {
+                None => {
+                    // A clean join clears any stale confirmation. (The original only
+                    // removed it on a successful revive; clearing here avoids
+                    // consuming a life silently for a previous, expired ban.)
+                    guard.deathban_confirm.remove(&uuid);
+                    Outcome::Allow
                 }
-                guard.deathban_confirm.remove(&uuid);
-                Outcome::Allow
-            }
-            Some((remaining, reason, lives)) => {
-                guard.deathban_confirm.insert(uuid.clone());
-                let message = format!(
-                    "{}\n\n{}",
-                    util::replace(
-                        &util::replace(
-                            &ban_message(&guard),
-                            "<time>",
-                            &util::format_duration_words(remaining),
-                        ),
-                        "<reason>",
-                        &reason,
+                Some((remaining, reason, lives)) if lives <= 0 => Outcome::Kick(util::replace(
+                    &util::replace(
+                        &ban_message(&guard),
+                        "<time>",
+                        &util::format_duration_words(remaining),
                     ),
-                    util::replace(&join_again_message(&guard), "<amount>", &lives.to_string()),
-                );
-                Outcome::Kick(message)
+                    "<reason>",
+                    &reason,
+                )),
+                Some(_) if guard.deathban_confirm.contains(&uuid) => {
+                    if let Some(user) = guard.userdata.get_mut(&uuid) {
+                        user.lives -= 1;
+                        user.revive();
+                    }
+                    guard.deathban_confirm.remove(&uuid);
+                    Outcome::Allow
+                }
+                Some((remaining, reason, lives)) => {
+                    guard.deathban_confirm.insert(uuid.clone());
+                    let message = format!(
+                        "{}\n\n{}",
+                        util::replace(
+                            &util::replace(
+                                &ban_message(&guard),
+                                "<time>",
+                                &util::format_duration_words(remaining),
+                            ),
+                            "<reason>",
+                            &reason,
+                        ),
+                        util::replace(&join_again_message(&guard), "<amount>", &lives.to_string()),
+                    );
+                    Outcome::Kick(message)
+                }
             }
         }
     };
@@ -150,6 +169,10 @@ pub fn apply_on_death(player: &Player, reason: &str) {
             break;
         }
     }
+    // The original only stores a ban when the resolved time is not zero.
+    if millis == 0 {
+        return;
+    }
 
     let now = util::now_millis();
     let mut guard = state().write().unwrap();
@@ -185,18 +208,34 @@ pub fn apply_on_death(player: &Player, reason: &str) {
         return;
     }
 
-    let message = util::replace(
-        &util::replace(
-            &ban_message(&guard),
-            "<time>",
-            &util::format_duration_words(millis),
-        ),
-        "<reason>",
-        reason,
-    );
+    // `DeathbanManager#kickPlayer`: during EOTW the kick shows the EOTW message
+    // instead of the ban message.
+    let message = if guard.eotw_active {
+        eotw_message(&guard)
+    } else {
+        util::replace(
+            &util::replace(
+                &ban_message(&guard),
+                "<time>",
+                &util::format_duration_words(millis),
+            ),
+            "<reason>",
+            reason,
+        )
+    };
 
     if let Some(user) = guard.userdata.get_mut(&uuid) {
-        user.deathban(millis, reason.to_string());
+        user.deathban(
+            millis,
+            reason.to_string(),
+            format!(
+                "{}, {}, {} ({})",
+                location.block_x(),
+                location.block_y(),
+                location.block_z(),
+                location.world
+            ),
+        );
     }
 
     guard.pending_kicks.push(PendingKick { uuid, message, at: now + 1000 });

@@ -150,6 +150,24 @@ pub struct AppState {
     /// Transient: last player that damaged each victim (uuid -> damager uuid +
     /// timestamp), used as the port of Bukkit's `Player#getKiller`.
     pub last_damagers: std::collections::BTreeMap<String, (String, i64)>,
+    /// Transient: last damage taken by each player (port of Bukkit's
+    /// `Player#getLastDamageCause`), used to build the death messages.
+    pub last_damage: std::collections::BTreeMap<String, LastDamage>,
+}
+
+/// The last damage dealt to a player, recorded by the combat listeners.
+#[derive(Debug, Clone)]
+pub struct LastDamage {
+    /// Canonical `damage_type` registry id (see `death::normalize_cause`).
+    pub cause: String,
+    /// True when it came from `EntityDamageByEntityEvent`.
+    pub entity: bool,
+    /// Resolved player damager/shooter.
+    pub damager: Option<String>,
+    /// Registry name of the non-player damager/shooter (mob, TNT, …).
+    pub entity_key: Option<String>,
+    /// True when the damage was dealt by a projectile.
+    pub projectile: bool,
 }
 
 /// A kick scheduled from an event handler (deathban), fired by the 1s tick.
@@ -245,6 +263,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
             pending_kicks: Vec::new(),
             deathban_confirm: std::collections::BTreeSet::new(),
             last_damagers: std::collections::BTreeMap::new(),
+            last_damage: std::collections::BTreeMap::new(),
         }))
         .map_err(|_| "state already initialised".to_string())
 }

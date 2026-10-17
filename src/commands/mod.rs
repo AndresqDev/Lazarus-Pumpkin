@@ -3,10 +3,12 @@
 pub mod base;
 pub mod crowbar;
 pub mod customtimer;
+pub mod deathban;
 pub mod economy;
 pub mod faction;
 pub mod hologram;
 pub mod kit;
+pub mod lastdeaths;
 pub mod lives;
 pub mod pvp;
 pub mod sotw;
@@ -44,8 +46,10 @@ pub fn register(context: &Context) -> Result<(), String> {
     base::register(context)?;
     crowbar::register(context)?;
     customtimer::register(context)?;
+    deathban::register(context)?;
     economy::register(context)?;
     faction::register(context)?;
+    lastdeaths::register(context)?;
     lives::register(context)?;
     staff::register(context)?;
     hologram::register(context)?;

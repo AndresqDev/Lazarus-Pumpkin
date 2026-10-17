@@ -406,12 +406,12 @@ impl EventHandler<PlayerMoveEvent> for MoveListener {
 /// Window in which the last damaging player still counts as the killer
 /// (approximates Bukkit's `Player#getKiller` combat-tracker window; the port has
 /// no NMS combat loggers).
-const KILLER_WINDOW_MILLIS: i64 = 5000;
+pub(crate) const KILLER_WINDOW_MILLIS: i64 = 5000;
 
 pub struct DeathListener;
 
 impl EventHandler<PlayerDeathEvent> for DeathListener {
-    fn handle(&self, server: Server, event: EventData<PlayerDeathEvent>) -> EventData<PlayerDeathEvent> {
+    fn handle(&self, server: Server, mut event: EventData<PlayerDeathEvent>) -> EventData<PlayerDeathEvent> {
         let uuid = core::uuid_of(&event.player);
         let name = core::name_of(&event.player);
         let world = core::world_name(&event.player);
@@ -419,18 +419,9 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
 
         // `Player#getKiller` replacement: the last player to damage the victim
         // within the combat window.
-        let (killer_uuid, killer_player) = {
-            let killer_uuid = {
-                let guard = state().read().unwrap();
-                guard.last_damagers.get(&uuid).and_then(|(killer, at)| {
-                    (util::now_millis() - at <= KILLER_WINDOW_MILLIS && *killer != uuid)
-                        .then(|| killer.clone())
-                })
-            };
-            let killer_player = killer_uuid.as_ref().and_then(|killer| {
-                pumpkin_plugin_api::uuid::parse(killer).and_then(|id| server.get_player_by_uuid(id))
-            });
-            (killer_uuid, killer_player)
+        let (killer_uuid, killer_player) = match crate::death::resolve_killer(&server, &uuid) {
+            Some((killer_uuid, killer_player)) => (Some(killer_uuid), Some(killer_player)),
+            None => (None, None),
         };
 
         let killer_name = killer_player.as_ref().map(core::name_of).or_else(|| {
@@ -445,12 +436,15 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
             })
         });
 
-        // Approximates `event.getDeathMessage()` (`DeathMessageHandler` is not
-        // ported).
-        let reason = match &killer_name {
-            Some(killer_name) => format!("{name} was slain by {killer_name}"),
-            None => format!("{name} died"),
-        };
+        // `DeathMessageHandler#getDeathMessage`: the message is also the
+        // deathban reason and the `/lastdeaths` entry. Built before the kill is
+        // credited so the killer's displayed count already includes it.
+        let reason = crate::death::build_message(&server, &event.player, killer_player.as_ref());
+
+        // Date prefix and `§`-to-`&` conversion of
+        // `Userdata#addLastKillOrDeathEntry`.
+        let date = crate::datetime::now_from_config();
+        let entry = format!("{date} - {}", reason.replace('§', "&"));
 
         let mut messages: Vec<(String, String)> = Vec::new();
         let mut victim_killstreak_lost = 0i32;
@@ -462,16 +456,17 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
             let config = guard.config.clone();
 
             guard.last_damagers.remove(&uuid);
+            guard.last_damage.remove(&uuid);
 
             // Stats (port of `DynamicEventHandler#onPlayerDeath`): every death is
             // recorded; kills only when the killer is online.
             if let Some(user) = guard.userdata.get_mut(&uuid) {
-                user.add_death(reason.clone());
+                user.add_death(entry.clone());
             }
             if killer_player.is_some() {
                 if let Some(killer) = &killer_uuid {
                     if let Some(user) = guard.userdata.get_mut(killer) {
-                        user.add_kill(reason.clone());
+                        user.add_kill(entry.clone());
                     }
                 }
             }
@@ -648,6 +643,12 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
                 }
             }
         }
+
+        // `DeathMessageHandler#onPlayerDeath` delivery: the victim, the killer
+        // and every player with death messages enabled (the vanilla broadcast is
+        // disabled at load, see `death::init`).
+        crate::death::send_death_message(&server, &uuid, killer_uuid.as_deref(), &reason);
+        event.death_message = util::text(&reason);
 
         // Deathban (`DeathbanManager#onPlayerDeath`; the kick fires ~1s later,
         // like the original's `Tasks.syncLater`).

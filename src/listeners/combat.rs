@@ -29,12 +29,46 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
         // Pumpkin attributes projectile damage directly to the shooter player, so
         // detect arrows via the damage type (the damager entity IS the player).
         let projectile_damager = event.cause.to_ascii_lowercase().contains("arrow");
-        let damager = core::player_by_entity(&server, event.damager_id).or_else(|| {
-            take_projectile_shooter(event.damager_id).and_then(|uuid| {
-                pumpkin_plugin_api::uuid::parse(&uuid)
-                    .and_then(|id| server.get_player_by_uuid(id))
-            })
-        });
+        let cause = crate::death::cause_from_damage_debug(&event.cause).unwrap_or_default();
+
+        let direct = core::player_by_entity(&server, event.damager_id);
+        let shooter = if direct.is_none() {
+            take_projectile_shooter(event.damager_id)
+        } else {
+            None
+        };
+        let shooter_player = match &shooter {
+            Some(Shooter::Player(uuid)) => {
+                pumpkin_plugin_api::uuid::parse(uuid).and_then(|id| server.get_player_by_uuid(id))
+            }
+            _ => None,
+        };
+
+        // Death message bookkeeping (port of `Player#getLastDamageCause`). The
+        // generic damage event fires first and is overwritten here with the
+        // damager details.
+        if let Some(victim) = &victim {
+            let entity_key = match &shooter {
+                Some(Shooter::Entity(key)) => Some(key.clone()),
+                None if direct.is_none() => crate::death::entity_key_by_id(event.damager_id),
+                _ => None,
+            };
+            let damager_uuid = direct.as_ref().map(core::uuid_of).or_else(|| match &shooter {
+                Some(Shooter::Player(uuid)) => Some(uuid.clone()),
+                _ => None,
+            });
+            let projectile = crate::death::is_projectile_cause(&cause) || shooter.is_some();
+            let record = crate::state::LastDamage {
+                cause,
+                entity: true,
+                damager: damager_uuid,
+                entity_key,
+                projectile,
+            };
+            state().write().unwrap().last_damage.insert(core::uuid_of(victim), record);
+        }
+
+        let damager = direct.or(shooter_player);
 
         // Archer tag on a *non-player* living entity (e.g. a mannequin) — for
         // testing: apply the damage multiplier and notify the shooter.
@@ -463,6 +497,21 @@ impl EventHandler<EntityDamageEvent> for EntityDamageListener {
 
         let uuid = core::uuid_of(&player);
 
+        // Death message bookkeeping (`Player#getLastDamageCause`): recorded from
+        // the generic event first; `EntityDamageByEntity` overwrites it with the
+        // damager details afterwards.
+        {
+            let cause = crate::death::normalize_cause(&format!("{:?}", event.damage_type));
+            let record = crate::state::LastDamage {
+                cause,
+                entity: false,
+                damager: None,
+                entity_key: None,
+                projectile: false,
+            };
+            state().write().unwrap().last_damage.insert(uuid.clone(), record);
+        }
+
         // Archer tag: increased damage taken.
         let archer_multiplier = {
             let guard = state().read().unwrap();
@@ -627,17 +676,26 @@ fn protected(player: &Player) -> bool {
 // Projectile ownership (so arrows respect safezone / friendly fire).
 // ---------------------------------------------------------------------------
 
-static PROJECTILE_SHOOTERS: std::sync::Mutex<Option<std::collections::HashMap<i32, String>>> =
+static PROJECTILE_SHOOTERS: std::sync::Mutex<Option<std::collections::HashMap<i32, Shooter>>> =
     std::sync::Mutex::new(None);
 
-fn set_projectile_shooter(entity_id: i32, shooter: String) {
+/// Who launched a projectile: a player, or a non-player entity recorded by its
+/// registry name (resolved through the `EntitySpawnEvent` registry so death
+/// messages can name it).
+#[derive(Clone)]
+pub(crate) enum Shooter {
+    Player(String),
+    Entity(String),
+}
+
+fn set_projectile_shooter(entity_id: i32, shooter: Shooter) {
     let mut guard = PROJECTILE_SHOOTERS.lock().unwrap();
     guard
         .get_or_insert_with(std::collections::HashMap::new)
         .insert(entity_id, shooter);
 }
 
-fn take_projectile_shooter(entity_id: i32) -> Option<String> {
+fn take_projectile_shooter(entity_id: i32) -> Option<Shooter> {
     let mut guard = PROJECTILE_SHOOTERS.lock().unwrap();
     guard.as_mut().and_then(|map| map.remove(&entity_id))
 }
@@ -652,10 +710,12 @@ impl EventHandler<ProjectileLaunchEvent> for ProjectileLaunchListener {
         server: Server,
         event: EventData<ProjectileLaunchEvent>,
     ) -> EventData<ProjectileLaunchEvent> {
-        if let Some(shooter_id) = event.shooter_id
-            && let Some(shooter) = core::player_by_entity(&server, shooter_id)
-        {
-            set_projectile_shooter(event.entity_id, core::uuid_of(&shooter));
+        if let Some(shooter_id) = event.shooter_id {
+            if let Some(shooter) = core::player_by_entity(&server, shooter_id) {
+                set_projectile_shooter(event.entity_id, Shooter::Player(core::uuid_of(&shooter)));
+            } else if let Some(key) = crate::death::entity_key_by_id(shooter_id) {
+                set_projectile_shooter(event.entity_id, Shooter::Entity(key));
+            }
         }
         event
     }

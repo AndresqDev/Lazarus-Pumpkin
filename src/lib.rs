@@ -19,6 +19,8 @@ mod commands;
 mod config;
 mod core;
 mod blockhandlers;
+mod datetime;
+mod death;
 mod deathban;
 mod factions;
 mod glass;
@@ -78,6 +80,10 @@ impl Plugin for LazarusPlugin {
 
         commands::register(&context)?;
         listeners::register(&context)?;
+        // Death messages are fully handled by the plugin: the `headdrop`
+        // permission is registered and the vanilla broadcast is turned off (the
+        // host has no per-death silent flag, see `death::init`).
+        death::init(&context, &server);
         tasks::start(&context);
 
         // KitmapHandler constructor: clear every PvP protection on startup so

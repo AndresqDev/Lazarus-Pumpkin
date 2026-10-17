@@ -14,12 +14,22 @@ use pumpkin_plugin_api::events::EventPriority;
 use pumpkin_plugin_api::Context;
 
 use crate::blockhandlers;
+use crate::death;
 
 /// Registers every ported event handler.
 pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(player::JoinListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::LeaveListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::MoveListener, EventPriority::Normal, true)?;
+
+    // Death handlers (`handlers.death.*`) that react to the death itself: they
+    // run *before* `DeathListener` so the killer is still resolvable from
+    // `last_damagers` (the DeathListener clears it while crediting the stats).
+    context.register_event_handler(death::EntityNameListener, EventPriority::Normal, true)?;
+    context.register_event_handler(death::StattrakListener, EventPriority::Normal, true)?;
+    context.register_event_handler(death::HeadDropDeathListener, EventPriority::Normal, true)?;
+    context.register_event_handler(death::DeathSignDeathListener, EventPriority::Normal, true)?;
+
     context.register_event_handler(player::DeathListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::RespawnListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::SpawnLocationListener, EventPriority::Normal, true)?;
@@ -83,6 +93,16 @@ pub fn register(context: &Context) -> Result<(), String> {
 
     context.register_event_handler(interact::InteractListener, EventPriority::High, true)?;
     context.register_event_handler(interact::SneakListener, EventPriority::Normal, true)?;
+
+    // Death handlers reacting to blocks (`ignoreCancelled` in the original):
+    // they run after the territory listeners, and the head/sign placements
+    // after `BlockPlaceListener` so denied placements are not tracked.
+    context.register_event_handler(death::HeadTrackPlaceListener, EventPriority::High, true)?;
+    context.register_event_handler(death::HeadDropBreakListener, EventPriority::High, true)?;
+    context.register_event_handler(death::DeathSignPlaceListener, EventPriority::High, true)?;
+    context.register_event_handler(death::DeathSignBreakListener, EventPriority::High, true)?;
+    context.register_event_handler(death::HeadDropInteractListener, EventPriority::High, true)?;
+    context.register_event_handler(death::DeathSignSignChangeListener, EventPriority::Normal, true)?;
 
     context.register_event_handler(items::EnderPearlListener, EventPriority::Normal, true)?;
     context.register_event_handler(items::GoldenAppleListener, EventPriority::Normal, true)?;
