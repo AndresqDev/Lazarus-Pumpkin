@@ -15,6 +15,7 @@ use pumpkin_plugin_api::Context;
 
 use crate::blockhandlers;
 use crate::death;
+use crate::elevator;
 
 /// Registers every ported event handler.
 pub fn register(context: &Context) -> Result<(), String> {
@@ -93,6 +94,15 @@ pub fn register(context: &Context) -> Result<(), String> {
 
     context.register_event_handler(interact::InteractListener, EventPriority::High, true)?;
     context.register_event_handler(interact::SneakListener, EventPriority::Normal, true)?;
+
+    // Elevators (`handlers.elevator.*`, `ignoreCancelled` in the original):
+    // they run after the territory/use listeners above, so denied actions are
+    // skipped.
+    context.register_event_handler(elevator::SignElevatorBreakListener, EventPriority::High, true)?;
+    context.register_event_handler(elevator::SignElevatorInteractListener, EventPriority::High, true)?;
+    context.register_event_handler(elevator::SignElevatorSignChangeListener, EventPriority::Normal, true)?;
+    context.register_event_handler(elevator::MinecartElevatorEnterListener, EventPriority::Normal, true)?;
+    context.register_event_handler(elevator::MinecartElevatorExitListener, EventPriority::Normal, true)?;
 
     // Death handlers reacting to blocks (`ignoreCancelled` in the original):
     // they run after the territory listeners, and the head/sign placements

@@ -79,6 +79,8 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | ↳ crowbar deviations | | extracted spawners/portal frames go straight to the inventory (no item-spawn API): the extracted spawner's `block_entity_data` is queued as pending block-entity NBT on `BlockPlaceEvent` (the host never applies the item component to the placed spawner), so the mob type survives while the client shows its predicted empty spawner until the chunk reloads; `Effect.STEP_SOUND` is the block break sound only (no block-state particle payload in the host API); numeric `CROWBAR.MATERIAL_ID` values use the small 1.8 id table, registry keys pass through |
 | `handlers.death.*` (death messages, death signs, head drop, stattrak) | ✅ | full `DeathMessageHandler#getDeathMessage` resolver (player/killer name formats with `kills`/`kills + 1`, item/projectile/entity attack variants, explosion-TNT branch, fall/void killer branches, `StringUtils#getEntityName`), targeted delivery (victim + killer + `death_messages` setting), stattrak counter (insert/rotate lore logic over the configured item list), head drop for `lazarus.headdrop` holders + placed-head protection, death sign item + fill + edit/break protection; `datetime.rs` ports the `FastDateFormat` subset + timezone resolution of `DATE_FORMAT`/`TIMEZONE` |
 | ↳ death deviations | | the vanilla broadcast is turned off (`showDeathMessages=false`, one shared level data for all dimensions) because the host cannot suppress a per-death message; the plugin replicates the original's targeted delivery and sets `death_message` for the death screen; head/death signs go straight to the killer's inventory (no item-entity spawns); placed heads are tracked from the placing item's `profile` component (no owner on `SkullBlockEntity`); death signs are filled at placement (`sign.update()` equivalent) but the client only sees it after a chunk reload and the editor cannot be closed (a `DEATH_SIGN.LORE` shorter than four lines fills what it has, where the original throws); item names are title-cased registry keys without NMS localization and custom names lose their colors; unknown entity-branch causes fall back to `REASON_CUSTOM` instead of the original's empty message; `lazarus.headdrop`/`lazarus.staff` also accept the registered op-default `lazarus:headdrop`/`lazarus:staff` (the host does not grant undefined nodes to operators) |
+| `handlers.elevator.*` (sign + minecart elevators) | ✅ | sign elevator (`[elevator]`/`[e]` + `up`/`down` created, up/down column search with the 0.5 block-centre landing, create/destroy/right-click messages), minecart elevator (sneaking mount on a cart parked in an open fence gate pulled up with the mount cancelled, dismount pulled up one tick later), both gated by `OWN_CLAIM_ONLY` (player faction vs faction at the sign/vehicle) and `DISABLED_IN_COMBAT` using the original's shared minecart message keys |
+| ↳ elevator deviations | | the sign rewrite lands in the block entity (`set_front_text`) while the event is cancelled so the typed lines are not applied on top: the client keeps showing what was typed until the chunk reloads, so the checks also accept the typed `[elevator]`/`[e]` + `up`/`down` shorthand; `setUseInteractedBlock(DENY)` maps to cancelling the interact event; `Material.AIR`/`WALL_SIGN`/`SIGN_POST`/`isSolid()` map to the block-state `is_air`/`is_solid` flags and `*_sign` names (cave/void air counts as air); the column search runs from `get_min_y` to `+384` (tallest vanilla column) instead of the fixed 1.8 `getMaxHeight()` 256; the dismount teleport is scheduled one tick later through the host scheduler because the host re-positions the dismounted passenger right after the event |
 | `handlers.limiter.*` (enchant/potion/entity limits) | ⬜ | |
 | `handlers.logger.*` (combat logger) | ⬜ | |
 | `handlers.kitmap.*` (KitmapHandler, KillstreakHandler) | 🟡 | kitmap mode fully wired: config sync from raw `config.yml`, deathban/DTR-loss skips, safezone drop denial, item-clear task, kill reward + killstreaks (console commands + broadcast), PvP-timer clearing/gating, first-join spawn teleport, `KITMAP_STATS` sidebar block, KITMAP-only kits restricted to safezones; `/spawn` teleport, `/topkillstreaks` and the Miner kitmap renames pending (below) |
@@ -295,7 +297,11 @@ and the kitmap warzone clickables), and the claim wand skips denied interacts
 like the original `SelectionManager`. The death sector is now complete: the full
 `DeathMessageHandler` resolver + targeted delivery, stattrak, head drops, death
 signs, `/lastdeaths` + `/lastkills`, `/deathban check|revive` with the stored
-ban location, and `datetime.rs` for `DATE_FORMAT`/`TIMEZONE`.
+ban location, and `datetime.rs` for `DATE_FORMAT`/`TIMEZONE`. The elevator
+sector is done as well: the sign elevator (create/destroy/ride with the
+`OWN_CLAIM_ONLY` + combat gates) and the fence-gate minecart elevator (sneak
+mount and dismount pulled up, the dismount one tick later like the original's
+`Tasks.sync`).
 
 Still to port (in rough priority order):
 
@@ -303,8 +309,8 @@ Still to port (in rough priority order):
 2. Abilities + PvP classes (Archer/Bard/Miner/Rogue/Mage/Bomber).
 3. Events/games (Koth, Conquest, DTC, Ender Dragon, King of the Hill, Mountain,
    Loot, Schedule) using boss bars + the world API.
-4. Block handlers (auto-smelt, cobweb remover, crowbar, filter, subclaim signs,
-   found-ore, elevators, mob stacking).
+4. Mob stacking (the remaining block handler; the filter stays blocked by the
+   missing player pickup event).
 5. Limiters (enchant/potion/entity limits), custom recipes, sign shops.
 6. World border, portals/end-exit, safezone food/potion rules.
 7. Leaderboard holograms.
@@ -331,6 +337,7 @@ src/
 ├── datetime.rs         `DATE_FORMAT`/`TIMEZONE` formatter (FastDateFormat subset)
 ├── death.rs            death messages, stattrak, head drops, death signs
 ├── deathban.rs         deathban / lives handling
+├── elevator.rs         sign + minecart elevators
 ├── tasks.rs            repeating tick (timers, DTR, teleports, glass, sidebar, tab)
 ├── userdata.rs         Userdata + UserdataManager
 ├── factions/

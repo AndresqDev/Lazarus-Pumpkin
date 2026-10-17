@@ -22,6 +22,7 @@ mod blockhandlers;
 mod datetime;
 mod death;
 mod deathban;
+mod elevator;
 mod factions;
 mod glass;
 mod hologram;
