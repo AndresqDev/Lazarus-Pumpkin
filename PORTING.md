@@ -148,6 +148,23 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   every load (`KITMAP_MODE`, `KITMAP_CLEAR_ITEMS`, `KITMAP_KILL_REWARD`,
   `KITMAP_KILLSTREAK.KILLS`), and the sidebar adds the `KITMAP_STATS` block from the
   raw `scoreboard.yml`.
+* **The spawn is `utilities.yml` `WORLD_SPAWN`, and it owns every spawn path.**
+  Joins (first join only, like `PvpProtHandler#onPlayerJoin`), respawns (port of
+  `DynamicEventHandler#onPlayerRespawn`'s `setRespawnLocation`, applied through
+  `PlayerSpawnLocationEvent`) and `respawn_fixes` all resolve the same entry
+  (`core::configured_spawn`). Beds and respawn anchors are cancelled on
+  `PlayerSpawnChangeEvent`, so no spawn point is ever stored — the original
+  respawned everyone at the spawn regardless, and a stored point can additionally
+  drag Pumpkin into the respawn point's dimension *before* the position override
+  applies (legacy NBT points are caught by the next-tick `respawn_fixes`
+  teleport). With `WORLD_SPAWN` unset the host's own placement is kept: it already
+  spawns players on the world-spawn surface (`top + 1`), which is the portable
+  equivalent of `player.getWorld().getSpawnLocation()` without the stale
+  `level.dat` Y. The plugin logs the resolution at startup (and a ready-to-paste
+  `WORLD_SPAWN` suggestion when the entry is unusable and the chunks are loaded).
+  Bukkit folder names (`world`, `world_nether`, `world_the_end`) are mapped to
+  their dimensions because Pumpkin names the nether/end worlds after the root
+  folder as well.
 
 ### Incomplete ports caused by host API limits
 
@@ -216,6 +233,9 @@ context):
   frames — the host events exist and this is the next candidate).
 * `PvpProtHandler#onPlayerInteract` (item-use denial while the PvP timer runs,
   behind the 10-second logout rule) — pending with the next PvP-protection pass.
+* Respawn rotation — `PlayerSpawnLocationEvent` carries only the position, so the
+  `WORLD_SPAWN` yaw/pitch are applied on the first-join teleport but respawns keep
+  the host's world-spawn rotation.
 
 ## 5. Roadmap
 

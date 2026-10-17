@@ -3,7 +3,7 @@
 
 use pumpkin_plugin_api::events::{
     EventData, EventHandler, PlayerDeathEvent, PlayerJoinEvent, PlayerLeaveEvent, PlayerMoveEvent,
-    PlayerRespawnEvent, PlayerTeleportEvent,
+    PlayerRespawnEvent, PlayerSpawnChangeEvent, PlayerSpawnLocationEvent, PlayerTeleportEvent,
 };
 use pumpkin_plugin_api::{Player, Server};
 
@@ -108,54 +108,65 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
 
 /// First-join teleport (port of `PvpProtHandler#onPlayerJoin` /
 /// `KitmapHandler#onPlayerJoin`): new players are sent to `WORLD_SPAWN` from
-/// `utilities.yml`, or their own world's spawn point when it is unset or points
-/// at a world that is not loaded.
+/// `utilities.yml`.
+///
+/// The original falls back to `player.getWorld().getSpawnLocation()` when the
+/// entry is unset; on Pumpkin the host has *already* placed the player on the
+/// world spawn (surface `top + 1`, i.e. the same spot without the stale Y kept
+/// in `level.dat`), so the fallback branch only has to leave them there.
 fn teleport_to_join_spawn(server: &Server, player: &Player) {
-    let configured = {
-        let guard = state().read().unwrap();
-        parse_utilities_location(&guard.raw.utilities.string("WORLD_SPAWN"))
-    };
-
-    if let Some((world_name, x, y, z, yaw, pitch)) = configured
-        && let Some(world) = server.get_world_by_name(&world_name)
-    {
+    if let Some((world, (x, y, z), yaw, pitch)) = core::configured_spawn(server) {
         player.teleport((x, y, z), Some(yaw), Some(pitch), world);
-        return;
     }
-
-    let world = player.get_world();
-    let spawn = world.get_spawn_location();
-    player.teleport(
-        (
-            spawn.pos.x as f64 + 0.5,
-            spawn.pos.y as f64,
-            spawn.pos.z as f64 + 0.5,
-        ),
-        Some(spawn.yaw),
-        Some(spawn.pitch),
-        world,
-    );
 }
 
-/// Parses `LocationUtils#stringToLocation`: `world|x|y|z|yaw|pitch`.
-fn parse_utilities_location(value: &str) -> Option<(String, f64, f64, f64, f32, f32)> {
-    if value.is_empty() {
-        return None;
-    }
+/// Forces every respawn onto the configured `WORLD_SPAWN` (port of
+/// `DynamicEventHandler#onPlayerRespawn`'s `event.setRespawnLocation(spawn)`).
+///
+/// The host applies `spawn-pos` to the respawn teleport right before sending
+/// the respawn packet, so this covers players with no respawn point as well as
+/// the host's own world-spawn resolution. The rotation of the configured spawn
+/// is not settable here (the event only carries the position); the first-join
+/// teleport applies it exactly.
+pub struct SpawnLocationListener;
 
-    let parts: Vec<&str> = value.split('|').collect();
-    if parts.len() < 6 {
-        return None;
-    }
+impl EventHandler<PlayerSpawnLocationEvent> for SpawnLocationListener {
+    fn handle(
+        &self,
+        server: Server,
+        mut event: EventData<PlayerSpawnLocationEvent>,
+    ) -> EventData<PlayerSpawnLocationEvent> {
+        if event.cancelled {
+            return event;
+        }
 
-    Some((
-        parts[0].to_string(),
-        parts[1].parse().ok()?,
-        parts[2].parse().ok()?,
-        parts[3].parse().ok()?,
-        parts[4].parse().ok()?,
-        parts[5].parse().ok()?,
-    ))
+        if let Some((_world, (x, y, z), _yaw, _pitch)) = core::configured_spawn(&server) {
+            event.spawn_pos = (x, y, z);
+        }
+
+        event
+    }
+}
+
+/// Beds and respawn anchors must not store spawn points: the original always
+/// respawns players at the spawn, and a stored point can additionally drag the
+/// host into another dimension (a charged anchor resolves *before* the respawn
+/// position override). `forced` entries come from the admin `/spawnpoint`
+/// command and are left alone — they cannot change the respawn destination
+/// either (see [`SpawnLocationListener`]).
+pub struct SpawnChangeListener;
+
+impl EventHandler<PlayerSpawnChangeEvent> for SpawnChangeListener {
+    fn handle(
+        &self,
+        _server: Server,
+        mut event: EventData<PlayerSpawnChangeEvent>,
+    ) -> EventData<PlayerSpawnChangeEvent> {
+        if !event.forced {
+            event.cancelled = true;
+        }
+        event
+    }
 }
 
 pub struct LeaveListener;
@@ -659,12 +670,29 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
 pub struct RespawnListener;
 
 impl EventHandler<PlayerRespawnEvent> for RespawnListener {
-    fn handle(&self, _server: Server, event: EventData<PlayerRespawnEvent>) -> EventData<PlayerRespawnEvent> {
+    fn handle(&self, server: Server, event: EventData<PlayerRespawnEvent>) -> EventData<PlayerRespawnEvent> {
         let uuid = core::uuid_of(&event.player);
         let (x, _y, z) = event.position;
         let world = event.respawned_world.get_name();
         let block_x = x.floor() as i32;
         let block_z = z.floor() as i32;
+
+        // `DynamicEventHandler#onPlayerRespawn` extinguishes the player. The
+        // destination itself is forced to `WORLD_SPAWN` by
+        // `SpawnLocationListener` (the host applies the position override
+        // before the respawn packet).
+        event.player.as_entity().set_fire_ticks(0);
+
+        // A stored respawn point in another dimension (legacy bed/anchor NBT)
+        // makes the host resolve that dimension *before* the spawn override is
+        // applied, so the player can land in the wrong world: queue a teleport
+        // for the next tick, once the respawn has been applied, restoring the
+        // original's "always respawn at the spawn" behaviour.
+        if let Some((configured_world, ..)) = core::configured_spawn(&server)
+            && configured_world.get_name() != world
+        {
+            state().write().unwrap().respawn_fixes.insert(uuid.clone());
+        }
 
         let (protect_seconds, kitmap_skips_pvp) = {
             let guard = state().read().unwrap();

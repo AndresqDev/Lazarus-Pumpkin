@@ -121,6 +121,9 @@ pub struct AppState {
     /// Transient: protected players to eject on the next tick (they respawned
     /// inside a claim they cannot enter).
     pub protection_ejects: std::collections::BTreeSet<String>,
+    /// Transient: players whose respawn landed in the wrong world (legacy
+    /// respawn point in another dimension) to teleport to the spawn next tick.
+    pub respawn_fixes: std::collections::BTreeSet<String>,
     /// Transient: players kicked with the deathban message at 1s after death
     /// (port of `Tasks.syncLater(() -> kickPlayer(...), 20L)`).
     pub pending_kicks: Vec<PendingKick>,
@@ -215,6 +218,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
             tab_cache: std::collections::BTreeMap::new(),
             spawn_centers: std::collections::BTreeMap::new(),
             protection_ejects: std::collections::BTreeSet::new(),
+            respawn_fixes: std::collections::BTreeSet::new(),
             pending_kicks: Vec::new(),
             deathban_confirm: std::collections::BTreeSet::new(),
             last_damagers: std::collections::BTreeMap::new(),

@@ -124,6 +124,7 @@ fn tick(server: &Server) {
     crate::sotw::check_expiry(server);
     process_pending(server);
     process_protection_ejects(server);
+    process_respawn_fixes(server);
     crate::deathban::process_pending_kicks(server);
 
     for player in server.get_all_players() {
@@ -346,6 +347,44 @@ fn process_protection_ejects(server: &Server) {
 
     if !retry.is_empty() {
         state().write().unwrap().protection_ejects.extend(retry);
+    }
+}
+
+/// Teleports players whose respawn landed in a different world back to the
+/// configured spawn. Only reachable with a legacy respawn point in another
+/// dimension (kept in the player NBT); new ones cannot be created
+/// (`SpawnChangeListener`) and the position override covers all other cases
+/// (`SpawnLocationListener`). Port of the unconditional respawn location set
+/// in `DynamicEventHandler#onPlayerRespawn`.
+fn process_respawn_fixes(server: &Server) {
+    let pending: Vec<String> = {
+        let mut guard = state().write().unwrap();
+        std::mem::take(&mut guard.respawn_fixes).into_iter().collect()
+    };
+    if pending.is_empty() {
+        return;
+    }
+
+    let mut retry: Vec<String> = Vec::new();
+
+    for uuid in pending {
+        let Some(player) = lookup(server, &uuid) else {
+            // Offline (e.g. kicked by the deathban): keep the flag for later.
+            retry.push(uuid);
+            continue;
+        };
+
+        let Some((world, (x, y, z), yaw, pitch)) = core::configured_spawn(server) else {
+            continue;
+        };
+        if world.get_name() == core::world_name(&player) {
+            continue;
+        }
+        player.teleport((x, y, z), Some(yaw), Some(pitch), world);
+    }
+
+    if !retry.is_empty() {
+        state().write().unwrap().respawn_fixes.extend(retry);
     }
 }
 

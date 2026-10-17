@@ -70,7 +70,9 @@ impl Plugin for LazarusPlugin {
         potion_components::init(&data_folder);
 
         // Cache world spawns before anything else so the warzone is centred correctly.
-        core::refresh_spawn_centers(&context.get_server());
+        let server = context.get_server();
+        core::refresh_spawn_centers(&server);
+        log_spawn_diagnostics(&server);
 
         commands::register(&context)?;
         listeners::register(&context)?;
@@ -94,6 +96,62 @@ impl Plugin for LazarusPlugin {
         state::save_all();
         tracing::info!("Lazarus HCF core disabled; data saved.");
         Ok(())
+    }
+}
+
+/// Logs how the join/respawn spawn resolves, so admins can copy the exact
+/// coordinates into `utilities.yml` (`WORLD_SPAWN`, `world|x|y|z|yaw|pitch`).
+///
+/// With an empty/unresolvable `WORLD_SPAWN` the port falls back to each world's
+/// own spawn point (like the original's `player.getWorld().getSpawnLocation()`);
+/// this prints those coordinates plus the top block Y as a ready-to-use value.
+fn log_spawn_diagnostics(server: &pumpkin_plugin_api::Server) {
+    let raw = {
+        let guard = state::state().read().unwrap();
+        guard.raw.utilities.string("WORLD_SPAWN")
+    };
+
+    if let Some((world, (x, y, z), yaw, pitch)) = core::configured_spawn(server) {
+        tracing::info!(
+            "spawn: WORLD_SPAWN=\"{raw}\" resolved to world '{}' ({x}, {y}, {z}, {yaw}, {pitch})",
+            world.get_name()
+        );
+        return;
+    }
+
+    for world in server.get_all_worlds() {
+        let spawn = world.get_spawn_location();
+        // The lowest buildable layer of the dimension: a `top block` on it
+        // means the chunk was not loaded and no Y can be suggested.
+        let min_y = if world.get_dimension() == "minecraft:overworld" {
+            -64
+        } else {
+            0
+        };
+        let top = world.get_top_block_y(spawn.pos.x, spawn.pos.z);
+        if top > min_y {
+            tracing::info!(
+                "spawn: WORLD_SPAWN=\"{raw}\" is unusable; world '{}' ({}) spawns at ({}, {}, {}) (top block y={top}) -> set WORLD_SPAWN: \"{}|{}.5|{}|{}.5|0|0\"",
+                world.get_name(),
+                world.get_dimension(),
+                spawn.pos.x,
+                spawn.pos.y,
+                spawn.pos.z,
+                world.get_name(),
+                spawn.pos.x,
+                top + 1,
+                spawn.pos.z
+            );
+        } else {
+            tracing::info!(
+                "spawn: WORLD_SPAWN=\"{raw}\" is unusable; world '{}' ({}) spawns at ({}, {}, {}) [chunks not loaded yet, top block unknown]",
+                world.get_name(),
+                world.get_dimension(),
+                spawn.pos.x,
+                spawn.pos.y,
+                spawn.pos.z
+            );
+        }
     }
 }
 

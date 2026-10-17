@@ -143,6 +143,70 @@ pub fn refresh_spawn_centers(server: &Server) {
     }
 }
 
+/// Resolves the `WORLD_SPAWN` entry of `utilities.yml` against the loaded
+/// worlds (same format as the original `LocationUtils#stringToLocation`).
+///
+/// Returns the world plus position and rotation. `None` when the entry is
+/// empty, malformed, or points at a world that is not loaded.
+pub fn configured_spawn(
+    server: &Server,
+) -> Option<(pumpkin_plugin_api::World, (f64, f64, f64), f32, f32)> {
+    let value = {
+        let guard = state().read().unwrap();
+        guard.raw.utilities.string("WORLD_SPAWN")
+    };
+    let (world_name, x, y, z, yaw, pitch) = parse_utilities_location(&value)?;
+    let world = resolve_world(server, &world_name)?;
+    Some((world, (x, y, z), yaw, pitch))
+}
+
+/// Resolves a world token from `utilities.yml` against the loaded worlds.
+///
+/// Pumpkin names the nether/end worlds after their *root* folder as well
+/// ("world"), so the Bukkit folder names of the original configs are mapped to
+/// their dimension first; anything else falls back to the host lookup (which
+/// also accepts dimension names like `minecraft:overworld`).
+fn resolve_world(server: &Server, token: &str) -> Option<pumpkin_plugin_api::World> {
+    let dimension = match token {
+        "world" => Some("minecraft:overworld"),
+        "world_nether" | "DIM-1" | "nether" => Some("minecraft:the_nether"),
+        "world_the_end" | "DIM1" | "end" => Some("minecraft:the_end"),
+        _ => None,
+    };
+
+    if let Some(dimension) = dimension
+        && let Some(world) = server
+            .get_all_worlds()
+            .into_iter()
+            .find(|world| world.get_dimension() == dimension)
+    {
+        return Some(world);
+    }
+
+    server.get_world_by_name(token)
+}
+
+/// Parses `LocationUtils#stringToLocation`: `world|x|y|z|yaw|pitch`.
+pub fn parse_utilities_location(value: &str) -> Option<(String, f64, f64, f64, f32, f32)> {
+    if value.is_empty() {
+        return None;
+    }
+
+    let parts: Vec<&str> = value.split('|').collect();
+    if parts.len() < 6 {
+        return None;
+    }
+
+    Some((
+        parts[0].to_string(),
+        parts[1].parse().ok()?,
+        parts[2].parse().ok()?,
+        parts[3].parse().ok()?,
+        parts[4].parse().ok()?,
+        parts[5].parse().ok()?,
+    ))
+}
+
 /// Applies the configured world borders using the live server config, centred on
 /// each world's spawn.
 ///

@@ -20,6 +20,8 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(player::MoveListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::DeathListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::RespawnListener, EventPriority::Normal, true)?;
+    context.register_event_handler(player::SpawnLocationListener, EventPriority::Normal, true)?;
+    context.register_event_handler(player::SpawnChangeListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::TeleportListener, EventPriority::Normal, true)?;
 
     context.register_event_handler(chat::ChatListener, EventPriority::Normal, true)?;
