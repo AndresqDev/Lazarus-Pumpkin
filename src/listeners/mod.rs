@@ -61,6 +61,9 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(death::DeathSignDeathListener, EventPriority::Normal, true)?;
 
     context.register_event_handler(player::DeathListener, EventPriority::Normal, true)?;
+    // Instant respawn (server addition): runs after the deathban bookkeeping so
+    // the queued kick can be detected.
+    context.register_event_handler(player::InstantRespawnListener, EventPriority::Normal, true)?;
     // Combat logger entity deaths (`VillagerCombatLogger_1_8#die`).
     context.register_event_handler(combatlogger::CombatLoggerDeathListener, EventPriority::Normal, true)?;
     // Vanilla drops of a dead logger (`dropDeathLoot` was empty on the
@@ -138,6 +141,11 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(block::BlockExplodeListener, EventPriority::High, true)?;
     context.register_event_handler(block::BlockFromToListner, EventPriority::High, true)?;
     context.register_event_handler(block::BlockIgniteListener, EventPriority::High, true)?;
+    // Fire spread/burn: the host splits the original's `BlockIgniteEvent`
+    // (SPREAD) into `BlockSpreadEvent` (air) and `BlockBurnEvent` (flammable
+    // blocks); both are cancelled so fire does not spread.
+    context.register_event_handler(block::BlockSpreadListener, EventPriority::High, true)?;
+    context.register_event_handler(block::BlockBurnListener, EventPriority::High, true)?;
     context.register_event_handler(block::PistonExtendListener, EventPriority::High, true)?;
     context.register_event_handler(block::PistonRetractListener, EventPriority::High, true)?;
 

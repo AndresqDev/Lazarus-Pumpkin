@@ -5,6 +5,7 @@ use pumpkin_plugin_api::events::{
     EventData, EventHandler, PlayerDeathEvent, PlayerJoinEvent, PlayerLeaveEvent, PlayerMoveEvent,
     PlayerRespawnEvent, PlayerSpawnChangeEvent, PlayerSpawnLocationEvent, PlayerTeleportEvent,
 };
+use pumpkin_plugin_api::scheduler::SchedulerExt;
 use pumpkin_plugin_api::{Player, Server};
 
 use crate::utils::core;
@@ -458,6 +459,18 @@ pub struct DeathListener;
 impl EventHandler<PlayerDeathEvent> for DeathListener {
     fn handle(&self, server: Server, mut event: EventData<PlayerDeathEvent>) -> EventData<PlayerDeathEvent> {
         let uuid = core::uuid_of(&event.player);
+
+        // Rejoin kill of a combat-logger victim: `die()` already sent the death
+        // message, credited the kill and applied the deathban when the logger
+        // was killed. The offline `setHealth(0)` did not fire any death event,
+        // so the host must not broadcast a second (default) message either; the
+        // cancelled event still reaches `InstantRespawnListener`, which sends
+        // the player back to spawn.
+        if state().write().unwrap().logger_rejoin_kills.remove(&uuid) {
+            event.cancelled = true;
+            return event;
+        }
+
         let name = core::name_of(&event.player);
         let world = core::world_name(&event.player);
 
@@ -649,6 +662,46 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
             guard.selection.cancel_local(&event.player);
             guard.glass.clear_type(&event.player, crate::glass::GlassType::ClaimSelection);
         }
+
+        event
+    }
+}
+
+/// Auto-respawn (server-specific addition, not in the original): the 1.8 death
+/// screen button misbehaves through ViaProxy, so every death is followed by an
+/// automatic respawn. Deathbanned players are skipped — their kick is queued
+/// by `deathban::apply_on_death` and fires ~1s later.
+pub struct InstantRespawnListener;
+
+impl EventHandler<PlayerDeathEvent> for InstantRespawnListener {
+    fn handle(&self, server: Server, event: EventData<PlayerDeathEvent>) -> EventData<PlayerDeathEvent> {
+        let uuid = core::uuid_of(&event.player);
+
+        // Two ticks: long enough for `handle_killed` to run after the event and
+        // for the deathban handler to queue its kick (checked below), short
+        // enough to feel instant.
+        server.schedule_delayed_task(2, move |server| {
+            if state()
+                .read()
+                .unwrap()
+                .pending_kicks
+                .iter()
+                .any(|kick| kick.uuid == uuid)
+            {
+                return;
+            }
+
+            let Some(player) = pumpkin_plugin_api::uuid::parse(&uuid)
+                .and_then(|id| server.get_player_by_uuid(id))
+            else {
+                return;
+            };
+            // A deathban or another handler may have revived them already.
+            if player.get_health() > 0.0 {
+                return;
+            }
+            player.respawn();
+        });
 
         event
     }

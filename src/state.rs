@@ -193,6 +193,10 @@ pub struct AppState {
     /// Transient: players kicked with the deathban message at 1s after death
     /// (port of `Tasks.syncLater(() -> kickPlayer(...), 20L)`).
     pub pending_kicks: Vec<PendingKick>,
+    /// Transient: players killed on join because their combat logger died
+    /// (`pending_logger_death`). The rejoin kill skips the normal
+    /// `DeathListener` bookkeeping — the offline `die()` already applied it.
+    pub logger_rejoin_kills: std::collections::BTreeSet<String>,
     /// Combat-logger removals retried by the tick (see [`PendingLoggerRemoval`]).
     pub pending_logger_removals: Vec<PendingLoggerRemoval>,
     /// Transient: players that already saw the "join again to use life" deathban
@@ -362,6 +366,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
             eotw_active: false,
             subclaim_creators: std::collections::BTreeMap::new(),
             pending_kicks: Vec::new(),
+            logger_rejoin_kills: std::collections::BTreeSet::new(),
             pending_logger_removals: Vec::new(),
             deathban_confirm: std::collections::BTreeSet::new(),
             last_damagers: std::collections::BTreeMap::new(),

@@ -286,18 +286,24 @@ fn handle_effect_changes(player: &Player, captured: &[CapturedEffect]) {
 pub fn on_join(server: &Server, player: &Player) {
     let uuid = core::uuid_of(player);
 
-    let (record, clear_inventory) = {
+    let (record, clear_inventory, kill_on_join) = {
         let mut guard = state().write().unwrap();
 
         // `player.removeMetadata("Logout", ...)`.
         guard.safe_logouts.remove(&uuid);
 
-        let clear = guard
+        let (clear, kill) = guard
             .userdata
             .get_mut(&uuid)
-            .is_some_and(|user| std::mem::take(&mut user.pending_logger_clear));
+            .map(|user| {
+                (
+                    std::mem::take(&mut user.pending_logger_clear),
+                    std::mem::take(&mut user.pending_logger_death),
+                )
+            })
+            .unwrap_or((false, false));
 
-        (guard.combat_loggers.remove(&uuid), clear)
+        (guard.combat_loggers.remove(&uuid), clear, kill)
     };
 
     // Deferred part of `die()`: the offline inventory was cleared (main + armor,
@@ -306,6 +312,35 @@ pub fn on_join(server: &Server, player: &Player) {
         let inventory = player.get_inventory();
         inventory.clear_main();
         inventory.clear_armor();
+    }
+
+    // The other deferred part of `die()`: the original set the offline player's
+    // health to 0, so the owner comes back dead. The host can only kill online
+    // players; defer one tick so the join packet burst (world, inventory) is
+    // delivered before the death screen.
+    if kill_on_join {
+        server.schedule_delayed_task(1, move |server| {
+            let Some(player) = pumpkin_plugin_api::uuid::parse(&uuid)
+                .and_then(|id| server.get_player_by_uuid(id))
+            else {
+                return;
+            };
+            // Already dead or gone (e.g. killed by the deathban rejoin gate).
+            if player.get_health() <= 0.0 {
+                return;
+            }
+
+            // `die()` already sent the death message, credited the kill and
+            // applied the deathban; the `DeathListener` cancels the host's
+            // death event for this kill so no second message or stats are
+            // produced, and the instant-respawn listener sends them to spawn.
+            state()
+                .write()
+                .unwrap()
+                .logger_rejoin_kills
+                .insert(uuid.clone());
+            player.kill();
+        });
     }
 
     let Some(mut record) = record else {
@@ -498,8 +533,11 @@ impl EventHandler<PlayerLeaveEvent> for CombatLoggerQuitListener {
 
         if let Some(mob) = entity.as_mob() {
             // The original overrode `move`/`getGoalTarget`/`collide` and never
-            // ran AI on the logger.
+            // ran AI on the logger. `set_ai_disabled` only sets the new NBT
+            // `NoAI` flag, which the host's mob tick does not consult, so the
+            // goal selectors are cleared too (otherwise the logger wanders).
             mob.set_ai_disabled(true);
+            mob.clear_ai_goals();
             mob.set_target(None);
         }
 
@@ -869,9 +907,11 @@ impl EventHandler<EntityDeathEvent> for CombatLoggerDeathListener {
             crate::handlers::leaderboard::add_death(&mut guard, &uuid, entry.clone());
             if let Some(user) = guard.userdata.get_mut(&uuid) {
                 user.reset_killstreak();
-                // `die()` clears the offline inventory; the wipe is applied on
-                // the next join (offline data is not writable).
+                // `die()` clears the offline inventory and sets the offline
+                // health to 0; both are applied on the next join (offline data
+                // is not writable through the host API).
                 user.pending_logger_clear = true;
+                user.pending_logger_death = true;
             }
 
             if let Some(killer_uuid) = &killer_uuid {

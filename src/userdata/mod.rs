@@ -71,6 +71,12 @@ pub struct Userdata {
     /// with the player online — so it happens on the next join.
     #[serde(default)]
     pub pending_logger_clear: bool,
+    /// Set alongside [`Self::pending_logger_clear`]: the original `die()` also
+    /// set the offline player's health to 0, so the owner must die on their
+    /// next join. Only an online player can be killed through the host API, so
+    /// the death is applied on join.
+    #[serde(default)]
+    pub pending_logger_death: bool,
 
     pub ignoring: Vec<String>,
     pub notes: Vec<String>,
@@ -98,6 +104,7 @@ impl Userdata {
             deathban_reason: None,
             deathban_location: None,
             pending_logger_clear: false,
+            pending_logger_death: false,
             ignoring: Vec::new(),
             notes: Vec::new(),
             last_kills: Vec::new(),

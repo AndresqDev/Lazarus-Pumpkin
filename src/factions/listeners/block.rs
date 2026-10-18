@@ -450,6 +450,40 @@ impl EventHandler<pumpkin_plugin_api::events::BlockIgniteEvent> for BlockIgniteL
     }
 }
 
+/// Fire spreading onto an air block. The original cancelled `BlockIgniteEvent`
+/// with cause `SPREAD`; the host reports this path through `BlockSpreadEvent`
+/// instead (the only producer of this event in the host is fire).
+pub struct BlockSpreadListener;
+
+impl EventHandler<pumpkin_plugin_api::events::BlockSpreadEvent> for BlockSpreadListener {
+    fn handle(
+        &self,
+        _server: Server,
+        mut event: EventData<pumpkin_plugin_api::events::BlockSpreadEvent>,
+    ) -> EventData<pumpkin_plugin_api::events::BlockSpreadEvent> {
+        event.cancelled = true;
+        event
+    }
+}
+
+/// Fire igniting/burning adjacent flammable blocks (the host also reports the
+/// TNT priming path through this event). The event carries no coordinates, so
+/// the original's system-faction-only guard cannot be applied; cancelling
+/// every burn matches the original's global `BlockIgniteEvent` (SPREAD)
+/// cancellation, which made fire unable to spread anywhere.
+pub struct BlockBurnListener;
+
+impl EventHandler<pumpkin_plugin_api::events::BlockBurnEvent> for BlockBurnListener {
+    fn handle(
+        &self,
+        _server: Server,
+        mut event: EventData<pumpkin_plugin_api::events::BlockBurnEvent>,
+    ) -> EventData<pumpkin_plugin_api::events::BlockBurnEvent> {
+        event.cancelled = true;
+        event
+    }
+}
+
 /// Pistons are disabled entirely (no lag machines): both extend and retract are
 /// cancelled.
 pub struct PistonExtendListener;
