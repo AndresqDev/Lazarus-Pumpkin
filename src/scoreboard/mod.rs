@@ -468,17 +468,36 @@ fn split_line(line: &str) -> (String, String) {
         return (line.to_string(), String::new());
     }
 
-    // Never cut a `&x` sequence in half (same guard as the original tab).
-    let split = if chars[15] == '&' || chars[15] == '\u{00a7}' {
-        15
-    } else {
-        16
-    };
+    // First cut at the 16-character budget, never in the middle of a code.
+    let hard = if is_code_marker(chars[15]) { 15 } else { 16 };
+    // The colours that are active at the cut: the suffix starts with them
+    // because the invisible entry between both fields resets the formatting.
+    let colors = last_colors(&chars[..hard].iter().collect::<String>());
 
-    let prefix: String = chars[..split].iter().collect();
-    let rest: String = chars[split..].iter().collect();
+    // Trailing codes at the end of the prefix render nothing, so drop them and
+    // spend the freed budget on the text that follows. Keeping them would make
+    // a decorated line lose visible characters for no reason (e.g. the
+    // separator's colour cluster would cost six of the sixteen characters).
+    let mut keep = hard;
+    while keep >= 2 && is_code_marker(chars[keep - 2]) {
+        keep -= 2;
+    }
 
-    let mut suffix: Vec<char> = last_colors(&prefix).chars().chain(rest.chars()).collect();
+    // Refill from the original cut until the prefix is back at 16 characters;
+    // a code pair is taken whole or not at all.
+    let mut i = hard;
+    while keep + (i - hard) < 16 && i < chars.len() {
+        if is_code_marker(chars[i]) {
+            if keep + (i - hard) + 2 > 16 {
+                break;
+            }
+            i += 1;
+        }
+        i += 1;
+    }
+    let prefix: String = chars[..keep].iter().chain(chars[hard..i].iter()).collect();
+
+    let mut suffix: Vec<char> = colors.chars().chain(chars[i..].iter().copied()).collect();
     if suffix.len() > 16 {
         suffix.truncate(16);
         if matches!(suffix.last(), Some('&' | '\u{00a7}')) {
@@ -487,6 +506,10 @@ fn split_line(line: &str) -> (String, String) {
     }
 
     (prefix, suffix.into_iter().collect())
+}
+
+fn is_code_marker(c: char) -> bool {
+    c == '&' || c == '\u{00a7}'
 }
 
 /// Bukkit's `ChatColor.getLastColors`: the last colour code plus the
