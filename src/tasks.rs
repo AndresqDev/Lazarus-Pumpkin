@@ -8,13 +8,13 @@
 use pumpkin_plugin_api::scheduler::SchedulerExt;
 use pumpkin_plugin_api::{Context, Player, Server};
 
-use crate::core;
+use crate::utils::core;
 use crate::glass;
 use crate::scoreboard;
 use crate::state::{state, AppState};
 use crate::tab;
-use crate::timers::{PendingAction, TimerType};
-use crate::util;
+use crate::timer::{PendingAction, TimerType};
+use crate::utils;
 
 /// Starts the repeating tasks (called from `on_load`).
 pub fn start(context: &Context) {
@@ -28,7 +28,7 @@ pub fn start(context: &Context) {
     context.schedule_repeating_task(10, 10, |server| glass_tick(&server));
     // Block gameplay handlers (`handlers.block`): one second passes of the
     // cobweb remover and the autosmel replacement queue.
-    context.schedule_repeating_task(20, 20, |server| crate::blockhandlers::tick_second(&server));
+    context.schedule_repeating_task(20, 20, |server| crate::handlers::block::tick_second(&server));
     // Re-send all active fake blocks frequently (fast resync of the render).
     context.schedule_repeating_task(2, 2, |server| {
         state().write().unwrap().glass.refresh_all(&server);
@@ -74,8 +74,8 @@ pub fn start(context: &Context) {
 
     // Apply the configured world borders (square, infinite on Y), centred on spawn.
     context.schedule_delayed_task(20, |server| {
-        crate::core::refresh_spawn_centers(&server);
-        crate::core::apply_world_borders_from_config(&server);
+        crate::utils::core::refresh_spawn_centers(&server);
+        crate::utils::core::apply_world_borders_from_config(&server);
     });
 
     // Kitmap item clear task (port of `KitmapHandler.ItemClearTask`): every
@@ -116,7 +116,7 @@ fn tick(server: &Server) {
         // original (`CustomTimer#scheduleExpiry`).
         guard.timers.purge_expired_custom();
         // Stale killer candidates (the window is 5s).
-        let now = crate::util::now_millis();
+        let now = crate::utils::now_millis();
         guard
             .last_damagers
             .retain(|_, (_, at)| now - *at <= 10_000);
@@ -124,12 +124,12 @@ fn tick(server: &Server) {
     };
 
     announce_expired(server, &expired);
-    crate::sotw::check_expiry(server);
+    crate::handlers::timer::sotw::check_expiry(server);
     process_pending(server);
     process_protection_ejects(server);
     process_respawn_fixes(server);
     crate::deathban::process_pending_kicks(server);
-    crate::combatlogger::process_pending_removals(server);
+    crate::handlers::logger::process_pending_removals(server);
 
     for player in server.get_all_players() {
         scoreboard::update(&player, server);
@@ -145,21 +145,21 @@ fn tick(server: &Server) {
         let flags: Vec<(bool, bool, bool)> = players
             .iter()
             .map(|player| {
-                let uuid = crate::core::uuid_of(player);
-                let location = crate::core::location(player);
+                let uuid = crate::utils::core::uuid_of(player);
+                let location = crate::utils::core::location(player);
                 (
                     guard
                         .timers
-                        .is_active(&uuid, crate::timers::TimerType::PvpProtection),
+                        .is_active(&uuid, crate::timer::TimerType::PvpProtection),
                     guard.timers.sotw_active() && !guard.sotw.enabled_players.contains(&uuid),
                     matches!(
-                        crate::core::territory_at_guard(
+                        crate::utils::core::territory_at_guard(
                             &guard,
                             &location.world,
                             location.block_x(),
                             location.block_z()
                         ),
-                        crate::core::Territory::Safezone
+                        crate::utils::core::Territory::Safezone
                     ),
                 )
             })
@@ -167,7 +167,7 @@ fn tick(server: &Server) {
 
         let crate::state::AppState { classes, raw, factions, .. } = &mut *guard;
         for (player, (pvp_protected, sotw_protected, in_safezone)) in players.iter().zip(flags) {
-            let uuid = crate::core::uuid_of(player);
+            let uuid = crate::utils::core::uuid_of(player);
             let faction_id = factions.by_member(&uuid).map(|f| f.id.clone());
             classes.tick_player(player, &server, &raw.language, &raw.config, faction_id.as_deref());
             classes.bard_tick(
@@ -255,7 +255,7 @@ fn announce_expired(server: &Server, expired: &[(String, TimerType)]) {
 fn process_pending(server: &Server) {
     let ready: Vec<(String, PendingAction)> = {
         let mut guard = state().write().unwrap();
-        let now = util::now_millis();
+        let now = utils::now_millis();
 
         let mut ready: Vec<(String, PendingAction)> = Vec::new();
         for (uuid, action) in guard.timers.pending.clone() {
@@ -289,7 +289,7 @@ fn process_pending(server: &Server) {
                 // `LogoutTimer#activate` completion: the quit counts as safe
                 // (`player.setMetadata("logout", ...)`) and the player is kicked
                 // (`LogoutHandler` reads the flag in the quit handler).
-                crate::combatlogger::finish_logout(&player);
+                crate::handlers::logger::finish_logout(&player);
             }
             _ => {}
         }

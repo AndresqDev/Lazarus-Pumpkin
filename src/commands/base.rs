@@ -5,10 +5,10 @@ use pumpkin_plugin_api::commands::CommandHandler;
 use pumpkin_plugin_api::{Context, Server};
 
 use super::{command, register_public_permission, reply};
-use crate::core;
+use crate::utils::core;
 use crate::scoreboard;
 use crate::state::{self, state};
-use crate::util;
+use crate::utils;
 
 pub fn register(context: &Context) -> Result<(), String> {
     register_public_permission(context, "lazarus:command.lazarus", "Use /lazarus")?;
@@ -40,9 +40,9 @@ struct ReloadExecutor;
 impl CommandHandler for ReloadExecutor {
     fn handle(&self, sender: CommandSender, server: Server, _args: ConsumedArgs) -> Result<i32, CommandError> {
         state::reload_config();
-        crate::limiters::reload();
-        crate::core::refresh_spawn_centers(&server);
-        crate::core::apply_world_borders_from_config(&server);
+        crate::handlers::limiter::reload();
+        crate::utils::core::refresh_spawn_centers(&server);
+        crate::utils::core::apply_world_borders_from_config(&server);
 
         // Re-apply tab + sidebar layouts so config changes take effect immediately.
         for player in server.get_all_players() {
@@ -140,7 +140,7 @@ impl CommandHandler for ToggleExecutor {
         }
 
         let status = if value { "&aenabled" } else { "&cdisabled" };
-        reply(&sender, util::replace("&e<label> has been <status>&e.", "<label>", label)
+        reply(&sender, utils::replace("&e<label> has been <status>&e.", "<label>", label)
             .replace("<status>", status));
         Ok(1)
     }

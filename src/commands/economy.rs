@@ -6,9 +6,9 @@ use pumpkin_plugin_api::commands::CommandHandler;
 use pumpkin_plugin_api::{Context, Server};
 
 use super::{command, int_arg, register_op_permission, register_public_permission, reply, string_arg};
-use crate::core;
+use crate::utils::core;
 use crate::state::state;
-use crate::util;
+use crate::utils;
 
 #[derive(Clone, Copy)]
 enum Action {
@@ -84,7 +84,7 @@ fn balance_other(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         return;
     };
     let Some(target) = server.get_player_by_name(&name) else {
-        reply(sender, util::replace(&state().read().unwrap().lang.player_not_online, "<player>", &name));
+        reply(sender, utils::replace(&state().read().unwrap().lang.player_not_online, "<player>", &name));
         return;
     };
     let uuid = core::uuid_of(&target);
@@ -102,7 +102,7 @@ fn change_balance(sender: &CommandSender, server: &Server, args: &ConsumedArgs, 
         return;
     };
     let Some(target) = server.get_player_by_name(&name) else {
-        reply(sender, util::replace(&state().read().unwrap().lang.player_not_online, "<player>", &name));
+        reply(sender, utils::replace(&state().read().unwrap().lang.player_not_online, "<player>", &name));
         return;
     };
     let uuid = core::uuid_of(&target);

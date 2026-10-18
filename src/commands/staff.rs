@@ -5,7 +5,7 @@ use pumpkin_plugin_api::commands::CommandHandler;
 use pumpkin_plugin_api::{Context, Server};
 
 use super::{command, register_op_permission, reply};
-use crate::core;
+use crate::utils::core;
 use crate::state::state;
 
 pub fn register(context: &Context) -> Result<(), String> {

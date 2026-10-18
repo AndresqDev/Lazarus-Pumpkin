@@ -5,10 +5,10 @@ use pumpkin_plugin_api::commands::CommandHandler;
 use pumpkin_plugin_api::{Context, Player, Server};
 
 use super::{command, int_arg, register_op_permission, register_public_permission, reply, string_arg};
-use crate::core;
+use crate::utils::core;
 use crate::kits;
 use crate::state::state;
-use crate::util;
+use crate::utils;
 
 #[derive(Clone, Copy)]
 enum Action {
@@ -89,7 +89,7 @@ fn give_self(sender: &CommandSender, args: &ConsumedArgs) {
             .userdata
             .get(&uuid)
             .and_then(|u| u.kit_delays.get(&name.to_lowercase()).copied())
-            .map(|expiry| (expiry - util::now_millis()).max(0))
+            .map(|expiry| (expiry - utils::now_millis()).max(0))
             .unwrap_or(0);
         (kit, remaining)
     };
@@ -127,7 +127,7 @@ fn give_self(sender: &CommandSender, args: &ConsumedArgs) {
     }
 
     if remaining > 0 {
-        reply(sender, format!("&cYou must wait &e{} &cbefore using that kit.", util::format_duration(remaining)));
+        reply(sender, format!("&cYou must wait &e{} &cbefore using that kit.", utils::format_duration(remaining)));
         return;
     }
 
@@ -137,7 +137,7 @@ fn give_self(sender: &CommandSender, args: &ConsumedArgs) {
         let mut guard = state().write().unwrap();
         if let Some(user) = guard.userdata.get_mut(&uuid) {
             user.kit_delays
-                .insert(name.to_lowercase(), util::now_millis() + kit.delay_seconds as i64 * 1000);
+                .insert(name.to_lowercase(), utils::now_millis() + kit.delay_seconds as i64 * 1000);
         }
     }
 
@@ -196,7 +196,7 @@ fn give_other(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         return;
     };
     let Some(target) = server.get_player_by_name(&player_name) else {
-        reply(sender, util::replace(&state().read().unwrap().lang.player_not_online, "<player>", &player_name));
+        reply(sender, utils::replace(&state().read().unwrap().lang.player_not_online, "<player>", &player_name));
         return;
     };
 

@@ -18,7 +18,7 @@ use pumpkin_plugin_api::{Context, Server};
 
 use super::{command, register_op_permission, reply};
 use crate::state::state;
-use crate::util;
+use crate::utils;
 
 pub fn register(context: &Context) -> Result<(), String> {
     register_op_permission(context, "lazarus:command.customtimer", "Manage custom timers")?;
@@ -136,7 +136,7 @@ impl CommandHandler for CustomTimerListExecutor {
         for (index, timer) in timers.iter().enumerate() {
             // `<placeholder>` keeps the stored trailing space, like the
             // original's `Color.translate(timer.getPlaceholder())`.
-            let line = util::replace_all(
+            let line = utils::replace_all(
                 &format,
                 &[
                     ("<id>", &(index + 1).to_string()),
@@ -176,15 +176,15 @@ impl CommandHandler for CustomTimerCancelExecutor {
             match &removed {
                 // `Color.translate(placeholder).replace(": ", "")`.
                 Some(timer) => {
-                    let timer_name = util::replace(&timer.placeholder, ": ", "");
-                    let message = util::replace_all(
+                    let timer_name = utils::replace(&timer.placeholder, ": ", "");
+                    let message = utils::replace_all(
                         &guard.lang.custom_timer_stopped,
                         &[("<timerName>", &timer_name), ("<player>", &sender_name)],
                     );
                     (guard.raw.language.string("PREFIX"), message)
                 }
                 None => {
-                    let message = util::replace(&guard.lang.custom_timer_not_running, "<name>", &name);
+                    let message = utils::replace(&guard.lang.custom_timer_not_running, "<name>", &name);
                     (guard.raw.language.string("PREFIX"), message)
                 }
             }
@@ -192,7 +192,7 @@ impl CommandHandler for CustomTimerCancelExecutor {
 
         if removed.is_some() {
             // `Messages.sendMessage` when the timer was stopped...
-            crate::sotw::broadcast(&server, &format!("{prefix}{message}"));
+            crate::handlers::timer::sotw::broadcast(&server, &format!("{prefix}{message}"));
         } else {
             // ...but the not-running error only reaches the sender.
             reply(&sender, &format!("{prefix}{message}"));
@@ -228,7 +228,7 @@ impl CommandHandler for CustomTimerStartExecutor {
         let duration_word = words.pop().unwrap_or_default();
         let placeholder = words.join(" ");
 
-        let Some(seconds) = util::parse_seconds(duration_word) else {
+        let Some(seconds) = utils::parse_seconds(duration_word) else {
             // `COMMANDS_INVALID_DURATION`; the original `PREFIX` is empty, so
             // the message goes out unprefixed.
             let message = state().read().unwrap().lang.invalid_duration.clone();
@@ -244,15 +244,15 @@ impl CommandHandler for CustomTimerStartExecutor {
 
             // `placeholder.replace(":", "")` on the translated text (the
             // renderer parses the colour codes anyway).
-            let timer_name = util::replace(&placeholder, ":", "");
-            let message = util::replace_all(
+            let timer_name = utils::replace(&placeholder, ":", "");
+            let message = utils::replace_all(
                 &guard.lang.custom_timer_started,
                 &[("<timerName>", &timer_name), ("<player>", &sender_name)],
             );
             (guard.raw.language.string("PREFIX"), message)
         };
 
-        crate::sotw::broadcast(&server, &format!("{prefix}{message}"));
+        crate::handlers::timer::sotw::broadcast(&server, &format!("{prefix}{message}"));
         Ok(1)
     }
 }

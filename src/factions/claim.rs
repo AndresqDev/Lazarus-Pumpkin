@@ -78,8 +78,8 @@ impl Claim {
 
     /// Every chunk covered by this claim, used to (re)build the fast index.
     pub fn chunks(&self) -> impl Iterator<Item = ChunkKey> + '_ {
-        let (min_cx, min_cz) = crate::util::chunk_key(self.min_x, self.min_z);
-        let (max_cx, max_cz) = crate::util::chunk_key(self.max_x, self.max_z);
+        let (min_cx, min_cz) = crate::utils::chunk_key(self.min_x, self.min_z);
+        let (max_cx, max_cz) = crate::utils::chunk_key(self.max_x, self.max_z);
         let world = self.world.clone();
         (min_cx..=max_cx).flat_map(move |cx| {
             let world = world.clone();
@@ -120,7 +120,7 @@ impl ClaimManager {
 
     /// Exact block lookup (port of `ClaimManager#getClaimAt`).
     pub fn claim_at(&self, world: &str, x: i32, z: i32) -> Option<(&String, &Claim)> {
-        let (cx, cz) = crate::util::chunk_key(x, z);
+        let (cx, cz) = crate::utils::chunk_key(x, z);
         let candidates = self.index.get(&(world.to_string(), cx, cz))?;
         for (owner, index) in candidates {
             if let Some(claim) = self.claims.get(owner).and_then(|list| list.get(*index))

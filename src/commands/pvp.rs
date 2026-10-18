@@ -9,10 +9,10 @@ use pumpkin_plugin_api::commands::CommandHandler;
 use pumpkin_plugin_api::{Context, Server};
 
 use super::{command, register_public_permission, reply};
-use crate::core;
+use crate::utils::core;
 use crate::state::state;
-use crate::timers::TimerType;
-use crate::util;
+use crate::timer::TimerType;
+use crate::utils;
 
 pub fn register(context: &Context) -> Result<(), String> {
     register_public_permission(context, "lazarus:command.pvp", "Use /pvp")?;
@@ -125,8 +125,8 @@ impl CommandHandler for PvpTimeExecutor {
             return Ok(0);
         }
 
-        let time = util::format_clock(remaining);
-        reply(&sender, prefixed(&prefix, &util::replace(&template, "<time>", &time)));
+        let time = utils::format_clock(remaining);
+        reply(&sender, prefixed(&prefix, &utils::replace(&template, "<time>", &time)));
         Ok(1)
     }
 }

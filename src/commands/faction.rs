@@ -18,13 +18,13 @@ use super::{
     register_public_permission, reply,
 };
 use crate::config::Config;
-use crate::core;
+use crate::utils::core;
 use crate::factions::{member, Claim, ClaimManager, Faction, FactionsManager, Role};
 use crate::glass::GlassType;
-use crate::lang::Lang;
+use crate::config::lang::Lang;
 use crate::state::{state, AppState, ChunkState};
-use crate::timers::{PendingAction, TimerType};
-use crate::util;
+use crate::timer::{PendingAction, TimerType};
+use crate::utils;
 
 #[derive(Clone, Copy)]
 enum Action {
@@ -771,11 +771,11 @@ fn create(sender: &CommandSender, _player: &Player, uuid: &str, name: &str, args
         }
 
         if faction_name.chars().count() < config.factions.name_min_length {
-            reply(sender, util::replace(&lang.faction_name_too_short, "<min>", &config.factions.name_min_length.to_string()));
+            reply(sender, utils::replace(&lang.faction_name_too_short, "<min>", &config.factions.name_min_length.to_string()));
             return;
         }
         if faction_name.chars().count() > config.factions.name_max_length {
-            reply(sender, util::replace(&lang.faction_name_too_long, "<max>", &config.factions.name_max_length.to_string()));
+            reply(sender, utils::replace(&lang.faction_name_too_long, "<max>", &config.factions.name_max_length.to_string()));
             return;
         }
         if config.factions.disallowed_names.iter().any(|n| n.eq_ignore_ascii_case(&faction_name)) {
@@ -783,14 +783,14 @@ fn create(sender: &CommandSender, _player: &Player, uuid: &str, name: &str, args
             return;
         }
         if guard.factions.name_taken(&faction_name) {
-            reply(sender, util::replace(&lang.faction_already_exists, "<name>", &faction_name));
+            reply(sender, utils::replace(&lang.faction_already_exists, "<name>", &faction_name));
             return;
         }
 
         let id = guard.factions.create(faction_name.clone(), &config);
         guard.factions.add_member(&id, member(uuid.to_string(), name.to_string(), Role::Leader));
 
-        messages = util::replace(&lang.faction_created, "<name>", &faction_name)
+        messages = utils::replace(&lang.faction_created, "<name>", &faction_name)
             .replace("<player>", name);
     }
 
@@ -822,8 +822,8 @@ fn disband(sender: &CommandSender, server: &Server, uuid: &str) {
         guard.claims.remove_all(&faction_id);
         guard.factions.disband(&faction_id);
 
-        let message = util::replace(
-            &util::replace(&lang.faction_disbanded, "<name>", &faction.name),
+        let message = utils::replace(
+            &utils::replace(&lang.faction_disbanded, "<name>", &faction.name),
             "<player>",
             &sender.get_name(),
         );
@@ -861,13 +861,13 @@ fn invite(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedAr
         };
 
         let Some(target) = server.get_player_by_name(&target_name) else {
-            reply(sender, util::replace(&lang.player_not_online, "<player>", &target_name));
+            reply(sender, utils::replace(&lang.player_not_online, "<player>", &target_name));
             return;
         };
         let target_uuid = core::uuid_of(&target);
 
         if guard.factions.by_member(&target_uuid).is_some() {
-            reply(sender, util::replace(&lang.faction_already_in_others, "<player>", &target_name));
+            reply(sender, utils::replace(&lang.faction_already_in_others, "<player>", &target_name));
             return;
         }
 
@@ -876,7 +876,7 @@ fn invite(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedAr
         };
 
         if faction.invitations.contains(&target_uuid) {
-            reply(sender, util::replace(&lang.faction_invite_already, "<player>", &target_name));
+            reply(sender, utils::replace(&lang.faction_invite_already, "<player>", &target_name));
             return;
         }
         if faction.members.len() >= config.factions.faction_limit {
@@ -889,8 +889,8 @@ fn invite(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedAr
             faction.invitations.push(target_uuid.clone());
         }
 
-        let to_target = util::replace(&lang.faction_invited, "<name>", &faction_name);
-        let to_sender = util::replace(&lang.faction_invite_others, "<player>", &target_name);
+        let to_target = utils::replace(&lang.faction_invited, "<name>", &faction_name);
+        let to_sender = utils::replace(&lang.faction_invite_others, "<player>", &target_name);
 
         core::send(&target, &to_target);
         messages = to_sender;
@@ -916,7 +916,7 @@ fn join(sender: &CommandSender, server: &Server, player: &Player, uuid: &str, na
         }
 
         let Some(faction_id) = search_player_faction(&guard, &faction_name) else {
-            reply(sender, util::replace(&lang.faction_doesnt_exist, "<argument>", &faction_name));
+            reply(sender, utils::replace(&lang.faction_doesnt_exist, "<argument>", &faction_name));
             return;
         };
 
@@ -948,7 +948,7 @@ fn join(sender: &CommandSender, server: &Server, player: &Player, uuid: &str, na
             .insert(uuid.to_string(), ChunkState::default());
 
         let faction = guard.factions.get(&faction_id).cloned().unwrap();
-        let broadcast = util::replace(&lang.faction_member_joined, "<player>", name);
+        let broadcast = utils::replace(&lang.faction_member_joined, "<player>", name);
         for member in faction.members.values() {
             if member.uuid == uuid {
                 continue;
@@ -959,7 +959,7 @@ fn join(sender: &CommandSender, server: &Server, player: &Player, uuid: &str, na
                 core::send(&online, &broadcast);
             }
         }
-        messages = util::replace(&lang.faction_joined, "<player>", name);
+        messages = utils::replace(&lang.faction_joined, "<player>", name);
         let _ = player;
     }
     reply(sender, messages);
@@ -993,7 +993,7 @@ fn leave(sender: &CommandSender, server: &Server, player: &Player, uuid: &str, n
             guard.factions.disband(&faction_id);
         }
 
-        let broadcast = util::replace(&lang.faction_member_left, "<player>", name);
+        let broadcast = utils::replace(&lang.faction_member_left, "<player>", name);
         for member in faction.members.values() {
             if member.uuid == uuid {
                 continue;
@@ -1004,7 +1004,7 @@ fn leave(sender: &CommandSender, server: &Server, player: &Player, uuid: &str, n
                 core::send(&online, &broadcast);
             }
         }
-        messages = util::replace(&lang.faction_left, "<name>", &faction.name);
+        messages = utils::replace(&lang.faction_left, "<name>", &faction.name);
         let _ = player;
     }
     reply(sender, messages);
@@ -1036,13 +1036,13 @@ fn kick(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs
         }
 
         let Some(target) = server.get_player_by_name(&target_name) else {
-            reply(sender, util::replace(&lang.player_not_online, "<player>", &target_name));
+            reply(sender, utils::replace(&lang.player_not_online, "<player>", &target_name));
             return;
         };
         let target_uuid = core::uuid_of(&target);
 
         let Some(target_role) = faction.member(&target_uuid).map(|m| m.role) else {
-            reply(sender, util::replace(&lang.faction_not_in_others, "<player>", &target_name));
+            reply(sender, utils::replace(&lang.faction_not_in_others, "<player>", &target_name));
             return;
         };
         if target_role.is_at_least(sender_role) {
@@ -1054,9 +1054,9 @@ fn kick(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs
         }
 
         guard.factions.remove_member(&faction_id, &target_uuid);
-        core::send(&target, &util::replace(&lang.faction_you_were_kicked, "<name>", &faction.name));
+        core::send(&target, &utils::replace(&lang.faction_you_were_kicked, "<name>", &faction.name));
 
-        messages = util::replace(&lang.faction_kicked, "<player>", &target_name);
+        messages = utils::replace(&lang.faction_kicked, "<player>", &target_name);
     }
     reply(sender, messages);
 }
@@ -1092,13 +1092,13 @@ fn change_role(sender: &CommandSender, server: &Server, uuid: &str, args: &Consu
         }
 
         let Some(target) = server.get_player_by_name(&target_name) else {
-            reply(sender, util::replace(&lang.player_not_online, "<player>", &target_name));
+            reply(sender, utils::replace(&lang.player_not_online, "<player>", &target_name));
             return;
         };
         let target_uuid = core::uuid_of(&target);
 
         let Some(target_role) = faction.member(&target_uuid).map(|m| m.role) else {
-            reply(sender, util::replace(&lang.faction_not_in_others, "<player>", &target_name));
+            reply(sender, utils::replace(&lang.faction_not_in_others, "<player>", &target_name));
             return;
         };
 
@@ -1114,8 +1114,8 @@ fn change_role(sender: &CommandSender, server: &Server, uuid: &str, args: &Consu
         }
 
         let template = if promote { &lang.faction_promoted } else { &lang.faction_demoted };
-        messages = util::replace(
-            &util::replace(template, "<player>", &target_name),
+        messages = utils::replace(
+            &utils::replace(template, "<player>", &target_name),
             "<role>",
             new_role.name(),
         );
@@ -1145,12 +1145,12 @@ fn transfer_leader(sender: &CommandSender, server: &Server, uuid: &str, args: &C
         }
 
         let Some(target) = server.get_player_by_name(&target_name) else {
-            reply(sender, util::replace(&lang.player_not_online, "<player>", &target_name));
+            reply(sender, utils::replace(&lang.player_not_online, "<player>", &target_name));
             return;
         };
         let target_uuid = core::uuid_of(&target);
         if !faction.members.contains_key(&target_uuid) {
-            reply(sender, util::replace(&lang.faction_not_in_others, "<player>", &target_name));
+            reply(sender, utils::replace(&lang.faction_not_in_others, "<player>", &target_name));
             return;
         }
 
@@ -1163,8 +1163,8 @@ fn transfer_leader(sender: &CommandSender, server: &Server, uuid: &str, args: &C
             }
         }
 
-        messages = util::replace(
-            &util::replace(&lang.faction_leader_changed, "<player>", &sender.get_name()),
+        messages = utils::replace(
+            &utils::replace(&lang.faction_leader_changed, "<player>", &sender.get_name()),
             "<target>",
             &target_name,
         );
@@ -1194,7 +1194,7 @@ fn rename(sender: &CommandSender, uuid: &str, args: &ConsumedArgs) {
             return;
         }
         if guard.factions.name_taken(&new_name) {
-            reply(sender, util::replace(&lang.faction_already_exists, "<name>", &new_name));
+            reply(sender, utils::replace(&lang.faction_already_exists, "<name>", &new_name));
             return;
         }
         if new_name.chars().count() < config.factions.name_min_length
@@ -1206,8 +1206,8 @@ fn rename(sender: &CommandSender, uuid: &str, args: &ConsumedArgs) {
         if let Some(faction) = guard.factions.get_mut(&faction_id) {
             faction.name = new_name.clone();
         }
-        messages = util::replace(
-            &util::replace(&lang.faction_renamed, "<name>", &faction.name),
+        messages = utils::replace(
+            &utils::replace(&lang.faction_renamed, "<name>", &faction.name),
             "<newName>",
             &new_name,
         );
@@ -1238,7 +1238,7 @@ fn toggle_chat(sender: &CommandSender, uuid: &str) {
         crate::factions::ChatType::Faction => "faction",
         crate::factions::ChatType::Ally => "ally",
     };
-    reply(sender, util::replace(&lang.faction_chat_toggled, "<status>", status));
+    reply(sender, utils::replace(&lang.faction_chat_toggled, "<status>", status));
 }
 
 fn claim(sender: &CommandSender, player: &Player, uuid: &str) {
@@ -1294,7 +1294,7 @@ fn validate_claim(
     let location = core::location(player);
     let warzone = config.warzone_radius.overworld;
     if location.block_x().abs() <= warzone && location.block_z().abs() <= warzone {
-        return Err(util::replace(
+        return Err(utils::replace(
             &lang.faction_claim_spawn_too_close,
             "<amount>",
             &warzone.to_string(),
@@ -1331,8 +1331,8 @@ fn unclaim(sender: &CommandSender, player: &Player, uuid: &str) {
         guard
             .claims
             .remove_claim_at(&faction_id, &loc.world, loc.block_x(), loc.block_z());
-        messages = util::replace(
-            &util::replace(&lang.faction_claim_removed, "<player>", &sender.get_name()),
+        messages = utils::replace(
+            &utils::replace(&lang.faction_claim_removed, "<player>", &sender.get_name()),
             "<location>",
             &format!("{}, {}", loc.block_x(), loc.block_z()),
         );
@@ -1525,7 +1525,7 @@ fn home(sender: &CommandSender, player: &Player, uuid: &str) {
         };
 
         let origin = core::location(player);
-        let expiry = crate::util::now_millis() + (warmup as i64 * 1000);
+        let expiry = crate::utils::now_millis() + (warmup as i64 * 1000);
         guard.timers.set_pending(
             uuid,
             PendingAction {
@@ -1539,7 +1539,7 @@ fn home(sender: &CommandSender, player: &Player, uuid: &str) {
             },
         );
 
-        messages = util::replace(&lang.faction_home_teleport, "<seconds>", &warmup.to_string());
+        messages = utils::replace(&lang.faction_home_teleport, "<seconds>", &warmup.to_string());
     }
     reply(sender, messages);
 }
@@ -1620,7 +1620,7 @@ fn stuck(sender: &CommandSender, server: &Server, player: &Player, uuid: &str) {
             uuid,
             PendingAction {
                 timer_type: TimerType::Stuck,
-                expiry: crate::util::now_millis() + (warmup as i64 * 1000),
+                expiry: crate::utils::now_millis() + (warmup as i64 * 1000),
                 origin_world: origin.world.clone(),
                 origin_x: origin.x,
                 origin_y: origin.y,
@@ -1629,10 +1629,10 @@ fn stuck(sender: &CommandSender, server: &Server, player: &Player, uuid: &str) {
             },
         );
 
-        messages = util::replace(
+        messages = utils::replace(
             &template,
             "<time>",
-            &util::format_duration(warmup as i64 * 1000),
+            &utils::format_duration(warmup as i64 * 1000),
         );
     }
     reply(sender, messages);
@@ -1659,9 +1659,9 @@ fn toggle_open(sender: &CommandSender, server: &Server, uuid: &str) {
             faction.open = new_value;
         }
         messages = if new_value {
-            util::replace(&lang.faction_opened, "<name>", &faction.name)
+            utils::replace(&lang.faction_opened, "<name>", &faction.name)
         } else {
-            util::replace(&lang.faction_closed, "<name>", &faction.name)
+            utils::replace(&lang.faction_closed, "<name>", &faction.name)
         };
         let _ = server;
     }
@@ -1782,7 +1782,7 @@ fn show(sender: &CommandSender, server: &Server, uuid: &str, name: Option<String
     if frozen {
         reply(sender, format!(
             " &eRegenerating: &7{}",
-            util::format_duration_words(guard.timers.freeze_remaining(&faction.id))
+            utils::format_duration_words(guard.timers.freeze_remaining(&faction.id))
         ));
     }
     reply(sender, format!(
@@ -1856,7 +1856,7 @@ fn list(sender: &CommandSender, server: &Server, uuid: &str, page: u32) {
         };
         reply(
             sender,
-            format!("{prefix}{}", util::replace(&template, "<number>", &page_total.to_string())),
+            format!("{prefix}{}", utils::replace(&template, "<number>", &page_total.to_string())),
         );
         return;
     }
@@ -1871,8 +1871,8 @@ fn list(sender: &CommandSender, server: &Server, uuid: &str, page: u32) {
         let mut lines: Vec<ListLine> = Vec::new();
 
         for template in guard.raw.language.string_list("FACTIONS.LIST_COMMAND.HEADER") {
-            lines.push(ListLine::Plain(util::replace(
-                &util::replace(&template, "<page>", &page.to_string()),
+            lines.push(ListLine::Plain(utils::replace(
+                &utils::replace(&template, "<page>", &page.to_string()),
                 "<pageTotal>",
                 &page_total.to_string(),
             )));
@@ -1905,7 +1905,7 @@ fn list(sender: &CommandSender, server: &Server, uuid: &str, page: u32) {
             let dtr = faction.dtr_string(&guard.config, guard.timers.is_frozen(faction_id));
             let max_dtr = faction.max_dtr_string(&guard.config);
 
-            let line = util::replace_all(
+            let line = utils::replace_all(
                 &format,
                 &[
                     ("<number>", &(index + 1).to_string()),
@@ -1919,7 +1919,7 @@ fn list(sender: &CommandSender, server: &Server, uuid: &str, page: u32) {
 
             lines.push(ListLine::Entry {
                 line,
-                hover: util::replace(&hover_template, "<faction>", &faction.name),
+                hover: utils::replace(&hover_template, "<faction>", &faction.name),
                 command: format!("/f show {}", faction.name),
             });
         }
@@ -1935,9 +1935,9 @@ fn list(sender: &CommandSender, server: &Server, uuid: &str, page: u32) {
         match line {
             ListLine::Plain(text) => reply(sender, text),
             ListLine::Entry { line, hover, command } => {
-                let component = util::text(&line)
+                let component = utils::text(&line)
                     .click_run_command(&command)
-                    .hover_show_text(util::text(&hover));
+                    .hover_show_text(utils::text(&hover));
                 core::send_component(&player, component);
             }
         }
@@ -1993,7 +1993,7 @@ fn top(sender: &CommandSender, _server: &Server, uuid: &str, metric: &str) {
                         .string("LEADERBOARDS.TYPE_DOESNT_EXIST"),
                 )
             };
-            reply(sender, format!("{prefix}{}", util::replace(&template, "<type>", metric)));
+            reply(sender, format!("{prefix}{}", utils::replace(&template, "<type>", metric)));
             return;
         }
     };
@@ -2063,7 +2063,7 @@ fn top(sender: &CommandSender, _server: &Server, uuid: &str, metric: &str) {
 
     let player = sender.as_player();
     for (index, (display, raw_name, value)) in entries.into_iter().enumerate() {
-        let line = util::replace_all(
+        let line = utils::replace_all(
             &line_format,
             &[
                 ("<number>", &(index + 1).to_string()),
@@ -2074,9 +2074,9 @@ fn top(sender: &CommandSender, _server: &Server, uuid: &str, metric: &str) {
 
         match &player {
             Some(player) => {
-                let component = util::text(&line)
+                let component = utils::text(&line)
                     .click_run_command(&format!("/f show {raw_name}"))
-                    .hover_show_text(util::text(&util::replace(&hover_template, "<faction>", &display)));
+                    .hover_show_text(utils::text(&utils::replace(&hover_template, "<faction>", &display)));
                 core::send_component(player, component);
             }
             // Console fallback: the original casts the sender to `Player` to
@@ -2125,7 +2125,7 @@ fn transfer_balance(
             let role = guard.factions.get(&id).and_then(|f| f.member(uuid)).map(|m| m.role);
             if role.map(|r| r.is_at_least(Role::Captain)) != Some(true) {
                 let tpl = guard.raw.language.string("FACTIONS.NO_PERMISSION");
-                let msg = util::replace(&tpl, "<role>", Role::Captain.name());
+                let msg = utils::replace(&tpl, "<role>", Role::Captain.name());
                 drop(guard);
                 return reply(sender, format!("{prefix}{msg}"));
             }
@@ -2153,7 +2153,7 @@ fn transfer_balance(
         if deposit {
             if amount > user_balance {
                 let tpl = guard.raw.language.string("FACTIONS.DEPOSIT_COMMAND.NOT_ENOUGH_MONEY");
-                let msg = util::replace(&tpl, "<amount>", &user_balance.to_string());
+                let msg = utils::replace(&tpl, "<amount>", &user_balance.to_string());
                 drop(guard);
                 return reply(sender, format!("{prefix}{msg}"));
             }
@@ -2175,7 +2175,7 @@ fn transfer_balance(
 
             messages = format!(
                 "{prefix}{}",
-                util::replace_all(
+                utils::replace_all(
                     &guard.raw.language.string("FACTIONS.DEPOSIT_COMMAND.DEPOSITED"),
                     &[("<player>", &sender.get_name()), ("<amount>", &amount.to_string())],
                 )
@@ -2183,7 +2183,7 @@ fn transfer_balance(
         } else {
             if amount > faction_balance {
                 let tpl = guard.raw.language.string("FACTIONS.WITHDRAW_COMMAND.NOT_ENOUGH_MONEY");
-                let msg = util::replace(&tpl, "<amount>", &faction_balance.to_string());
+                let msg = utils::replace(&tpl, "<amount>", &faction_balance.to_string());
                 drop(guard);
                 return reply(sender, format!("{prefix}{msg}"));
             }
@@ -2197,7 +2197,7 @@ fn transfer_balance(
 
             messages = format!(
                 "{prefix}{}",
-                util::replace_all(
+                utils::replace_all(
                     &guard.raw.language.string("FACTIONS.WITHDRAW_COMMAND.WITHDRAWN"),
                     &[("<player>", &sender.get_name()), ("<amount>", &amount.to_string())],
                 )
@@ -2230,7 +2230,7 @@ fn ally(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs
             return;
         };
         let Some(other_id) = search_player_faction(&guard, &name) else {
-            reply(sender, util::replace(&lang.faction_doesnt_exist, "<argument>", &name));
+            reply(sender, utils::replace(&lang.faction_doesnt_exist, "<argument>", &name));
             return;
         };
         if my_id == other_id {
@@ -2253,7 +2253,7 @@ fn ally(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs
             {
                 faction.allies.push(my_id.clone());
             }
-            messages = util::replace(&lang.faction_ally_added, "<faction>", &name);
+            messages = utils::replace(&lang.faction_ally_added, "<faction>", &name);
         } else {
             if let Some(faction) = guard.factions.get_mut(&my_id) {
                 faction.allies.retain(|id| id != &other_id);
@@ -2261,7 +2261,7 @@ fn ally(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArgs
             if let Some(faction) = guard.factions.get_mut(&other_id) {
                 faction.allies.retain(|id| id != &my_id);
             }
-            messages = util::replace(&lang.faction_ally_removed, "<faction>", &name);
+            messages = utils::replace(&lang.faction_ally_removed, "<faction>", &name);
         }
         let _ = server;
     }
@@ -2349,7 +2349,7 @@ fn admin_change_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs
 
     let Some(id) = search_player_faction(&guard, &name) else {
         let tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
-        let msg = util::replace(&tpl, "<argument>", &name);
+        let msg = utils::replace(&tpl, "<argument>", &name);
         drop(guard);
         return reply(sender, format!("{prefix}{msg}"));
     };
@@ -2401,13 +2401,13 @@ fn admin_change_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs
         sender,
         format!(
             "{prefix}{}",
-            util::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<value>", &dtr_string)])
+            utils::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<value>", &dtr_string)])
         ),
     );
 
     let message = format!(
         "{prefix}{}",
-        util::replace_all(
+        utils::replace_all(
             &faction_tpl,
             &[("<player>", &sender.get_name()), ("<dtr>", &dtr_string)]
         )
@@ -2477,7 +2477,7 @@ fn admin_force_role(sender: &CommandSender, server: &Server, args: &ConsumedArgs
     };
 
     let Some((faction_id, member_uuid, role, faction_name)) = found else {
-        let message = util::replace(&not_in_tpl, "<player>", &target_name);
+        let message = utils::replace(&not_in_tpl, "<player>", &target_name);
         reply(sender, format!("{prefix}{message}"));
         return;
     };
@@ -2521,7 +2521,7 @@ fn admin_force_role(sender: &CommandSender, server: &Server, args: &ConsumedArgs
         sender,
         format!(
             "{prefix}{}",
-            util::replace_all(
+            utils::replace_all(
                 &sender_tpl,
                 &[("<player>", &target_name), ("<role>", role_name)]
             )
@@ -2530,7 +2530,7 @@ fn admin_force_role(sender: &CommandSender, server: &Server, args: &ConsumedArgs
 
     let message = format!(
         "{prefix}{}",
-        util::replace_all(
+        utils::replace_all(
             &faction_tpl,
             &[("<player>", &target_name), ("<role>", role_name)]
         )
@@ -2588,7 +2588,7 @@ fn admin_force_join(sender: &CommandSender, server: &Server, args: &ConsumedArgs
         return;
     }
     let Some((id, members)) = found else {
-        let message = util::replace(&missing_tpl, "<argument>", &faction_name);
+        let message = utils::replace(&missing_tpl, "<argument>", &faction_name);
         reply(sender, format!("{prefix}{message}"));
         return;
     };
@@ -2602,7 +2602,7 @@ fn admin_force_join(sender: &CommandSender, server: &Server, args: &ConsumedArgs
 
     let message = format!(
         "{prefix}{}",
-        util::replace(&joined_tpl, "<player>", &name)
+        utils::replace(&joined_tpl, "<player>", &name)
     );
     for member_uuid in members {
         if let Some(id) = pumpkin_plugin_api::uuid::parse(&member_uuid)
@@ -2654,7 +2654,7 @@ fn admin_force_rename(sender: &CommandSender, server: &Server, args: &ConsumedAr
     let _ = usage;
 
     let Some(id) = search_player_faction(&guard, &old_arg) else {
-        let message = util::replace(&missing_tpl, "<argument>", &old_arg);
+        let message = utils::replace(&missing_tpl, "<argument>", &old_arg);
         reply(sender, format!("{prefix}{message}"));
         return;
     };
@@ -2662,7 +2662,7 @@ fn admin_force_rename(sender: &CommandSender, server: &Server, args: &ConsumedAr
     let old_name = guard.factions.get(&id).map(|f| f.name.clone()).unwrap_or_default();
 
     if old_name.eq_ignore_ascii_case(&new_name) {
-        reply(sender, format!("{prefix}{}", util::replace(&same_tpl, "<name>", &new_name)));
+        reply(sender, format!("{prefix}{}", utils::replace(&same_tpl, "<name>", &new_name)));
         return;
     }
     if config
@@ -2687,7 +2687,7 @@ fn admin_force_rename(sender: &CommandSender, server: &Server, args: &ConsumedAr
         return;
     }
     if guard.factions.name_taken(&new_name) {
-        reply(sender, format!("{prefix}{}", util::replace(&exists_tpl, "<name>", &new_name)));
+        reply(sender, format!("{prefix}{}", utils::replace(&exists_tpl, "<name>", &new_name)));
         return;
     }
 
@@ -2696,7 +2696,7 @@ fn admin_force_rename(sender: &CommandSender, server: &Server, args: &ConsumedAr
     }
     drop(guard);
 
-    let message = util::replace_all(
+    let message = utils::replace_all(
         &renamed_tpl,
         &[("<name>", &old_name), ("<newName>", &new_name)],
     );
@@ -2723,7 +2723,7 @@ fn admin_system_create(sender: &CommandSender, server: &Server, args: &ConsumedA
     if guard.factions.name_taken(&name) {
         let tpl = guard.raw.language.string("FACTIONS.FACTION_ALREADY_EXISTS");
         drop(guard);
-        reply(sender, format!("{prefix}{}", util::replace(&tpl, "<name>", &name)));
+        reply(sender, format!("{prefix}{}", utils::replace(&tpl, "<name>", &name)));
         return;
     }
     let created = guard.raw.language.string("FACTIONS.SYSTEM_CREATE_COMMAND.CREATED");
@@ -2740,7 +2740,7 @@ fn admin_system_create(sender: &CommandSender, server: &Server, args: &ConsumedA
 
     reply(
         sender,
-        format!("{prefix}{}", util::replace(&created, "<name>", &name)),
+        format!("{prefix}{}", utils::replace(&created, "<name>", &name)),
     );
 }
 
@@ -2777,14 +2777,14 @@ fn admin_system_list(sender: &CommandSender) {
 
     let count = factions.len().to_string();
     for line in &header {
-        reply(sender, util::replace(line, "<count>", &count));
+        reply(sender, utils::replace(line, "<count>", &count));
     }
     for (index, (_, color, name)) in factions.iter().enumerate() {
         let number = (index + 1).to_string();
         let display = format!("{color}{name}");
         reply(
             sender,
-            util::replace_all(
+            utils::replace_all(
                 &format_tpl,
                 &[("<number>", &number), ("<name>", &display)],
             ),
@@ -2826,7 +2826,7 @@ fn admin_system_rename(sender: &CommandSender, server: &Server, args: &ConsumedA
     let renamed_tpl = guard.raw.language.string("FACTIONS.SYSTEM_RENAME_COMMAND.RENAMED");
 
     let Some(id) = guard.factions.by_name(&old_arg).map(|f| f.id.clone()) else {
-        reply(sender, format!("{prefix}{}", util::replace(&missing_tpl, "<argument>", &old_arg)));
+        reply(sender, format!("{prefix}{}", utils::replace(&missing_tpl, "<argument>", &old_arg)));
         return;
     };
 
@@ -2846,11 +2846,11 @@ fn admin_system_rename(sender: &CommandSender, server: &Server, args: &ConsumedA
         return;
     }
     if old_name.eq_ignore_ascii_case(&new_name) {
-        reply(sender, format!("{prefix}{}", util::replace(&same_tpl, "<name>", &new_name)));
+        reply(sender, format!("{prefix}{}", utils::replace(&same_tpl, "<name>", &new_name)));
         return;
     }
     if guard.factions.name_taken(&new_name) {
-        reply(sender, format!("{prefix}{}", util::replace(&exists_tpl, "<name>", &new_name)));
+        reply(sender, format!("{prefix}{}", utils::replace(&exists_tpl, "<name>", &new_name)));
         return;
     }
 
@@ -2863,7 +2863,7 @@ fn admin_system_rename(sender: &CommandSender, server: &Server, args: &ConsumedA
         sender,
         format!(
             "{prefix}{}",
-            util::replace_all(
+            utils::replace_all(
                 &renamed_tpl,
                 &[("<faction>", &format!("{color}{old_name}")), ("<name>", &format!("{color}{new_name}"))],
             )
@@ -2906,7 +2906,7 @@ fn admin_toggle_system_flag(
     });
 
     let Some(id) = guard.factions.by_name(&name).map(|f| f.id.clone()) else {
-        let message = util::replace(&missing_tpl, "<argument>", &name);
+        let message = utils::replace(&missing_tpl, "<argument>", &name);
         reply(sender, format!("{prefix}{message}"));
         return;
     };
@@ -2927,7 +2927,7 @@ fn admin_toggle_system_flag(
             faction.safezone = !faction.safezone;
             let now = faction.safezone;
             let tpl = guard.raw.language.string("FACTIONS.SAFEZONE_COMMAND.CHANGED");
-            util::replace_all(
+            utils::replace_all(
                 &tpl,
                 &[
                     ("<faction>", &display),
@@ -2944,7 +2944,7 @@ fn admin_toggle_system_flag(
             } else {
                 "FACTIONS.ENDERPEARLS_COMMAND.DISABLED"
             });
-            util::replace(&tpl, "<faction>", &display)
+            utils::replace(&tpl, "<faction>", &display)
         }
         SystemFlag::Abilities => {
             let faction = guard.factions.get_mut(&id).unwrap();
@@ -2955,7 +2955,7 @@ fn admin_toggle_system_flag(
             } else {
                 "FACTIONS.ABILITIES_COMMAND.DISABLED"
             });
-            util::replace(&tpl, "<faction>", &display)
+            utils::replace(&tpl, "<faction>", &display)
         }
     };
     let _ = usage;
@@ -2992,7 +2992,7 @@ fn admin_color(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
     let changed_tpl = lang.string("FACTIONS.COLOR_COMMAND.CHANGED");
 
     let Some(id) = guard.factions.by_name(&name).map(|f| f.id.clone()) else {
-        let message = util::replace(&missing_tpl, "<argument>", &name);
+        let message = utils::replace(&missing_tpl, "<argument>", &name);
         reply(sender, format!("{prefix}{message}"));
         return;
     };
@@ -3007,7 +3007,7 @@ fn admin_color(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
 
     let lowered = color.to_lowercase();
     if !is_valid_color(&lowered) {
-        reply(sender, format!("{prefix}{}", util::replace(&invalid_tpl, "<color>", &color)));
+        reply(sender, format!("{prefix}{}", utils::replace(&invalid_tpl, "<color>", &color)));
         return;
     }
 
@@ -3021,7 +3021,7 @@ fn admin_color(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         sender,
         format!(
             "{prefix}{}",
-            util::replace_all(&changed_tpl, &[("<faction>", &old_display), ("<color>", &new_display)])
+            utils::replace_all(&changed_tpl, &[("<faction>", &old_display), ("<color>", &new_display)])
         ),
     );
 }
@@ -3065,7 +3065,7 @@ fn admin_deathban(sender: &CommandSender, server: &Server, args: &ConsumedArgs) 
     let changed_tpl = lang.string("FACTIONS.DEATHBAN_COMMAND.CHANGED");
 
     let Some(id) = guard.factions.by_name(&name).map(|f| f.id.clone()) else {
-        let message = util::replace(&missing_tpl, "<argument>", &name);
+        let message = utils::replace(&missing_tpl, "<argument>", &name);
         reply(sender, format!("{prefix}{message}"));
         return;
     };
@@ -3089,7 +3089,7 @@ fn admin_deathban(sender: &CommandSender, server: &Server, args: &ConsumedArgs) 
         sender,
         format!(
             "{prefix}{}",
-            util::replace_all(&changed_tpl, &[("<faction>", &display), ("<deathban>", deathban)])
+            utils::replace_all(&changed_tpl, &[("<faction>", &display), ("<deathban>", deathban)])
         ),
     );
 }
@@ -3158,7 +3158,7 @@ fn admin_tp_here(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
     };
 
     if faction_name.is_empty() {
-        let message = util::replace(&missing_tpl, "<argument>", &name);
+        let message = utils::replace(&missing_tpl, "<argument>", &name);
         reply(sender, format!("{prefix}{message}"));
         return;
     }
@@ -3179,14 +3179,14 @@ fn admin_tp_here(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
             }
             core::send(
                 &online,
-                format!("{prefix}{}", util::replace(&faction_tpl, "<player>", &core::name_of(&player))),
+                format!("{prefix}{}", utils::replace(&faction_tpl, "<player>", &core::name_of(&player))),
             );
         }
     }
 
     reply(
         sender,
-        format!("{prefix}{}", util::replace(&sender_tpl, "<faction>", &faction_name)),
+        format!("{prefix}{}", utils::replace(&sender_tpl, "<faction>", &faction_name)),
     );
 }
 
@@ -3254,7 +3254,7 @@ fn admin_remove_claim(sender: &CommandSender, server: &Server) {
         sender,
         format!(
             "{lang_prefix}{}",
-            util::replace_all(&sender_tpl, &[("<faction>", &owner_display), ("<location>", &center)])
+            utils::replace_all(&sender_tpl, &[("<faction>", &owner_display), ("<location>", &center)])
         ),
     );
 
@@ -3262,7 +3262,7 @@ fn admin_remove_claim(sender: &CommandSender, server: &Server) {
         let player_name = core::name_of(&player);
         let message = format!(
             "{lang_prefix}{}",
-            util::replace_all(&faction_tpl, &[("<player>", &player_name), ("<location>", &center)])
+            utils::replace_all(&faction_tpl, &[("<player>", &player_name), ("<location>", &center)])
         );
         for member_uuid in members {
             if let Some(id) = pumpkin_plugin_api::uuid::parse(&member_uuid)
@@ -3300,7 +3300,7 @@ fn admin_claim_for(sender: &CommandSender, server: &Server, args: &ConsumedArgs)
         .filter(|f| f.is_system())
         .map(|f| f.id.clone())
     else {
-        let message = util::replace(
+        let message = utils::replace(
             &guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST"),
             "<argument>",
             &name,
@@ -3349,7 +3349,7 @@ fn admin_claim_for(sender: &CommandSender, server: &Server, args: &ConsumedArgs)
         .get(&owner_id)
         .map(|f| format!("{}{}", f.color, f.name))
         .unwrap_or_default();
-    let message = util::replace_all(
+    let message = utils::replace_all(
         &guard.raw.language.string("FACTIONS.CLAIM_FOR_COMMAND.CLAIM_CLAIMED"),
         &[("<player>", &core::name_of(&player)), ("<faction>", &display)],
     );
@@ -3360,7 +3360,7 @@ fn admin_claim_for(sender: &CommandSender, server: &Server, args: &ConsumedArgs)
     drop(guard);
 
     // Eject PvP-protected players that ended up inside the new claim.
-    crate::core::eject_intruders(server, &claim_clone, &owner_id_clone);
+    crate::utils::core::eject_intruders(server, &claim_clone, &owner_id_clone);
 
     reply(sender, format!("{prefix}{message}"));
 }
@@ -3385,7 +3385,7 @@ fn friendly_fire(sender: &CommandSender, server: &Server) {
 
         let role = guard.factions.get(&id).and_then(|f| f.member(&uuid)).map(|m| m.role);
         if role.map(|r| r.is_at_least(Role::CoLeader)) != Some(true) {
-            let message = util::replace(&no_permission_tpl, "<role>", Role::CoLeader.name());
+            let message = utils::replace(&no_permission_tpl, "<role>", Role::CoLeader.name());
             return reply(sender, format!("{prefix}{message}"));
         }
 
@@ -3439,7 +3439,7 @@ fn uninvite(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
 
     let role = guard.factions.get(&id).and_then(|f| f.member(&uuid)).map(|m| m.role);
     if role.map(|r| r.is_at_least(Role::Captain)) != Some(true) {
-        let message = util::replace(&no_permission_tpl, "<role>", Role::Captain.name());
+        let message = utils::replace(&no_permission_tpl, "<role>", Role::Captain.name());
         drop(guard);
         return reply(sender, format!("{prefix}{message}"));
     }
@@ -3450,7 +3450,7 @@ fn uninvite(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         if let Some(faction) = guard.factions.get_mut(&id) {
             faction.invitations.clear();
         }
-        let message = util::replace(&all_tpl, "<player>", &player_name);
+        let message = utils::replace(&all_tpl, "<player>", &player_name);
         let members = guard
             .factions
             .get(&id)
@@ -3478,7 +3478,7 @@ fn uninvite(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
     };
 
     let template = if removed { uninvited_tpl } else { not_invited_tpl };
-    let message = format!("{prefix}{}", util::replace(&template, "<player>", &target));
+    let message = format!("{prefix}{}", utils::replace(&template, "<player>", &target));
     let members = guard
         .factions
         .get(&id)
@@ -3518,7 +3518,7 @@ fn auto_revive(sender: &CommandSender, server: &Server) {
 
         let role = guard.factions.get(&id).and_then(|f| f.member(&uuid)).map(|m| m.role);
         if role.map(|r| r.is_at_least(Role::CoLeader)) != Some(true) {
-            let message = util::replace(&no_perm_tpl, "<role>", Role::CoLeader.name());
+            let message = utils::replace(&no_perm_tpl, "<role>", Role::CoLeader.name());
             return reply(sender, format!("{prefix}{message}"));
         }
 
@@ -3535,7 +3535,7 @@ fn auto_revive(sender: &CommandSender, server: &Server) {
             .map(|m| m.uuid.clone())
             .collect::<Vec<_>>();
         (
-            format!("{prefix}{}", util::replace(&template, "<player>", &name)),
+            format!("{prefix}{}", utils::replace(&template, "<player>", &name)),
             members,
         )
     };
@@ -3565,7 +3565,7 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
 
         let role = guard.factions.get(&id).and_then(|f| f.member(uuid)).map(|m| m.role);
         if role.map(|r| r.is_at_least(Role::CoLeader)) != Some(true) {
-            let msg = util::replace(
+            let msg = utils::replace(
                 &guard.raw.language.string("FACTIONS.NO_PERMISSION"),
                 "<role>",
                 Role::CoLeader.name(),
@@ -3591,7 +3591,7 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
             return reply(sender, format!("{prefix}{msg}"));
         }
 
-        let (cx, cz) = crate::util::chunk_key(location.block_x(), location.block_z());
+        let (cx, cz) = crate::utils::chunk_key(location.block_x(), location.block_z());
         let x1 = cx * 16;
         let z1 = cz * 16;
         let claim = Claim::new(location.world.clone(), x1, x1 + 15, z1, z1 + 15);
@@ -3612,7 +3612,7 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
         let ignore_roads = guard.raw.config.bool("FACTION_CLAIM.CLAIM_BUFFER_IGNORE_ROADS");
         let ignore = if ignore_roads { guard.factions.road_ids() } else { Vec::new() };
         if guard.claims.within_buffer(&claim, buffer, &id, &ignore) {
-            let msg = util::replace(
+            let msg = utils::replace(
                 &guard.raw.language.string("FACTIONS.CLAIM_CLAIM_BUFFER"),
                 "<buffer>",
                 &buffer.to_string(),
@@ -3636,7 +3636,7 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
         }
 
         let player_name = core::name_of(player);
-        let msg = util::replace_all(
+        let msg = utils::replace_all(
             &guard.raw.language.string("FACTIONS.CLAIM_CLAIM_CLAIMED"),
             &[
                 ("<player>", &player_name),
@@ -3682,7 +3682,7 @@ fn lives(sender: &CommandSender, args: &ConsumedArgs) {
                 return reply(sender, format!("{prefix}{msg}"));
             };
             let amount = guard.factions.get(&id).map(|f| f.lives).unwrap_or(0);
-            let msg = util::replace(
+            let msg = utils::replace(
                 &guard.raw.language.string("FACTIONS.LIVES_COMMAND.LIVES_SELF"),
                 "<amount>",
                 &amount.to_string(),
@@ -3692,7 +3692,7 @@ fn lives(sender: &CommandSender, args: &ConsumedArgs) {
         }
         Some(name) => {
             let Some(faction_id) = search_player_faction(&guard, &name) else {
-                let msg = util::replace(
+                let msg = utils::replace(
                     &guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST"),
                     "<argument>",
                     &name,
@@ -3714,7 +3714,7 @@ fn lives(sender: &CommandSender, args: &ConsumedArgs) {
                 viewer_faction.as_deref(),
                 &guard.config.relation_colors,
             );
-            let msg = util::replace_all(
+            let msg = utils::replace_all(
                 &guard.raw.language.string("FACTIONS.LIVES_COMMAND.LIVES_OTHERS"),
                 &[("<faction>", &display), ("<amount>", &faction.lives.to_string())],
             );
@@ -3776,7 +3776,7 @@ fn lives_transfer(
     if !deposit {
         let role = guard.factions.get(&id).and_then(|f| f.member(uuid)).map(|m| m.role);
         if role.map(|r| r.is_at_least(Role::Captain)) != Some(true) {
-            let msg = util::replace(&no_perm_tpl, "<role>", Role::Captain.name());
+            let msg = utils::replace(&no_perm_tpl, "<role>", Role::Captain.name());
             drop(guard);
             return reply(sender, format!("{prefix}{msg}"));
         }
@@ -3786,7 +3786,7 @@ fn lives_transfer(
     let faction_lives = guard.factions.get(&id).map(|f| f.lives).unwrap_or(0);
 
     if deposit && user_lives < amount {
-        let msg = util::replace(
+        let msg = utils::replace(
             &guard.raw.language.string(not_enough_key),
             "<amount>",
             &user_lives.to_string(),
@@ -3819,7 +3819,7 @@ fn lives_transfer(
     let name = core::name_of(&player);
     let message = format!(
         "{prefix}{}",
-        util::replace_all(
+        utils::replace_all(
             &guard.raw.language.string(template_key),
             &[("<player>", &name), ("<amount>", &amount.to_string())],
         )
@@ -3853,7 +3853,7 @@ fn lives_revive(sender: &CommandSender, server: &Server, uuid: &str, args: &Cons
     };
     let role = guard.factions.get(&id).and_then(|f| f.member(uuid)).map(|m| m.role);
     if role.map(|r| r.is_at_least(Role::Captain)) != Some(true) {
-        let msg = util::replace(&no_perm_tpl, "<role>", Role::Captain.name());
+        let msg = utils::replace(&no_perm_tpl, "<role>", Role::Captain.name());
         drop(guard);
         return reply(sender, format!("{prefix}{msg}"));
     }
@@ -3864,7 +3864,7 @@ fn lives_revive(sender: &CommandSender, server: &Server, uuid: &str, args: &Cons
             .find(|m| m.name.eq_ignore_ascii_case(&target_name))
             .map(|m| m.uuid.clone())
     }) else {
-        let msg = util::replace(
+        let msg = utils::replace(
             &guard.raw.language.string("FACTIONS.NOT_IN_FACTION_OTHERS"),
             "<player>",
             &target_name,
@@ -3880,7 +3880,7 @@ fn lives_revive(sender: &CommandSender, server: &Server, uuid: &str, args: &Cons
         .get(&target_uuid)
         .is_some_and(|user| user.is_deathbanned())
     {
-        let msg = util::replace(
+        let msg = utils::replace(
             &guard
                 .raw
                 .language
@@ -3911,7 +3911,7 @@ fn lives_revive(sender: &CommandSender, server: &Server, uuid: &str, args: &Cons
 
     let message = format!(
         "{prefix}{}",
-        util::replace_all(
+        utils::replace_all(
             &guard.raw.language.string("FACTIONS.LIVES_REVIVE_COMMAND.REVIVED"),
             &[("<player>", &core::name_of(&player)), ("<target>", &target_name)],
         )
@@ -3977,7 +3977,7 @@ fn rally(sender: &CommandSender, server: &Server, player: &Player, uuid: &str) {
     };
     let message = format!(
         "{prefix}{}",
-        util::replace_all(
+        utils::replace_all(
             &template,
             &[("<player>", &core::name_of(player)), ("<location>", &loc_str)],
         )
@@ -4019,7 +4019,7 @@ fn remove_rally(sender: &CommandSender, server: &Server, player: &Player, uuid: 
     }
     let message = format!(
         "{prefix}{}",
-        util::replace(&removed_tpl, "<player>", &core::name_of(player))
+        utils::replace(&removed_tpl, "<player>", &core::name_of(player))
     );
     broadcast_to_faction(server, &guard, &id, &message);
     drop(guard);
@@ -4052,13 +4052,13 @@ fn focus(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArg
     };
     let role = guard.factions.get(&id).and_then(|f| f.member(uuid)).map(|m| m.role);
     if role.map(|r| r.is_at_least(Role::Captain)) != Some(true) {
-        let msg = util::replace(&no_perm_tpl, "<role>", Role::Captain.name());
+        let msg = utils::replace(&no_perm_tpl, "<role>", Role::Captain.name());
         drop(guard);
         return reply(sender, format!("{prefix}{msg}"));
     }
 
     let Some(target_id) = search_player_faction(&guard, &target_name) else {
-        let msg = util::replace(&missing_tpl, "<argument>", &target_name);
+        let msg = utils::replace(&missing_tpl, "<argument>", &target_name);
         drop(guard);
         return reply(sender, format!("{prefix}{msg}"));
     };
@@ -4085,7 +4085,7 @@ fn focus(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArg
         .and_then(|f| f.focused_faction.as_ref())
         == Some(&target_id)
     {
-        let msg = util::replace(&already_tpl, "<faction>", &target_name_real);
+        let msg = utils::replace(&already_tpl, "<faction>", &target_name_real);
         drop(guard);
         return reply(sender, format!("{prefix}{msg}"));
     }
@@ -4094,7 +4094,7 @@ fn focus(sender: &CommandSender, server: &Server, uuid: &str, args: &ConsumedArg
         faction.focused_faction = Some(target_id.clone());
     }
     for line in focused_lines {
-        let msg = format!("{prefix}{}", util::replace(&line, "<faction>", &target_name_real));
+        let msg = format!("{prefix}{}", utils::replace(&line, "<faction>", &target_name_real));
         broadcast_to_faction(server, &guard, &id, &msg);
     }
     drop(guard);
@@ -4124,7 +4124,7 @@ fn unfocus(sender: &CommandSender, _server: &Server, uuid: &str) {
     };
     let role = guard.factions.get(&id).and_then(|f| f.member(uuid)).map(|m| m.role);
     if role.map(|r| r.is_at_least(Role::Captain)) != Some(true) {
-        let msg = util::replace(&no_perm_tpl, "<role>", Role::Captain.name());
+        let msg = utils::replace(&no_perm_tpl, "<role>", Role::Captain.name());
         drop(guard);
         return reply(sender, format!("{prefix}{msg}"));
     }
@@ -4142,7 +4142,7 @@ fn unfocus(sender: &CommandSender, _server: &Server, uuid: &str) {
 
     match target_name {
         Some(name) => {
-            let msg = format!("{prefix}{}", util::replace(&unfocused_tpl, "<faction>", &name));
+            let msg = format!("{prefix}{}", utils::replace(&unfocused_tpl, "<faction>", &name));
             drop(guard);
             reply(sender, msg);
         }
@@ -4185,7 +4185,7 @@ fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         return;
     };
     let Some((id, faction_name, is_player, members)) = found else {
-        let message = util::replace(&missing_tpl, "<argument>", &name);
+        let message = utils::replace(&missing_tpl, "<argument>", &name);
         reply(sender, format!("{prefix}{message}"));
         return;
     };
@@ -4202,12 +4202,12 @@ fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
 
     reply(
         sender,
-        format!("{prefix}{}", util::replace(&sender_tpl, "<faction>", &faction_name)),
+        format!("{prefix}{}", utils::replace(&sender_tpl, "<faction>", &faction_name)),
     );
 
     let message = format!(
         "{prefix}{}",
-        util::replace(&faction_tpl, "<player>", &sender.get_name())
+        utils::replace(&faction_tpl, "<player>", &sender.get_name())
     );
     for uuid in members {
         if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
@@ -4250,7 +4250,7 @@ fn admin_clear_claims(sender: &CommandSender, server: &Server, args: &ConsumedAr
         return;
     };
     let Some((id, faction_name, is_player, members)) = found else {
-        let message = util::replace(&missing_tpl, "<argument>", &name);
+        let message = utils::replace(&missing_tpl, "<argument>", &name);
         reply(sender, format!("{prefix}{message}"));
         return;
     };
@@ -4267,7 +4267,7 @@ fn admin_clear_claims(sender: &CommandSender, server: &Server, args: &ConsumedAr
 
     reply(
         sender,
-        format!("{prefix}{}", util::replace(&sender_tpl, "<faction>", &faction_name)),
+        format!("{prefix}{}", utils::replace(&sender_tpl, "<faction>", &faction_name)),
     );
 
     if !is_player {
@@ -4276,7 +4276,7 @@ fn admin_clear_claims(sender: &CommandSender, server: &Server, args: &ConsumedAr
 
     let message = format!(
         "{prefix}{}",
-        util::replace(&faction_tpl, "<player>", &sender.get_name())
+        utils::replace(&faction_tpl, "<player>", &sender.get_name())
     );
     for uuid in members {
         if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
@@ -4310,7 +4310,7 @@ fn admin_set_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
 
     let Some(id) = search_player_faction(&guard, &name) else {
         let tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
-        let msg = util::replace(&tpl, "<argument>", &name);
+        let msg = utils::replace(&tpl, "<argument>", &name);
         drop(guard);
         return reply(sender, format!("{prefix}{msg}"));
     };
@@ -4349,13 +4349,13 @@ fn admin_set_dtr(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         sender,
         format!(
             "{prefix}{}",
-            util::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<value>", &dtr_string)])
+            utils::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<value>", &dtr_string)])
         ),
     );
 
     let message = format!(
         "{prefix}{}",
-        util::replace_all(
+        utils::replace_all(
             &faction_tpl,
             &[("<player>", &sender.get_name()), ("<dtr>", &dtr_string)]
         )
@@ -4404,7 +4404,7 @@ fn admin_set_int(sender: &CommandSender, server: &Server, args: &ConsumedArgs, f
 
     let Some(id) = search_player_faction(&guard, &name) else {
         let tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
-        let msg = util::replace(&tpl, "<argument>", &name);
+        let msg = utils::replace(&tpl, "<argument>", &name);
         drop(guard);
         return reply(sender, format!("{prefix}{msg}"));
     };
@@ -4457,13 +4457,13 @@ fn admin_set_int(sender: &CommandSender, server: &Server, args: &ConsumedArgs, f
         sender,
         format!(
             "{prefix}{}",
-            util::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<amount>", &amount)])
+            utils::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<amount>", &amount)])
         ),
     );
 
     let message = format!(
         "{prefix}{}",
-        util::replace_all(
+        utils::replace_all(
             &faction_tpl,
             &[("<player>", &sender.get_name()), ("<amount>", &amount)]
         )
@@ -4493,7 +4493,7 @@ fn admin_force_kick(sender: &CommandSender, server: &Server, args: &ConsumedArgs
     };
 
     let Some(target) = server.get_player_by_name(&name) else {
-        reply(sender, util::replace(&state().read().unwrap().lang.player_not_online, "<player>", &name));
+        reply(sender, utils::replace(&state().read().unwrap().lang.player_not_online, "<player>", &name));
         return;
     };
     let uuid = core::uuid_of(&target);
@@ -4506,7 +4506,7 @@ fn admin_force_kick(sender: &CommandSender, server: &Server, args: &ConsumedArgs
 
         let Some(faction_id) = guard.factions.by_member(&uuid).map(|f| f.id.clone()) else {
             let tpl = guard.raw.language.string("FACTIONS.NOT_IN_FACTION");
-            let msg = util::replace(&tpl, "<player>", &player_name);
+            let msg = utils::replace(&tpl, "<player>", &player_name);
             drop(guard);
             return reply(sender, format!("{prefix}{msg}"));
         };
@@ -4543,16 +4543,16 @@ fn admin_force_kick(sender: &CommandSender, server: &Server, args: &ConsumedArgs
 
         messages = (
             prefix.clone(),
-            util::replace_all(
+            utils::replace_all(
                 &guard.raw.language.string("FACTIONS.FORCE_KICK_COMMAND.KICKED_SENDER"),
                 &[("<player>", &player_name), ("<faction>", &faction_name)],
             ),
-            util::replace(
+            utils::replace(
                 &guard.raw.language.string("FACTIONS.FORCE_KICK_COMMAND.KICKED_SELF"),
                 "<name>",
                 &faction_name,
             ),
-            util::replace(
+            utils::replace(
                 &guard.raw.language.string("FACTIONS.FORCE_KICK_COMMAND.KICKED_OTHERS"),
                 "<player>",
                 &player_name,
@@ -4593,7 +4593,7 @@ fn admin_force_leader(sender: &CommandSender, server: &Server, args: &ConsumedAr
     };
 
     let Some(target) = server.get_player_by_name(&name) else {
-        reply(sender, util::replace(&state().read().unwrap().lang.player_not_online, "<player>", &name));
+        reply(sender, utils::replace(&state().read().unwrap().lang.player_not_online, "<player>", &name));
         return;
     };
     let uuid = core::uuid_of(&target);
@@ -4607,7 +4607,7 @@ fn admin_force_leader(sender: &CommandSender, server: &Server, args: &ConsumedAr
 
         let Some(faction_id) = guard.factions.by_member(&uuid).map(|f| f.id.clone()) else {
             let tpl = guard.raw.language.string("FACTIONS.NOT_IN_FACTION");
-            let msg = util::replace(&tpl, "<player>", &player_name);
+            let msg = utils::replace(&tpl, "<player>", &player_name);
             drop(guard);
             return reply(sender, format!("{prefix}{msg}"));
         };
@@ -4625,7 +4625,7 @@ fn admin_force_leader(sender: &CommandSender, server: &Server, args: &ConsumedAr
 
         if already_leader {
             let tpl = guard.raw.language.string("FACTIONS.FORCE_LEADER_COMMAND.ALREADY_LEADER");
-            let msg = util::replace(&tpl, "<player>", &player_name);
+            let msg = utils::replace(&tpl, "<player>", &player_name);
             drop(guard);
             return reply(sender, format!("{prefix}{msg}"));
         }
@@ -4644,11 +4644,11 @@ fn admin_force_leader(sender: &CommandSender, server: &Server, args: &ConsumedAr
 
         messages = (
             prefix,
-            util::replace_all(
+            utils::replace_all(
                 &guard.raw.language.string("FACTIONS.FORCE_LEADER_COMMAND.CHANGED_SENDER"),
                 &[("<player>", &player_name), ("<faction>", &faction_name)],
             ),
-            util::replace_all(
+            utils::replace_all(
                 &guard.raw.language.string("FACTIONS.FORCE_LEADER_COMMAND.CHANGED_FACTION"),
                 &[("<sender>", &sender_name), ("<player>", &player_name)],
             ),
@@ -4687,12 +4687,12 @@ fn admin_set_freeze(sender: &CommandSender, server: &Server, args: &ConsumedArgs
 
     let Some(id) = search_player_faction(&guard, &name) else {
         let tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
-        let msg = util::replace(&tpl, "<argument>", &name);
+        let msg = utils::replace(&tpl, "<argument>", &name);
         drop(guard);
         return reply(sender, format!("{prefix}{msg}"));
     };
 
-    let Some(duration) = util::parse_seconds(&time_raw) else {
+    let Some(duration) = utils::parse_seconds(&time_raw) else {
         let invalid = guard.raw.language.string("COMMANDS.INVALID_DURATION");
         drop(guard);
         return reply(sender, format!("{prefix}{invalid}"));
@@ -4714,7 +4714,7 @@ fn admin_set_freeze(sender: &CommandSender, server: &Server, args: &ConsumedArgs
         guard.timers.freeze_faction(&id, duration as u64);
     }
 
-    let time = util::format_duration_words(duration * 1000);
+    let time = utils::format_duration_words(duration * 1000);
     let sender_tpl = guard.raw.language.string("FACTIONS.SET_FREEZE_COMMAND.CHANGED_SENDER");
     let faction_tpl = guard.raw.language.string("FACTIONS.SET_FREEZE_COMMAND.CHANGED_FACTION");
     drop(guard);
@@ -4723,13 +4723,13 @@ fn admin_set_freeze(sender: &CommandSender, server: &Server, args: &ConsumedArgs
         sender,
         format!(
             "{prefix}{}",
-            util::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<time>", &time)])
+            utils::replace_all(&sender_tpl, &[("<faction>", &faction_name), ("<time>", &time)])
         ),
     );
 
     let message = format!(
         "{prefix}{}",
-        util::replace_all(&faction_tpl, &[("<player>", &sender.get_name()), ("<time>", &time)])
+        utils::replace_all(&faction_tpl, &[("<player>", &sender.get_name()), ("<time>", &time)])
     );
     for uuid in members {
         if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
@@ -4758,7 +4758,7 @@ fn admin_thaw(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
 
     let Some(id) = search_player_faction(&guard, &name) else {
         let tpl = guard.raw.language.string("FACTIONS.FACTION_DOESNT_EXIST");
-        let msg = util::replace(&tpl, "<argument>", &name);
+        let msg = utils::replace(&tpl, "<argument>", &name);
         drop(guard);
         return reply(sender, format!("{prefix}{msg}"));
     };
@@ -4783,13 +4783,13 @@ fn admin_thaw(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         sender,
         format!(
             "{prefix}{}",
-            util::replace_all(&sender_tpl, &[("<faction>", &faction_name)])
+            utils::replace_all(&sender_tpl, &[("<faction>", &faction_name)])
         ),
     );
 
     let message = format!(
         "{prefix}{}",
-        util::replace_all(&faction_tpl, &[("<player>", &sender.get_name())])
+        utils::replace_all(&faction_tpl, &[("<player>", &sender.get_name())])
     );
     for uuid in members {
         if let Some(id) = pumpkin_plugin_api::uuid::parse(&uuid)
@@ -4844,7 +4844,7 @@ fn help(sender: &CommandSender, requested: Option<String>) {
             .string("FACTIONS.HELP_COMMAND.PAGE_NOT_FOUND");
         let display = requested.unwrap_or_else(|| page.to_string());
         drop(guard);
-        return reply(sender, format!("{prefix}{}", util::replace(&template, "<page>", &display)));
+        return reply(sender, format!("{prefix}{}", utils::replace(&template, "<page>", &display)));
     }
 
     drop(guard);

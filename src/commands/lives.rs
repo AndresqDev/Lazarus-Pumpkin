@@ -15,9 +15,9 @@ use pumpkin_plugin_api::commands::CommandHandler;
 use pumpkin_plugin_api::{Context, Server};
 
 use super::{command, register_public_permission, reply, string_arg};
-use crate::core;
+use crate::utils::core;
 use crate::state::state;
-use crate::util;
+use crate::utils;
 
 pub fn register(context: &Context) -> Result<(), String> {
     register_public_permission(context, "lazarus:command.lives", "Manage lives")?;
@@ -171,7 +171,7 @@ impl CommandHandler for LivesReviveExecutor {
                     .string("LIVES_COMMAND.PLAYER_NOT_DEATHBANNED");
                 format!(
                     "{prefix}{}",
-                    util::replace(&template, "<player>", &target_name)
+                    utils::replace(&template, "<player>", &target_name)
                 )
             } else {
                 let sender_lives = guard
@@ -199,7 +199,7 @@ impl CommandHandler for LivesReviveExecutor {
                         .string("LIVES_COMMAND.SUCCESSFULLY_REVIVED_PLAYER");
                     format!(
                         "{prefix}{}",
-                        util::replace(&template, "<player>", &target_name)
+                        utils::replace(&template, "<player>", &target_name)
                     )
                 }
             }
@@ -282,7 +282,7 @@ impl CommandHandler for LivesSendExecutor {
                     (
                         format!(
                             "{prefix}{}",
-                            util::replace(&template, "<amount>", &lives.to_string())
+                            utils::replace(&template, "<amount>", &lives.to_string())
                         ),
                         false,
                     )
@@ -301,7 +301,7 @@ impl CommandHandler for LivesSendExecutor {
                     (
                         format!(
                             "{prefix}{}",
-                            util::replace_all(
+                            utils::replace_all(
                                 &template,
                                 &[
                                     ("<amount>", &lives.to_string()),
@@ -332,7 +332,7 @@ impl CommandHandler for LivesSendExecutor {
                         .string("LIVES_COMMAND.SUCCESSFULLY_RECEIVED_LIVES"),
                 )
             };
-            let message = util::replace_all(
+            let message = utils::replace_all(
                 &template,
                 &[
                     ("<amount>", &lives.to_string()),
@@ -466,7 +466,7 @@ fn change_lives(
 
             format!(
                 "{prefix}{}",
-                util::replace_all(
+                utils::replace_all(
                     &template,
                     &[("<amount>", &amount_raw), ("<player>", &target_name)],
                 )
@@ -495,7 +495,7 @@ fn change_lives(
                 }),
             )
         };
-        let message = util::replace_all(
+        let message = utils::replace_all(
             &template,
             &[
                 ("<amount>", &amount_raw),
@@ -535,10 +535,10 @@ fn send_lives_count(sender: &CommandSender, target_uuid: &str, target_name: &str
     };
 
     let message = if is_self {
-        util::replace(&template, "<lives>", &lives.to_string())
+        utils::replace(&template, "<lives>", &lives.to_string())
     } else {
-        util::replace(
-            &util::replace(&template, "<player>", target_name),
+        utils::replace(
+            &utils::replace(&template, "<player>", target_name),
             "<lives>",
             &lives.to_string(),
         )
@@ -602,7 +602,7 @@ fn player_not_found(sender: &CommandSender, name: &str) {
         .raw
         .language
         .string("COMMANDS.PLAYER_NOT_FOUND");
-    let message = prefixed(&util::replace(&template, "<player>", name));
+    let message = prefixed(&utils::replace(&template, "<player>", name));
     reply(sender, message);
 }
 

@@ -20,7 +20,7 @@ use pumpkin_plugin_api::permission::{Permission, PermissionDefault, PermissionLe
 use pumpkin_plugin_api::wit::pumpkin::plugin::command::Number;
 use pumpkin_plugin_api::Context;
 
-use crate::core;
+use crate::utils::core;
 
 /// Registers a permission node that defaults to allowing everyone.
 pub fn register_public_permission(context: &Context, node: &str, description: &str) -> Result<(), String> {
@@ -112,12 +112,12 @@ pub(crate) fn sender_player(sender: &pumpkin_plugin_api::command::CommandSender)
 
 /// Sends a message to the command sender.
 pub(crate) fn reply(sender: &pumpkin_plugin_api::command::CommandSender, message: impl AsRef<str>) {
-    sender.send_message(crate::util::text(message));
+    sender.send_message(crate::utils::text(message));
 }
 
 /// Sends an error to the command sender.
 pub(crate) fn reply_error(sender: &pumpkin_plugin_api::command::CommandSender, message: impl AsRef<str>) {
-    sender.send_error(crate::util::text(message));
+    sender.send_error(crate::utils::text(message));
 }
 
 /// The invoking player's faction id, if any.

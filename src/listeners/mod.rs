@@ -1,23 +1,27 @@
 //! Event listener registration.
+//!
+//! The event adapters that span several original packages (join/leave/death,
+//! PvP rules, claim-wand interactions, command pre-processing) live here; the
+//! adapters owned by a single package live with it (`factions::listeners`,
+//! `handlers::*`).
 
-pub mod block;
-pub mod chat;
 pub mod combat;
 pub mod command;
-pub mod entity;
 pub mod interact;
-pub mod items;
-pub mod kitmap;
 pub mod player;
 
 use pumpkin_plugin_api::events::EventPriority;
 use pumpkin_plugin_api::Context;
 
-use crate::blockhandlers;
-use crate::combatlogger;
-use crate::death;
-use crate::elevator;
-use crate::limiters;
+use crate::factions::listeners::{block, entity};
+use crate::handlers::block as blockhandlers;
+use crate::handlers::chat;
+use crate::handlers::death;
+use crate::handlers::elevator;
+use crate::handlers::kitmap;
+use crate::handlers::limiter as limiters;
+use crate::handlers::logger as combatlogger;
+use crate::handlers::timer::items;
 
 /// Registers every ported event handler.
 pub fn register(context: &Context) -> Result<(), String> {

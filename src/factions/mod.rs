@@ -1,6 +1,7 @@
 //! Factions subsystem (port of `me.qiooip.lazarus.factions`).
 
 pub mod claim;
+pub mod listeners;
 pub mod manager;
 pub mod types;
 

@@ -6,6 +6,11 @@
 //! binary-compatible port. See `PORTING.md` for the module-by-module mapping,
 //! what was omitted (knockback + LunarClient, as requested) and the roadmap.
 //!
+//! The module tree mirrors the original `me.qiooip.lazarus` package layout
+//! (`handlers/logger`, `factions/listeners`, `timer`, ...); the adapters that
+//! span several packages live in `listeners/`. Files that only existed as port
+//! glue (`state`, `tasks`) stay at the crate root.
+//!
 //! Build with `cargo build --release` and drop the produced
 //! `target/wasm32-wasip2/release/lazarus_pumpkin.wasm` into the server's
 //! `plugins/` folder.
@@ -17,34 +22,22 @@
 mod classes;
 mod commands;
 mod config;
-mod core;
-mod blockhandlers;
-mod combatlogger;
-mod datetime;
-mod death;
 mod deathban;
-mod elevator;
 mod factions;
 mod glass;
+mod handlers;
 mod hologram;
 mod kits;
-mod lang;
-mod limiters;
 mod listeners;
-mod nbt;
-mod potion_components;
 mod scoreboard;
 mod selection;
-mod sotw;
 mod staffmode;
 mod state;
 mod tab;
-mod tab_api;
 mod tasks;
-mod timers;
+mod timer;
 mod userdata;
-mod util;
-mod yaml;
+mod utils;
 
 use pumpkin_plugin_api::permissions;
 use pumpkin_plugin_api::{Context, Plugin, PluginMetadata};
@@ -74,11 +67,11 @@ impl Plugin for LazarusPlugin {
         // The plugin's private data folder is our persistence + config location.
         let data_folder = context.get_data_folder();
         state::init(data_folder.clone())?;
-        potion_components::init(&data_folder);
+        utils::potion_components::init(&data_folder);
 
         // Cache world spawns before anything else so the warzone is centred correctly.
         let server = context.get_server();
-        core::refresh_spawn_centers(&server);
+        utils::core::refresh_spawn_centers(&server);
         log_spawn_diagnostics(&server);
 
         commands::register(&context)?;
@@ -86,9 +79,9 @@ impl Plugin for LazarusPlugin {
         // Death messages are fully handled by the plugin: the `headdrop`
         // permission is registered and the vanilla broadcast is turned off (the
         // host has no per-death silent flag, see `death::init`).
-        death::init(&context, &server);
+        handlers::death::init(&context, &server);
         // Combat logger bypass node (`lazarus.combatlogger.bypass`).
-        combatlogger::init(&context);
+        handlers::logger::init(&context);
         tasks::start(&context);
 
         // KitmapHandler constructor: clear every PvP protection on startup so
@@ -107,7 +100,7 @@ impl Plugin for LazarusPlugin {
 
     fn on_unload(&self, context: Context) -> pumpkin_plugin_api::Result<()> {
         // `CobwebRemoveHandler#disable`: put every tracked cobweb back to air.
-        blockhandlers::clear_cobwebs(&context.get_server());
+        handlers::block::clear_cobwebs(&context.get_server());
         state::save_all();
         tracing::info!("Lazarus HCF core disabled; data saved.");
         Ok(())
@@ -126,7 +119,7 @@ fn log_spawn_diagnostics(server: &pumpkin_plugin_api::Server) {
         guard.raw.utilities.string("WORLD_SPAWN")
     };
 
-    if let Some((world, (x, y, z), yaw, pitch)) = core::configured_spawn(server) {
+    if let Some((world, (x, y, z), yaw, pitch)) = utils::core::configured_spawn(server) {
         tracing::info!(
             "spawn: WORLD_SPAWN=\"{raw}\" resolved to world '{}' ({x}, {y}, {z}, {yaw}, {pitch})",
             world.get_name()

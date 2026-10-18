@@ -7,12 +7,12 @@ use pumpkin_plugin_api::events::{
 };
 use pumpkin_plugin_api::{Player, Server};
 
-use crate::core;
+use crate::utils::core;
 use crate::factions::Location;
 use crate::scoreboard;
 use crate::state::{state, ChunkState};
-use crate::timers::TimerType;
-use crate::util;
+use crate::timer::TimerType;
+use crate::utils;
 
 pub struct JoinListener;
 
@@ -46,8 +46,8 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
         };
 
         if welcome_enabled {
-            let message = util::replace(&welcome_message, "<player>", &name);
-            event.join_message = util::text(message);
+            let message = utils::replace(&welcome_message, "<player>", &name);
+            event.join_message = utils::text(message);
         }
 
         // First-join spawn teleport (port of `PvpProtHandler#onPlayerJoin` and,
@@ -91,14 +91,14 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
         // Combat logger (`CombatLoggerHandler#onPlayerJoin`): clears the
         // safe-logout flag, applies the deferred inventory wipe of a dead logger
         // and restores a live one.
-        crate::combatlogger::on_join(&server, &event.player);
+        crate::handlers::logger::on_join(&server, &event.player);
 
         // Hide vanished staff from the joiner.
         state().read().unwrap().staff.apply_vanish_to(&server, &event.player);
 
         // SOTW: hide safezone players from the joiner (port of
         // `SotwHandler#onPlayerJoin`).
-        crate::sotw::on_player_join(&server, &event.player, in_safezone);
+        crate::handlers::timer::sotw::on_player_join(&server, &event.player, in_safezone);
 
         scoreboard::setup(&event.player);
         crate::tab::setup(&event.player, &server);
@@ -294,8 +294,8 @@ fn check_movement(
 
             let viewer_faction = guard.factions.by_member(uuid).map(|f| f.id.clone());
 
-            let leaving = util::replace(
-                &util::replace(
+            let leaving = utils::replace(
+                &utils::replace(
                     &guard.raw.language.string("FACTIONS.CLAIM_MESSAGES.LEAVING"),
                     "<faction>",
                     &core::territory_display_guard(
@@ -307,8 +307,8 @@ fn check_movement(
                 "<deathban>",
                 &core::deathban_string_guard(&guard, &from_territory),
             );
-            let entering = util::replace(
-                &util::replace(
+            let entering = utils::replace(
+                &utils::replace(
                     &guard.raw.language.string("FACTIONS.CLAIM_MESSAGES.ENTERING"),
                     "<faction>",
                     &core::territory_display_guard(&guard, &to_territory, viewer_faction.as_deref()),
@@ -321,7 +321,7 @@ fn check_movement(
         }
 
         // Remember the latest position for the next check (and teleports).
-        let (cx, cz) = util::chunk_key(tx.floor() as i32, tz.floor() as i32);
+        let (cx, cz) = utils::chunk_key(tx.floor() as i32, tz.floor() as i32);
         guard.chunk_cache.insert(
             uuid.to_string(),
             ChunkState { world: world.to_string(), cx, cz, territory: to_territory },
@@ -418,7 +418,7 @@ impl EventHandler<PlayerMoveEvent> for MoveListener {
         // SOTW visibility follows the safezone boundary (port of
         // `SotwHandler#toggleSotwInvisibility(Player, Faction)`).
         if is_safezone != was_safezone {
-            crate::sotw::update_player_visibility(&server, &event.player, is_safezone);
+            crate::handlers::timer::sotw::update_player_visibility(&server, &event.player, is_safezone);
         }
 
         // Claim leave/enter messages + warmup cancels (`checkMovement`).
@@ -443,7 +443,7 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
 
         // `Player#getKiller` replacement: the last player to damage the victim
         // within the combat window.
-        let (killer_uuid, killer_player) = match crate::death::resolve_killer(&server, &uuid) {
+        let (killer_uuid, killer_player) = match crate::handlers::death::resolve_killer(&server, &uuid) {
             Some((killer_uuid, killer_player)) => (Some(killer_uuid), Some(killer_player)),
             None => (None, None),
         };
@@ -463,11 +463,11 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
         // `DeathMessageHandler#getDeathMessage`: the message is also the
         // deathban reason and the `/lastdeaths` entry. Built before the kill is
         // credited so the killer's displayed count already includes it.
-        let reason = crate::death::build_message(&server, &event.player, killer_player.as_ref());
+        let reason = crate::handlers::death::build_message(&server, &event.player, killer_player.as_ref());
 
         // Date prefix and `§`-to-`&` conversion of
         // `Userdata#addLastKillOrDeathEntry`.
-        let date = crate::datetime::now_from_config();
+        let date = crate::utils::datetime::now_from_config();
         let entry = format!("{date} - {}", reason.replace('§', "&"));
 
         let mut messages: Vec<(String, String)> = Vec::new();
@@ -540,7 +540,7 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
             // `PlayerFaction#onDeath` + the silent warmup cancels (shared with
             // the combat logger's offline victim).
             if let Some((faction_id, message)) =
-                crate::death::faction_on_death(&mut guard, &uuid, &name, &world, &config)
+                crate::handlers::death::faction_on_death(&mut guard, &uuid, &name, &world, &config)
             {
                 messages.push((faction_id, message));
             }
@@ -581,14 +581,14 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
                 )
             };
             let message =
-                util::replace(&template, "<amount>", &victim_killstreak_lost.to_string());
+                utils::replace(&template, "<amount>", &victim_killstreak_lost.to_string());
             core::send(&event.player, &format!("{prefix}{message}"));
         }
 
         if let Some((killer, streak, commands)) = killer_killstreak_reward {
             for command in &commands {
                 server.execute_command(
-                    &util::replace(command, "<player>", &killer),
+                    &utils::replace(command, "<player>", &killer),
                     pumpkin_plugin_api::server::CommandSender::Console,
                 );
             }
@@ -599,18 +599,18 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
                 .raw
                 .language
                 .string("KITMAP_KILLSTREAK.MESSAGE");
-            let message = util::replace_all(
+            let message = utils::replace_all(
                 &template,
                 &[("<player>", &killer), ("<amount>", &streak.to_string())],
             );
-            crate::sotw::broadcast(&server, &message);
+            crate::handlers::timer::sotw::broadcast(&server, &message);
         }
 
         if let Some(commands) = kill_reward_commands {
             if let Some(killer) = &killer_name {
                 for command in &commands {
                     server.execute_command(
-                        &util::replace(command, "<player>", killer),
+                        &utils::replace(command, "<player>", killer),
                         pumpkin_plugin_api::server::CommandSender::Console,
                     );
                 }
@@ -620,8 +620,8 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
         // `DeathMessageHandler#onPlayerDeath` delivery: the victim, the killer
         // and every player with death messages enabled (the vanilla broadcast is
         // disabled at load, see `death::init`).
-        crate::death::send_death_message(&server, &uuid, killer_uuid.as_deref(), &reason);
-        event.death_message = util::text(&reason);
+        crate::handlers::death::send_death_message(&server, &uuid, killer_uuid.as_deref(), &reason);
+        event.death_message = utils::text(&reason);
 
         // Deathban (`DeathbanManager#onPlayerDeath`; the kick fires ~1s later,
         // like the original's `Tasks.syncLater`).
@@ -778,7 +778,7 @@ impl EventHandler<PlayerTeleportEvent> for TeleportListener {
 
         // SOTW: update visibility for the destination (no-op when the timer is
         // not running or hiding is disabled).
-        crate::sotw::update_player_visibility(&server, &event.player, in_safezone);
+        crate::handlers::timer::sotw::update_player_visibility(&server, &event.player, in_safezone);
 
         // `PlayerEventListener#onPlayerTeleport` also runs `checkMovement`, so
         // teleports announce claim changes immediately (and cancel warmups).

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::config::Config;
-use crate::util;
+use crate::utils;
 
 /// A serialisable location. Bukkit's `Location` is replaced by this plain struct
 /// because Pumpkin has no persistent location type — world is stored by name.
@@ -221,7 +221,7 @@ impl Faction {
             ally_invitations: Vec::new(),
             members: BTreeMap::new(),
             announcement: None,
-            created_at: crate::util::now_millis(),
+            created_at: crate::utils::now_millis(),
         }
     }
 
@@ -254,7 +254,7 @@ impl Faction {
             ally_invitations: Vec::new(),
             members: BTreeMap::new(),
             announcement: None,
-            created_at: crate::util::now_millis(),
+            created_at: crate::utils::now_millis(),
         }
     }
 
@@ -379,14 +379,14 @@ impl Faction {
         format!(
             "{}{}{}",
             self.dtr_color(),
-            util::java_double(self.dtr),
+            utils::java_double(self.dtr),
             self.dtr_character(config, frozen)
         )
     }
 
     /// `PlayerFaction#getMaxDtrString` = maximum DTR rounded to one decimal.
     pub fn max_dtr_string(&self, config: &Config) -> String {
-        util::java_double((self.max_dtr(config) * 10.0).round() / 10.0)
+        utils::java_double((self.max_dtr(config) * 10.0).round() / 10.0)
     }
 
     pub fn home_string(&self) -> String {

@@ -21,10 +21,10 @@ use crate::selection::SelectionManager;
 use crate::staffmode::StaffManager;
 use pumpkin_plugin_api::Entity;
 use crate::factions::{ClaimManager, FactionsManager};
-use crate::lang::Lang;
-use crate::timers::TimerManager;
+use crate::config::lang::Lang;
+use crate::timer::TimerManager;
 use crate::userdata::UserdataManager;
-use crate::yaml::ConfigFile;
+use crate::config::yaml::ConfigFile;
 
 /// Raw YAML configs — the original files, read 1:1 (Fase 0).
 pub struct RawConfigs {
@@ -103,7 +103,7 @@ pub struct AppState {
     pub claims: ClaimManager,
     pub userdata: UserdataManager,
     pub timers: TimerManager,
-    pub sotw: crate::sotw::SotwState,
+    pub sotw: crate::handlers::timer::sotw::SotwState,
     pub glass: GlassManager,
     pub selection: SelectionManager,
     pub staff: StaffManager,
@@ -158,7 +158,7 @@ pub struct AppState {
     /// Live combat logger entities (`CombatLoggerHandler#combatLoggers`),
     /// keyed by the victim uuid. Memory only, like the original (restarting
     /// the server loses the loggers).
-    pub combat_loggers: std::collections::BTreeMap<String, crate::combatlogger::CombatLogger>,
+    pub combat_loggers: std::collections::BTreeMap<String, crate::handlers::logger::CombatLogger>,
     /// `CombatLoggerHandler#kickAll`: set while EOTW shuts the server down, so
     /// no loggers spawn (`setKickAll`).
     pub combat_logger_kick_all: bool,
@@ -209,7 +209,7 @@ pub struct ChunkState {
     pub world: String,
     pub cx: i32,
     pub cz: i32,
-    pub territory: crate::core::Territory,
+    pub territory: crate::utils::core::Territory,
 }
 
 static STATE: OnceLock<RwLock<AppState>> = OnceLock::new();
@@ -236,9 +236,9 @@ pub fn init(data_folder: String) -> Result<(), String> {
     // original `SystemTimer#loadTimer` reactivates from `timers.yml`). Old files
     // stored whole seconds; both are accepted.
     if timers.sotw_remaining_millis > 0 {
-        timers.sotw_until = Some(crate::util::now_millis() + timers.sotw_remaining_millis);
+        timers.sotw_until = Some(crate::utils::now_millis() + timers.sotw_remaining_millis);
     } else if let Some(seconds) = timers.sotw_remaining_seconds_legacy.filter(|seconds| *seconds > 0) {
-        timers.sotw_until = Some(crate::util::now_millis() + seconds as i64 * 1000);
+        timers.sotw_until = Some(crate::utils::now_millis() + seconds as i64 * 1000);
     }
     let holograms: std::collections::BTreeMap<String, Hologram> =
         load_json(&data_folder, "holograms.json");
@@ -252,7 +252,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
     let mut classes = crate::classes::PvpClassManager::new();
     classes.load(&raw.classes);
 
-    let sotw = crate::sotw::SotwState::new(config.sotw.hide_players);
+    let sotw = crate::handlers::timer::sotw::SotwState::new(config.sotw.hide_players);
 
     STATE
         .set(RwLock::new(AppState {
@@ -589,7 +589,7 @@ where
 /// Renames a store that failed to parse out of the way (`<name>.corrupt-<ts>`)
 /// so the next save can never silently overwrite (and destroy) the bad file.
 fn preserve_corrupt(folder: &str, name: &str) {
-    let backup = format!("{folder}/{name}.corrupt-{}", crate::util::now_millis());
+    let backup = format!("{folder}/{name}.corrupt-{}", crate::utils::now_millis());
     match std::fs::rename(format!("{folder}/{name}"), &backup) {
         Ok(()) => tracing::warn!("corrupt {name} preserved as {backup}"),
         Err(error) => tracing::warn!("failed to preserve corrupt {name}: {error}"),

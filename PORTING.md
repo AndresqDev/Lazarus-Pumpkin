@@ -372,40 +372,62 @@ Still to port (in rough priority order):
 
 ## 6. Files
 
+The tree mirrors the original `me.qiooip.lazarus` packages: each feature lives
+in its package folder (`handlers/logger`, `factions/listeners`, `timer`, ...).
+Files that only exist as port glue (global state, the repeating tick) stay at
+the crate root, and the event adapters that span several original packages stay
+in `listeners/` (the original distributed them across packages; here they keep
+one file per event family, and each file's header names its original class).
+
 ```
 src/
 ├── lib.rs              plugin entry (metadata, permissions, lifecycle)
 ├── state.rs            global state + JSON/TOML persistence
-├── config.rs           Config (config.toml, tab.toml, scoreboard.toml, deathban)
-├── lang.rs             Lang (lang.toml)
-├── util.rs             colour/string/time helpers
-├── core.rs             host-API bridge + territory resolution
-├── scoreboard.rs       sidebar renderer (placeholders + teams)
-├── tab.rs              tab list header/footer + names
-├── glass.rs            client-side block render engine (send_block_change)
-├── selection.rs        claim wand + selection state
-├── timers.rs           TimerManager (player/faction/custom timers, PvP-prot banking, SOTW)
-├── staffmode.rs        vanish + staff mode
-├── sotw.rs             Start-Of-The-World timer, immunity + safezone hiding
-├── hologram.rs         TextDisplay holograms
-├── kits.rs             inventory kits (lore + enchantments)
-├── datetime.rs         `DATE_FORMAT`/`TIMEZONE` formatter (FastDateFormat subset)
-├── death.rs            death messages, stattrak, head drops, death signs
-├── deathban.rs         deathban / lives handling
-├── elevator.rs         sign + minecart elevators
-├── limiters.rs         enchant/potion/entity limits (limiters.yml)
-├── combatlogger.rs     combat loggers + /logout warmup
 ├── tasks.rs            repeating tick (timers, DTR, teleports, glass, sidebar, tab)
-├── userdata.rs         Userdata + UserdataManager
+├── config/
+│   ├── mod.rs          Config (config.toml, tab.toml, scoreboard.toml, deathban)
+│   ├── lang.rs         Lang (lang.toml)
+│   └── yaml.rs         YAML subset parser (original-style config/language files)
+├── utils/
+│   ├── mod.rs          colour/string/time helpers
+│   ├── core.rs         host-API bridge + territory resolution
+│   ├── datetime.rs     `DATE_FORMAT`/`TIMEZONE` formatter (FastDateFormat subset)
+│   ├── nbt.rs          NBT tree helpers for the host bridge
+│   └── potion_components.rs  native potion-component table bridge
+├── classes/            PvP classes (Archer/Bard/Miner/Rogue/Mage/Bomber)
+├── deathban/           deathban / lives handling
+├── glass/              client-side block render engine (send_block_change)
+├── hologram/           TextDisplay holograms
+├── kits/               inventory kits (lore + enchantments)
+├── scoreboard/         sidebar renderer (placeholders + teams)
+├── selection/          claim wand + selection state
+├── staffmode/          vanish + staff mode
+├── tab/
+│   ├── mod.rs          tab list driver (native companion state)
+│   └── api.rs          shared tab-state model + writer
+├── timer/              TimerManager (player/faction/custom timers, PvP-prot banking, SOTW)
+├── userdata/           Userdata + UserdataManager
 ├── factions/
 │   ├── types.rs        Faction, Role, Relation, ChatType, Location
 │   ├── claim.rs        Claim + ClaimManager (chunk index)
-│   └── manager.rs      FactionsManager
+│   ├── manager.rs      FactionsManager
+│   └── listeners/      block + entity protection (`factions.listeners`)
+├── handlers/
+│   ├── block/          auto-smelt, cobweb, crowbar, subclaims, found ore, ...
+│   ├── chat/           chat formatting + faction chat (`handlers.chat`)
+│   ├── death/          death messages, stattrak, head drops, death signs
+│   ├── elevator/       sign + minecart elevators
+│   ├── kitmap/         kitmap mode (safezone item-drop denial)
+│   ├── limiter/        enchant/potion/entity limits (limiters.yml)
+│   ├── logger/         combat loggers + /logout warmup
+│   └── timer/          enderpearl / golden apple cooldowns + SOTW
 ├── commands/
 │   ├── mod.rs          registration helpers
 │   ├── base.rs         /lazarus + setting toggles
+│   ├── crowbar.rs      /crowbar
 │   ├── customtimer.rs  /customtimer (start/cancel/list)
 │   ├── deathban.rs     /deathban check|revive
+│   ├── economy.rs      /balance + economy admin commands
 │   ├── lastdeaths.rs   /lastdeaths + /lastkills
 │   ├── faction.rs      /f command tree (+ admin subcommands)
 │   ├── lives.rs        /lives
@@ -416,12 +438,9 @@ src/
 │   ├── sotw.rs         /sotw (start/stop/hideplayers/enable/time)
 │   └── kit.rs          /kit
 └── listeners/
+    ├── mod.rs          registration order (the original `HandlerManager`)
     ├── player.rs       join/leave/move/death/respawn/teleport
-    ├── chat.rs         faction/ally chat
     ├── combat.rs       friendly fire, combat tag, pvp protection
-    ├── block.rs        claim block protection
     ├── command.rs      blocked commands
-    ├── interact.rs     claim wand interactions + sneak tracking
-    ├── kitmap.rs       kitmap mode (safezone item-drop denial)
-    └── items.rs        enderpearl / golden apple cooldowns
+    └── interact.rs     claim wand interactions + sneak tracking
 ```

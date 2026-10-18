@@ -4,9 +4,9 @@
 use pumpkin_plugin_api::events::{EventData, EventHandler, PlayerCommandPreprocessEvent};
 use pumpkin_plugin_api::Server;
 
-use crate::core;
+use crate::utils::core;
 use crate::state::state;
-use crate::timers::TimerType;
+use crate::timer::TimerType;
 
 pub struct CommandPreprocessListener;
 

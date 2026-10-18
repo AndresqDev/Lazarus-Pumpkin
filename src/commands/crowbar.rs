@@ -7,10 +7,10 @@ use pumpkin_plugin_api::commands::CommandHandler;
 use pumpkin_plugin_api::{Context, Server};
 
 use super::{command, register_op_permission, reply, string_arg};
-use crate::blockhandlers;
-use crate::core;
+use crate::handlers::block as blockhandlers;
+use crate::utils::core;
 use crate::state::state;
-use crate::util;
+use crate::utils;
 
 enum Action {
     Usage,
@@ -74,7 +74,7 @@ fn give(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
     let Some(target) = server.get_player_by_name(&name) else {
         reply(
             sender,
-            util::replace(
+            utils::replace(
                 &state().read().unwrap().lang.player_not_online,
                 "<player>",
                 &name,
@@ -89,7 +89,7 @@ fn give(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
 
     reply(
         sender,
-        util::replace(&prefixed("CROWBAR.GAVE"), "<player>", &core::name_of(&target)),
+        utils::replace(&prefixed("CROWBAR.GAVE"), "<player>", &core::name_of(&target)),
     );
     core::send(&target, prefixed("CROWBAR.RECEIVED"));
 }

@@ -11,7 +11,7 @@ use pumpkin_plugin_api::{Context, Server};
 
 use super::{command, register_public_permission, reply};
 use crate::state::state;
-use crate::timers::TimerType;
+use crate::timer::TimerType;
 
 /// `LogoutCommand` had no permission node defined in the original (`super(...,
 /// "lazarus.logout", true)`); like `/pvp`, the port registers a public node.
@@ -33,7 +33,7 @@ impl CommandHandler for LogoutExecutor {
             reply(&sender, &message);
             return Ok(0);
         };
-        let uuid = crate::core::uuid_of(&player);
+        let uuid = crate::utils::core::uuid_of(&player);
 
         // `LogoutTimer#isActive(player)`.
         let already_running = {
@@ -65,7 +65,7 @@ impl CommandHandler for LogoutExecutor {
             )
         };
 
-        crate::combatlogger::start_logout(&player, seconds);
+        crate::handlers::logger::start_logout(&player, seconds);
         reply(
             &sender,
             &format!("{prefix}{}", template.replace("<seconds>", &seconds.to_string())),

@@ -5,10 +5,10 @@ use pumpkin_plugin_api::commands::CommandHandler;
 use pumpkin_plugin_api::{Context, Player, Server};
 
 use super::{command, int_arg, register_op_permission, reply, string_arg};
-use crate::core;
+use crate::utils::core;
 use crate::hologram::Hologram;
 use crate::state::state;
-use crate::util;
+use crate::utils;
 
 #[derive(Clone, Copy)]
 enum Action {
@@ -91,7 +91,7 @@ fn create(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
     guard.hologram_entities.insert(name.clone(), entities);
     guard.holograms.insert(name.clone(), holo);
 
-    let message = util::replace(&guard.lang.hologram_created, "<name>", &name);
+    let message = utils::replace(&guard.lang.hologram_created, "<name>", &name);
     drop(guard);
     reply(sender, message);
 }
@@ -103,12 +103,12 @@ fn delete(sender: &CommandSender, args: &ConsumedArgs) {
     {
         let mut guard = state().write().unwrap();
         if guard.holograms.remove(&name).is_none() {
-            message = util::replace(&guard.lang.hologram_not_found, "<name>", &name);
+            message = utils::replace(&guard.lang.hologram_not_found, "<name>", &name);
         } else {
             if let Some(entities) = guard.hologram_entities.remove(&name) {
                 crate::hologram::despawn(entities);
             }
-            message = util::replace(&guard.lang.hologram_deleted, "<name>", &name);
+            message = utils::replace(&guard.lang.hologram_deleted, "<name>", &name);
         }
     }
     reply(sender, message);
@@ -122,7 +122,7 @@ fn add_line(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
     {
         let mut guard = state().write().unwrap();
         let Some(holo) = guard.holograms.get_mut(&name).cloned() else {
-            reply(sender, util::replace(&guard.lang.hologram_not_found, "<name>", &name));
+            reply(sender, utils::replace(&guard.lang.hologram_not_found, "<name>", &name));
             return;
         };
 
@@ -130,7 +130,7 @@ fn add_line(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         updated.lines.push(text);
         respawn(server, &mut guard, &name, updated);
 
-        message = util::replace(&guard.lang.hologram_line_added, "<name>", &name);
+        message = utils::replace(&guard.lang.hologram_line_added, "<name>", &name);
     }
     reply(sender, message);
 }
@@ -143,7 +143,7 @@ fn remove_line(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
     {
         let mut guard = state().write().unwrap();
         let Some(holo) = guard.holograms.get(&name).cloned() else {
-            reply(sender, util::replace(&guard.lang.hologram_not_found, "<name>", &name));
+            reply(sender, utils::replace(&guard.lang.hologram_not_found, "<name>", &name));
             return;
         };
         if index < 0 || index as usize >= holo.lines.len() {
@@ -155,7 +155,7 @@ fn remove_line(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         updated.lines.remove(index as usize);
         respawn(server, &mut guard, &name, updated);
 
-        message = util::replace(&guard.lang.hologram_line_removed, "<name>", &name);
+        message = utils::replace(&guard.lang.hologram_line_removed, "<name>", &name);
     }
     reply(sender, message);
 }
@@ -167,7 +167,7 @@ fn tp_here(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
 
     let mut guard = state().write().unwrap();
     let Some(holo) = guard.holograms.get(&name).cloned() else {
-        reply(sender, util::replace(&guard.lang.hologram_not_found, "<name>", &name));
+        reply(sender, utils::replace(&guard.lang.hologram_not_found, "<name>", &name));
         return;
     };
 

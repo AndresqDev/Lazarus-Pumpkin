@@ -14,12 +14,12 @@ use pumpkin_plugin_api::events::{
 };
 use pumpkin_plugin_api::{Player, Server};
 
-use crate::core::{self, Dimension, Territory};
+use crate::utils::core::{self, Dimension, Territory};
 use crate::factions::{Claim, ClaimManager, Faction};
 use crate::glass;
 use crate::selection::SelectedPos;
 use crate::state::{state, AppState};
-use crate::util;
+use crate::utils;
 
 /// Dedupes interaction events: the host fires them once per hand (main + off),
 /// and the event carries no hand field, so identical interactions within a short
@@ -28,7 +28,7 @@ static LAST_INTERACT: std::sync::Mutex<Option<std::collections::HashMap<String, 
     std::sync::Mutex::new(None);
 
 pub(crate) fn is_duplicate(key: &str) -> bool {
-    let now = crate::util::now_millis();
+    let now = crate::utils::now_millis();
     let mut guard = LAST_INTERACT.lock().unwrap();
     let map = guard.get_or_insert_with(std::collections::HashMap::new);
     if let Some(last) = map.get(key)
@@ -193,7 +193,7 @@ fn set_position(player: &Player, uuid: &str, pos: BlockPos, left: bool) {
             };
 
             if min_size != -1 && min_size < config.factions.min_claim_size {
-                messages.push(util::replace(
+                messages.push(utils::replace(
                     &lang.faction_claim_too_small,
                     "<size>",
                     &format!(
@@ -202,7 +202,7 @@ fn set_position(player: &Player, uuid: &str, pos: BlockPos, left: bool) {
                     ),
                 ));
             } else if max_size != -1 && max_size > config.factions.max_claim_size {
-                messages.push(util::replace(
+                messages.push(utils::replace(
                     &lang.faction_claim_too_large,
                     "<size>",
                     &format!(
@@ -226,7 +226,7 @@ fn set_position(player: &Player, uuid: &str, pos: BlockPos, left: bool) {
                 } else {
                     &lang.faction_claim_position_two
                 };
-                messages.push(util::replace(template, "<location>", &location_string(x, z)));
+                messages.push(utils::replace(template, "<location>", &location_string(x, z)));
 
                 // Price message when both positions are set (player claims only).
                 if !is_system
@@ -240,7 +240,7 @@ fn set_position(player: &Player, uuid: &str, pos: BlockPos, left: bool) {
                         format!("&a${price}")
                     };
                     messages.push(
-                        util::replace_all(
+                        utils::replace_all(
                             &lang.faction_claim_price_message,
                             &[
                                 ("<price>", &price_string),
@@ -308,7 +308,7 @@ fn purchase(server: &Server, player: &Player, uuid: &str) {
             match factions.get(&target_id).cloned() {
                 Some(target) => {
                     claims.add_claim(&target_id, claim.clone());
-                    messages.push(util::replace_all(
+                    messages.push(utils::replace_all(
                         &system_claimed,
                         &[
                             ("<player>", &core::name_of(player)),
@@ -318,7 +318,7 @@ fn purchase(server: &Server, player: &Player, uuid: &str) {
                 }
                 None => {
                     // The faction disappeared: drop the wand instead of erroring.
-                    messages.push(util::replace(&system_missing, "<argument>", &target_id));
+                    messages.push(utils::replace(&system_missing, "<argument>", &target_id));
                 }
             }
 
@@ -378,7 +378,7 @@ fn purchase(server: &Server, player: &Player, uuid: &str) {
             &faction_id,
             &ignore_factions,
         ) {
-            messages.push(util::replace(
+            messages.push(utils::replace(
                 &lang.faction_claim_buffer,
                 "<buffer>",
                 &config.factions.claim_buffer.to_string(),
@@ -404,7 +404,7 @@ fn purchase(server: &Server, player: &Player, uuid: &str) {
         glass::update_selection(glass, player, None, None);
 
         let player_name = core::name_of(player);
-        messages.push(util::replace_all(
+        messages.push(utils::replace_all(
             &lang.faction_claim_claimed,
             &[
                 ("<player>", &player_name),
@@ -421,7 +421,7 @@ fn purchase(server: &Server, player: &Player, uuid: &str) {
 
     // Eject PvP-protected players that ended up inside the new claim.
     if let Some((claim, owner_id)) = created {
-        crate::core::eject_intruders(server, &claim, &owner_id);
+        crate::utils::core::eject_intruders(server, &claim, &owner_id);
     }
 }
 

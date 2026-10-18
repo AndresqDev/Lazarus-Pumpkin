@@ -9,11 +9,11 @@ use pumpkin_plugin_api::events::{
 };
 use pumpkin_plugin_api::{DamageType, Player, Server};
 
-use crate::core;
+use crate::utils::core;
 use crate::factions::Relation;
 use crate::state::state;
-use crate::timers::TimerType;
-use crate::util;
+use crate::timer::TimerType;
+use crate::utils;
 
 pub struct EntityDamageByEntityListener;
 
@@ -29,7 +29,7 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
         // Pumpkin attributes projectile damage directly to the shooter player, so
         // detect arrows via the damage type (the damager entity IS the player).
         let projectile_damager = event.cause.to_ascii_lowercase().contains("arrow");
-        let cause = crate::death::cause_from_damage_debug(&event.cause).unwrap_or_default();
+        let cause = crate::handlers::death::cause_from_damage_debug(&event.cause).unwrap_or_default();
 
         let direct = core::player_by_entity(&server, event.damager_id);
         let shooter = if direct.is_none() {
@@ -50,14 +50,14 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
         if let Some(victim) = &victim {
             let entity_key = match &shooter {
                 Some(Shooter::Entity(key)) => Some(key.clone()),
-                None if direct.is_none() => crate::death::entity_key_by_id(event.damager_id),
+                None if direct.is_none() => crate::handlers::death::entity_key_by_id(event.damager_id),
                 _ => None,
             };
             let damager_uuid = direct.as_ref().map(core::uuid_of).or_else(|| match &shooter {
                 Some(Shooter::Player(uuid)) => Some(uuid.clone()),
                 _ => None,
             });
-            let projectile = crate::death::is_projectile_cause(&cause) || shooter.is_some();
+            let projectile = crate::handlers::death::is_projectile_cause(&cause) || shooter.is_some();
             let record = crate::state::LastDamage {
                 cause,
                 entity: true,
@@ -103,7 +103,7 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
                         shooter,
                         &format!(
                             "{prefix}{}",
-                            util::replace_all(
+                            utils::replace_all(
                                 &template,
                                 &[("<victim>", "mannequin"), ("<seconds>", &duration.to_string())],
                             )
@@ -235,7 +235,7 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
                     .raw
                     .language
                     .string("FACTIONS.DENY_DAMAGE_ALLIES");
-                let message = util::replace(
+                let message = utils::replace(
                     &template,
                     "<player>",
                     &format!("{}{}", ally_color, core::name_of(&victim)),
@@ -269,7 +269,7 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
                     guard.lang.pvp_protection_deny_attacker.clone(),
                 )
             };
-            let message = util::replace(&template, "<name>", &core::name_of(&victim));
+            let message = utils::replace(&template, "<name>", &core::name_of(&victim));
             core::send(&damager, &format!("{prefix}{message}"));
             return event;
         }
@@ -303,7 +303,7 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
                     &victim,
                     &format!(
                         "{prefix}{}",
-                        util::replace_all(
+                        utils::replace_all(
                             &victim_tpl,
                             &[("<player>", &tagger_name), ("<seconds>", &duration.to_string())],
                         )
@@ -313,7 +313,7 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
                     &damager,
                     &format!(
                         "{prefix}{}",
-                        util::replace_all(
+                        utils::replace_all(
                             &tagger_tpl,
                             &[("<victim>", &victim_name), ("<seconds>", &duration.to_string())],
                         )
@@ -364,7 +364,7 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
                             guard.raw.classes.keys("ROGUE_CLASS.BACKSTAB.EFFECTS"),
                         )
                     };
-                    let now = util::now_millis();
+                    let now = utils::now_millis();
                     let on_cooldown = {
                         let guard = state().read().unwrap();
                         guard
@@ -395,7 +395,7 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
                             &damager,
                             format!(
                                 "{prefix}{}",
-                                util::replace(&template, "<seconds>", &seconds.to_string())
+                                utils::replace(&template, "<seconds>", &seconds.to_string())
                             ),
                         );
                     } else {
@@ -455,10 +455,10 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
         }
 
         // Activate combat tags for both players.
-        let tag_message = util::replace(
+        let tag_message = utils::replace(
             "&cYou are now combat tagged for &e<time>&c.",
             "<time>",
-            &crate::util::format_duration(tag_seconds as i64 * 1000),
+            &crate::utils::format_duration(tag_seconds as i64 * 1000),
         );
 
         {
@@ -470,7 +470,7 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
             // victim, valid for a few seconds.
             guard
                 .last_damagers
-                .insert(victim_uuid.clone(), (damager_uuid.clone(), util::now_millis()));
+                .insert(victim_uuid.clone(), (damager_uuid.clone(), utils::now_millis()));
         }
 
         if !victim_combat {
@@ -501,7 +501,7 @@ impl EventHandler<EntityDamageEvent> for EntityDamageListener {
         // the generic event first; `EntityDamageByEntity` overwrites it with the
         // damager details afterwards.
         {
-            let cause = crate::death::normalize_cause(&format!("{:?}", event.damage_type));
+            let cause = crate::handlers::death::normalize_cause(&format!("{:?}", event.damage_type));
             let record = crate::state::LastDamage {
                 cause,
                 entity: false,
@@ -528,7 +528,7 @@ impl EventHandler<EntityDamageEvent> for EntityDamageListener {
         // SOTW: players are damage-immune unless they opted out; falling into the
         // void teleports back to the world spawn first (port of
         // `SotwHandler#onPlayerDamage`, which cancels every cause).
-        if crate::sotw::is_under_protection(&uuid) {
+        if crate::handlers::timer::sotw::is_under_protection(&uuid) {
             if event.damage_type == DamageType::OutOfWorld {
                 let world_name = core::world_name(&player);
                 let (x, z) = state()
@@ -725,7 +725,7 @@ impl EventHandler<ProjectileLaunchEvent> for ProjectileLaunchListener {
         if let Some(shooter_id) = event.shooter_id {
             if let Some(shooter) = core::player_by_entity(&server, shooter_id) {
                 set_projectile_shooter(event.entity_id, Shooter::Player(core::uuid_of(&shooter)));
-            } else if let Some(key) = crate::death::entity_key_by_id(shooter_id) {
+            } else if let Some(key) = crate::handlers::death::entity_key_by_id(shooter_id) {
                 set_projectile_shooter(event.entity_id, Shooter::Entity(key));
             }
         }

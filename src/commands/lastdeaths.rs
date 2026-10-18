@@ -8,9 +8,9 @@ use pumpkin_plugin_api::commands::CommandHandler;
 use pumpkin_plugin_api::{Context, Server};
 
 use super::{command, present_string_arg, register_op_permission, reply};
-use crate::core;
+use crate::utils::core;
 use crate::state::state;
-use crate::util;
+use crate::utils;
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -96,7 +96,7 @@ fn last_stats(sender: &CommandSender, server: &Server, args: &ConsumedArgs, kind
 
     let Some(target) = server.get_player_by_name(&name) else {
         let message = state().read().unwrap().lang.player_not_online.clone();
-        reply(sender, &util::replace(&message, "<player>", &name));
+        reply(sender, &utils::replace(&message, "<player>", &name));
         return;
     };
 
@@ -121,14 +121,14 @@ fn last_stats(sender: &CommandSender, server: &Server, args: &ConsumedArgs, kind
 
     if entries.is_empty() {
         let message = prefixed(empty);
-        reply(sender, &util::replace(&message, "<player>", &target_name));
+        reply(sender, &utils::replace(&message, "<player>", &target_name));
         return;
     }
 
     reply(sender, "");
-    reply(sender, &util::replace(&raw(header), "<player>", &target_name));
+    reply(sender, &utils::replace(&raw(header), "<player>", &target_name));
     for entry in entries {
-        reply(sender, &util::replace(&raw(line), placeholder, &entry));
+        reply(sender, &utils::replace(&raw(line), placeholder, &entry));
     }
     reply(sender, "");
 }

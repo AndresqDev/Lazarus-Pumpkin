@@ -107,7 +107,7 @@ impl CommandHandler for SotwStartExecutor {
             guard.config.sotw.default_time_minutes * 60
         };
 
-        if !crate::sotw::start(&server, seconds) {
+        if !crate::handlers::timer::sotw::start(&server, seconds) {
             let (prefix, message) = {
                 let guard = state().read().unwrap();
                 (
@@ -137,7 +137,7 @@ impl CommandHandler for SotwStartTimeExecutor {
 
         // Port of `StringUtils#parseSeconds`; `KIT_PREFIX` is empty in the
         // original, so the invalid-duration message goes out unprefixed.
-        let Some(seconds) = crate::util::parse_seconds(&raw) else {
+        let Some(seconds) = crate::utils::parse_seconds(&raw) else {
             let message = state().read().unwrap().lang.invalid_duration.clone();
             reply(&sender, &message);
             return Ok(0);
@@ -145,7 +145,7 @@ impl CommandHandler for SotwStartTimeExecutor {
 
         // `activate(0)` quirk kept: a zero duration still starts (and
         // broadcasts) the timer.
-        if !crate::sotw::start(&server, seconds.max(0) as u64) {
+        if !crate::handlers::timer::sotw::start(&server, seconds.max(0) as u64) {
             let (prefix, message) = {
                 let guard = state().read().unwrap();
                 (
@@ -169,7 +169,7 @@ impl CommandHandler for SotwStopExecutor {
             return Ok(0);
         }
 
-        if !crate::sotw::stop(&server) {
+        if !crate::handlers::timer::sotw::stop(&server) {
             let (prefix, message) = {
                 let guard = state().read().unwrap();
                 (
@@ -195,7 +195,7 @@ impl CommandHandler for SotwHidePlayersExecutor {
 
         // The original runs the toggle async (with a null sender, so only the
         // visibility update happens there); synchronous is fine here.
-        let hidden = crate::sotw::toggle_invisibility(&server, None);
+        let hidden = crate::handlers::timer::sotw::toggle_invisibility(&server, None);
 
         let (prefix, message) = {
             let guard = state().read().unwrap();
@@ -237,7 +237,7 @@ impl CommandHandler for SotwEnableExecutor {
 
         // `enableSotwForPlayer` sends its own not-running/already/enabled
         // messages.
-        crate::sotw::enable_for_player(&player);
+        crate::handlers::timer::sotw::enable_for_player(&player);
         Ok(1)
     }
 }
@@ -248,7 +248,7 @@ impl CommandHandler for SotwTimeExecutor {
     fn handle(&self, sender: CommandSender, _server: Server, _args: ConsumedArgs) -> Result<i32, CommandError> {
         // `SotwTimer#isActive` — `/sotw time` needs no permission and works
         // from the console too.
-        if !crate::sotw::is_active() {
+        if !crate::handlers::timer::sotw::is_active() {
             let (prefix, message) = {
                 let guard = state().read().unwrap();
                 (
@@ -267,8 +267,8 @@ impl CommandHandler for SotwTimeExecutor {
                 guard.lang.sotw_time_status.clone(),
             )
         };
-        let time = crate::util::format_clock(crate::sotw::remaining());
-        let message = crate::util::replace(&template, "<time>", &time);
+        let time = crate::utils::format_clock(crate::handlers::timer::sotw::remaining());
+        let message = crate::utils::replace(&template, "<time>", &time);
         reply(&sender, format!("{prefix}{message}"));
         Ok(1)
     }

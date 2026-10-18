@@ -7,9 +7,9 @@ use pumpkin_plugin_api::commands::CommandHandler;
 use pumpkin_plugin_api::{Context, Server};
 
 use super::{command, present_string_arg, register_op_permission, reply, sender_player};
-use crate::core;
+use crate::utils::core;
 use crate::state::state;
-use crate::util;
+use crate::utils;
 
 #[derive(Clone, Copy)]
 enum Action {
@@ -96,12 +96,12 @@ fn lookup(server: &Server, name: &str) -> Option<(String, String)> {
 
 fn not_found(sender: &CommandSender, name: &str) {
     let message = state().read().unwrap().lang.player_not_found.clone();
-    reply(sender, &util::replace(&message, "<player>", name));
+    reply(sender, &utils::replace(&message, "<player>", name));
 }
 
 fn not_deathbanned(sender: &CommandSender, name: &str) {
     let message = prefixed("DEATHBAN.PLAYER_NOT_DEATHBANNED");
-    reply(sender, &util::replace(&message, "<player>", name));
+    reply(sender, &utils::replace(&message, "<player>", name));
 }
 
 /// `DeathbanManager#checkStatus`.
@@ -138,7 +138,7 @@ fn check(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
     let duration = if remaining <= 0 {
         "Unbanned".to_string()
     } else {
-        util::format_duration_words(remaining)
+        utils::format_duration_words(remaining)
     };
 
     let lines = state()
@@ -151,7 +151,7 @@ fn check(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
     for line in lines {
         reply(
             sender,
-            &util::replace_all(
+            &utils::replace_all(
                 &line,
                 &[
                     ("<player>", &target_name),
@@ -198,8 +198,8 @@ fn revive(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         .map(|player| core::name_of(&player))
         .unwrap_or_else(|| "CONSOLE".to_string());
 
-    let message = util::replace(
-        &util::replace(
+    let message = utils::replace(
+        &utils::replace(
             &prefixed("DEATHBAN.REVIVED_PLAYER"),
             "<player>",
             &sender_name,
