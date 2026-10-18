@@ -11,18 +11,25 @@ use pumpkin_plugin_api::{Context, Player, Server};
 use crate::utils::core;
 use crate::glass;
 use crate::scoreboard;
-use crate::state::{state, AppState};
+use crate::state::{state, AppState, PendingTeleport};
 use crate::tab;
 use crate::timer::{PendingAction, TimerType};
 use crate::utils;
+
+/// Ticks a deferred join-time teleport waits before firing (see
+/// [`queue_join_teleport`]): enough for the host's own join teleport
+/// confirmation to be processed, short enough to be invisible.
+const JOIN_TELEPORT_DELAY_TICKS: u32 = 20;
 
 /// Starts the repeating tasks (called from `on_load`).
 pub fn start(context: &Context) {
     context.schedule_repeating_task(20, 20, |server| tick(&server));
     // Re-send fake blocks that were broken/placed over (next tick, after the
-    // server's own block update has been applied).
+    // server's own block update has been applied). The same per-tick pass
+    // fires the deferred join teleports.
     context.schedule_repeating_task(1, 1, |server| {
         state().write().unwrap().glass.process_pending_regen(&server);
+        process_join_teleports(&server);
     });
     // Client-side glass walls refresh a bit faster, like the original 100ms loop.
     context.schedule_repeating_task(10, 10, |server| glass_tick(&server));
@@ -385,6 +392,100 @@ fn process_protection_ejects(server: &Server) {
 
     if !retry.is_empty() {
         state().write().unwrap().protection_ejects.extend(retry);
+    }
+}
+
+/// Queues a join-time teleport, skipping it when the player already stands on
+/// the target (the host's own join teleport normally leaves them there).
+///
+/// Pumpkin teleports the client itself right before firing `PlayerJoinEvent`
+/// (world spawn for a first join, the stored position otherwise) and keeps a
+/// single pending teleport: a second teleport in the same tick makes the
+/// client confirm the host's id when the server already awaits the plugin's
+/// one, and the connection is closed with "Wrong teleport id". Waiting
+/// [`JOIN_TELEPORT_DELAY_TICKS`] ticks lets that confirmation be processed, so
+/// the deferred teleport never races it.
+///
+/// The original teleported first-join players to `player.getWorld()
+/// .getSpawnLocation()` when `WORLD_SPAWN` was unset; the host's own
+/// placement (world-spawn surface `top + 1`, i.e. the same spot without the
+/// stale `level.dat` Y) is the portable equivalent, so callers only queue when
+/// the configured entry resolves.
+pub fn queue_join_teleport(
+    player: &Player,
+    world: &str,
+    x: f64,
+    y: f64,
+    z: f64,
+    yaw: f32,
+    pitch: f32,
+) {
+    if at_target(player, world, x, y, z) {
+        return;
+    }
+    state().write().unwrap().join_teleports.insert(
+        core::uuid_of(player),
+        PendingTeleport {
+            ticks: JOIN_TELEPORT_DELAY_TICKS,
+            world: world.to_string(),
+            x,
+            y,
+            z,
+            yaw,
+            pitch,
+        },
+    );
+}
+
+/// Whether the player already stands on `(world, x, y, z)`, within two blocks
+/// (the host's placement adds `top + 1` and rounds to block centres).
+fn at_target(player: &Player, world: &str, x: f64, y: f64, z: f64) -> bool {
+    let location = core::location(player);
+    location.world == world
+        && (location.x - x).abs() <= 2.0
+        && (location.y - y).abs() <= 2.0
+        && (location.z - z).abs() <= 2.0
+}
+
+/// Fires the teleports queued by [`queue_join_teleport`] once their delay has
+/// passed, dropping the ones whose player disconnected meanwhile. Runs from
+/// the per-tick task.
+fn process_join_teleports(server: &Server) {
+    let pending: Vec<(String, PendingTeleport)> = {
+        let mut guard = state().write().unwrap();
+        std::mem::take(&mut guard.join_teleports).into_iter().collect()
+    };
+    if pending.is_empty() {
+        return;
+    }
+
+    let mut keep: Vec<(String, PendingTeleport)> = Vec::new();
+    for (uuid, mut entry) in pending {
+        entry.ticks = entry.ticks.saturating_sub(1);
+        if entry.ticks > 0 {
+            keep.push((uuid, entry));
+            continue;
+        }
+        let Some(player) = lookup(server, &uuid) else {
+            // Disconnected while waiting: nothing left to correct.
+            continue;
+        };
+        if at_target(&player, &entry.world, entry.x, entry.y, entry.z) {
+            continue;
+        }
+        let Some(world) = server.get_world_by_name(&entry.world) else {
+            continue;
+        };
+        player.teleport(
+            (entry.x, entry.y, entry.z),
+            Some(entry.yaw),
+            Some(entry.pitch),
+            world,
+        );
+    }
+
+    if !keep.is_empty() {
+        state().write().unwrap().join_teleports.extend(keep);
     }
 }
 

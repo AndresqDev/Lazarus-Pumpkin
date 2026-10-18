@@ -65,8 +65,22 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
 
         // First-join spawn teleport (port of `PvpProtHandler#onPlayerJoin` and,
         // when kitmap mode skips that handler, `KitmapHandler#onPlayerJoin`).
-        if first_join {
-            teleport_to_join_spawn(&server, &event.player);
+        // Queued instead of sent here: the host teleports the client itself
+        // right before firing this event and a second teleport in the same
+        // tick gets the player kicked ("Wrong teleport id"; see
+        // `tasks::queue_join_teleport`).
+        if first_join
+            && let Some((world, (x, y, z), yaw, pitch)) = core::configured_spawn(&server)
+        {
+            crate::tasks::queue_join_teleport(
+                &event.player,
+                &world.get_name(),
+                x,
+                y,
+                z,
+                yaw,
+                pitch,
+            );
         }
 
         let in_safezone = {
@@ -121,20 +135,6 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
         }
 
         event
-    }
-}
-
-/// First-join teleport (port of `PvpProtHandler#onPlayerJoin` /
-/// `KitmapHandler#onPlayerJoin`): new players are sent to `WORLD_SPAWN` from
-/// `utilities.yml`.
-///
-/// The original falls back to `player.getWorld().getSpawnLocation()` when the
-/// entry is unset; on Pumpkin the host has *already* placed the player on the
-/// world spawn (surface `top + 1`, i.e. the same spot without the stale Y kept
-/// in `level.dat`), so the fallback branch only has to leave them there.
-fn teleport_to_join_spawn(server: &Server, player: &Player) {
-    if let Some((world, (x, y, z), yaw, pitch)) = core::configured_spawn(server) {
-        player.teleport((x, y, z), Some(yaw), Some(pitch), world);
     }
 }
 

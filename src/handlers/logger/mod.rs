@@ -314,14 +314,20 @@ pub fn on_join(server: &Server, player: &Player) {
 
     player.set_health(record.health);
 
-    if let Some(world) = server.get_world_by_name(&record.world) {
-        player.teleport(
-            (record.x, record.y, record.z),
-            Some(record.yaw),
-            Some(record.pitch),
-            world,
-        );
-    }
+    // Deferred like every join-time teleport (`tasks::queue_join_teleport`):
+    // the host's own join teleport is still in flight and a second one in the
+    // same tick would get the player kicked ("Wrong teleport id"). The
+    // logger's spot normally matches the stored logout position the host
+    // already dropped the player on, in which case the queue skips the packet.
+    crate::tasks::queue_join_teleport(
+        player,
+        &record.world,
+        record.x,
+        record.y,
+        record.z,
+        record.yaw,
+        record.pitch,
+    );
 
     freeze_effects(&mut record);
     handle_effect_changes(player, &record.effects);

@@ -93,6 +93,24 @@ impl RawConfigs {
     }
 }
 
+/// A teleport queued a few ticks after a join (see
+/// `tasks::queue_join_teleport`): the host resolves and sends its own join
+/// teleport right before firing `PlayerJoinEvent` and keeps a single pending
+/// teleport, so a plugin teleport in the same tick would make the client's
+/// confirmation for the host's id arrive after the awaited id was overwritten
+/// — Pumpkin answers that with a "Wrong teleport id" kick.
+pub struct PendingTeleport {
+    /// Ticks left before the teleport fires.
+    pub ticks: u32,
+    /// Target world name (`server.get_world_by_name` spelling).
+    pub world: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
 pub struct AppState {
     pub data_folder: String,
     pub raw: RawConfigs,
@@ -148,6 +166,10 @@ pub struct AppState {
     /// Transient: players whose respawn landed in the wrong world (legacy
     /// respawn point in another dimension) to teleport to the spawn next tick.
     pub respawn_fixes: std::collections::BTreeSet<String>,
+    /// Transient: join-time teleports awaiting their delay (uuid -> target),
+    /// so the host's own join teleport can be confirmed first. See
+    /// `tasks::queue_join_teleport`.
+    pub join_teleports: std::collections::BTreeMap<String, PendingTeleport>,
     /// Transient: placed cobwebs awaiting the remover (`handlers.block`,
     /// key -> expiry millis).
     pub cobwebs: std::collections::BTreeMap<(String, i32, i32, i32), i64>,
@@ -326,6 +348,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
             spawn_centers: std::collections::BTreeMap::new(),
             protection_ejects: std::collections::BTreeSet::new(),
             respawn_fixes: std::collections::BTreeSet::new(),
+            join_teleports: std::collections::BTreeMap::new(),
             cobwebs: std::collections::BTreeMap::new(),
             found_ore_marks: std::collections::BTreeSet::new(),
             autosmel_pending: std::collections::BTreeMap::new(),
