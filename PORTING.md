@@ -43,6 +43,15 @@ Copy the `.wasm` into the server's `plugins/` folder. On first run the plugin
 creates its data folder with default `config.toml`, `lang.toml`,
 `factions.json`, `userdata.json`, `claims.json` and `timers.json`.
 
+The tab-list companion (`native-tab/`) is not a WASM guest: it is a native
+`cdylib` that talks to the host directly and writes the tab state the WASM side
+renders from. **It is built exclusively by CI** (`.github/workflows/native-tab.yml`,
+which injects the crate into Pumpkin's workspace so it shares the server's
+`Cargo.lock`); local builds of the full workspace are deliberately not used. The
+workflow produces one artifact per architecture — `native_tab_x86_64` and
+`native_tab_aarch64` (the VPS) — and the file is installed as
+`plugins/native_tab.so`.
+
 Because the plugin persists data it requests the `fs.read.data` and
 `fs.write.data` permissions. In `pumpkin.toml`:
 
@@ -129,6 +138,28 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   (`ScoreboardUpdaterImpl`'s fixed-rate loop, ported as a 2-tick task) and every
   row is diffed against the last one sent (`PlayerScoreboard_1_8#update`'s entry
   cache), so unchanged rows cost no packets.
+* **Sidebar lines are split for 1.8 clients.** A 1.8 client renders only 16
+  characters of a team prefix and 16 of its suffix, so every line is cut into a
+  ≤16-char prefix plus a ≤16-char suffix on a stable invisible entry, carrying
+  the active colours over between the halves (`ChatColor.getLastColors`
+  equivalent) — the same trick as `PlayerScoreboard_1_8` and the original's 1.7
+  tab guard. This caps a sidebar line at 32 visible characters; configured lines
+  fit, and without the split ViaVersion truncates them at 16.
+* **Real players are moved to a `lzreal` team for 1.8 clients.** 1.8 sorts tab
+  entries by *team name* and then by profile name, and renders at most 80
+  entries; the 80 artificial slots are teamless and sort first, so real players
+  fall past the cap. The native companion creates the team (white, no
+  friendly-fire/invisibility change) and adds every real player to it. Modern
+  clients would hide real players through their `UPDATE_LISTED(false)` flag, but
+  ViaVersion drops that flag for 1.8, so the team is the only lever there. The
+  original `PlayerTab_1_8` only removed real players below 1.7, so this is a
+  deliberate 1.8-only deviation.
+* **Tab slots are added once.** The native companion sends `ADD_PLAYER` (with
+  the skin textures) only the first time a slot appears; later text/order
+  changes send `UPDATE_DISPLAY_NAME`/`UPDATE_LIST_PRIORITY` only. 1.8 rebuilds
+  the player-info entry — and restarts the skin download — on every add, which
+  is what made heads load slowly. One full resend per joining player covers the
+  join/readiness window instead of the previous 8×500 ms loop.
 * **Single-chunk claiming** is replaced by the original **selection wand**: `/f claim`
   gives a golden-hoe wand; left/right click set positions, sneak + left-click buys.
   Selection pillars and claim maps are rendered entirely client-side (`glass.rs`).
