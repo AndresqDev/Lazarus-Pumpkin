@@ -42,6 +42,9 @@ static TABLE: Mutex<Option<Table>> = Mutex::new(None);
 
 struct Table {
     components: HashMap<String, Vec<u8>>,
+    /// Potion registry id → table name, reversed from `components` (each entry
+    /// starts with `[has_potion=1][varint id]`).
+    names_by_id: HashMap<i32, String>,
 }
 
 /// Stores the plugin's data folder so the native table can be found later.
@@ -139,6 +142,64 @@ fn component_bytes(potion: &str) -> Option<Vec<u8>> {
     bytes
 }
 
+/// Resolves the potion carried by an item through the native table: reads the
+/// `potion_contents` component and maps its registry id back to the vanilla
+/// potion name (`water`, `strong_healing`, `long_swiftness`, ...).
+///
+/// Used by the potion limiter to classify potions the way the original's
+/// `Potion.fromItemStack` did. `None` for items without a potion component and
+/// while the native table is missing (same degraded mode as [`apply_marker`]).
+pub fn potion_name_for_item(item: &ItemStack) -> Option<String> {
+    let bytes = item.get_components().into_iter().find_map(|value| {
+        if matches!(value.component, DataComponent::PotionContents) {
+            Some(value.value)
+        } else {
+            None
+        }
+    })?;
+
+    let id = potion_id(&bytes)?;
+
+    {
+        let guard = TABLE.lock().expect("potion table mutex poisoned");
+        if let Some(table) = guard.as_ref() {
+            return table.names_by_id.get(&id).cloned();
+        }
+    }
+
+    let table = match load_table() {
+        Ok(table) => table,
+        Err(error) => {
+            tracing::warn!("lazarus: {error}");
+            return None;
+        }
+    };
+    let name = table.names_by_id.get(&id).cloned();
+    *TABLE.lock().expect("potion table mutex poisoned") = Some(table);
+    name
+}
+
+/// Reads the registry id from `potion_contents` component bytes
+/// (`[has_potion]` + varint id; the trailing custom colour/effects/name fields
+/// are irrelevant here).
+fn potion_id(bytes: &[u8]) -> Option<i32> {
+    if bytes.first() != Some(&1u8) {
+        return None;
+    }
+
+    let mut cursor = 1usize;
+    let mut value = 0u32;
+    for shift in 0..5 {
+        let byte = *bytes.get(cursor)?;
+        cursor += 1;
+        value |= u32::from(byte & 0x7F) << (shift * 7);
+        if byte & 0x80 == 0 {
+            return i32::try_from(value).ok();
+        }
+    }
+    None
+}
+
 fn load_table() -> Result<Table, String> {
     let folder = DATA_FOLDER
         .get()
@@ -168,6 +229,7 @@ fn load_table() -> Result<Table, String> {
         .ok_or_else(|| format!("native potion table ({path}) has no potion_components"))?;
 
     let mut components = HashMap::with_capacity(entries.len());
+    let mut names_by_id = HashMap::with_capacity(entries.len());
     for (name, value) in entries {
         let Some(encoded) = value.as_str() else {
             continue;
@@ -176,6 +238,9 @@ fn load_table() -> Result<Table, String> {
             tracing::warn!("lazarus: skipping malformed entry `{name}` in {path}");
             continue;
         };
+        if let Some(id) = potion_id(&bytes) {
+            names_by_id.insert(id, name.clone());
+        }
         components.insert(name.clone(), bytes);
     }
 
@@ -186,7 +251,7 @@ fn load_table() -> Result<Table, String> {
         "lazarus: loaded {} potion components from the native table",
         components.len()
     );
-    Ok(Table { components })
+    Ok(Table { components, names_by_id })
 }
 
 /// base64 of [`MARKER_CODE`], as embedded in the marker line by the writer.

@@ -156,12 +156,19 @@ impl EventHandler<EntitySpawnEvent> for EntityNameListener {
 /// (used by the combat listeners for projectiles whose shooter is not a
 /// player).
 pub(crate) fn entity_key_by_id(entity_id: i32) -> Option<String> {
-    ENTITY_TYPES
+    let raw = ENTITY_TYPES
         .lock()
         .unwrap()
         .as_ref()?
         .get(&entity_id)
-        .cloned()
+        .cloned()?;
+
+    // The host fills `EntitySpawnEvent.entity_type` with the numeric registry
+    // id; resolve it to the vanilla name used by the death messages.
+    Some(match crate::core::entity_type_name(&raw) {
+        Some(name) => name.to_string(),
+        None => raw,
+    })
 }
 
 /// `StringUtils#getEntityName`: lower-cased, `_` turned into spaces, otherwise

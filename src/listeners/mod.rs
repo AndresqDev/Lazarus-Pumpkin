@@ -16,6 +16,7 @@ use pumpkin_plugin_api::Context;
 use crate::blockhandlers;
 use crate::death;
 use crate::elevator;
+use crate::limiters;
 
 /// Registers every ported event handler.
 pub fn register(context: &Context) -> Result<(), String> {
@@ -94,6 +95,16 @@ pub fn register(context: &Context) -> Result<(), String> {
 
     context.register_event_handler(interact::InteractListener, EventPriority::High, true)?;
     context.register_event_handler(interact::SneakListener, EventPriority::Normal, true)?;
+
+    // Limiters (`handlers.limiter.*`): enchantment table + anvil result,
+    // potion drinking/throwing/brewing and disabled entity spawns. They run
+    // after the interact group and before the elevators, like the original's
+    // `HandlerManager` (EnchantLimiter < EntityLimiter < MinecartElevator).
+    context.register_event_handler(limiters::EnchantTableListener, EventPriority::Normal, true)?;
+    context.register_event_handler(limiters::AnvilClickListener, EventPriority::Normal, true)?;
+    context.register_event_handler(limiters::PotionConsumeListener, EventPriority::Low, true)?;
+    context.register_event_handler(limiters::BrewListener, EventPriority::Normal, true)?;
+    context.register_event_handler(limiters::EntitySpawnLimiterListener, EventPriority::Lowest, true)?;
 
     // Elevators (`handlers.elevator.*`, `ignoreCancelled` in the original):
     // they run after the territory/use listeners above, so denied actions are

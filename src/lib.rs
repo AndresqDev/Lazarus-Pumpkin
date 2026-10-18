@@ -28,6 +28,7 @@ mod glass;
 mod hologram;
 mod kits;
 mod lang;
+mod limiters;
 mod listeners;
 mod nbt;
 mod potion_components;

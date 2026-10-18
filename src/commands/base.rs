@@ -40,6 +40,7 @@ struct ReloadExecutor;
 impl CommandHandler for ReloadExecutor {
     fn handle(&self, sender: CommandSender, server: Server, _args: ConsumedArgs) -> Result<i32, CommandError> {
         state::reload_config();
+        crate::limiters::reload();
         crate::core::refresh_spawn_centers(&server);
         crate::core::apply_world_borders_from_config(&server);
 

@@ -81,7 +81,8 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | ↳ death deviations | | the vanilla broadcast is turned off (`showDeathMessages=false`, one shared level data for all dimensions) because the host cannot suppress a per-death message; the plugin replicates the original's targeted delivery and sets `death_message` for the death screen; head/death signs go straight to the killer's inventory (no item-entity spawns); placed heads are tracked from the placing item's `profile` component (no owner on `SkullBlockEntity`); death signs are filled at placement (`sign.update()` equivalent) but the client only sees it after a chunk reload and the editor cannot be closed (a `DEATH_SIGN.LORE` shorter than four lines fills what it has, where the original throws); item names are title-cased registry keys without NMS localization and custom names lose their colors; unknown entity-branch causes fall back to `REASON_CUSTOM` instead of the original's empty message; `lazarus.headdrop`/`lazarus.staff` also accept the registered op-default `lazarus:headdrop`/`lazarus:staff` (the host does not grant undefined nodes to operators) |
 | `handlers.elevator.*` (sign + minecart elevators) | ✅ | sign elevator (`[elevator]`/`[e]` + `up`/`down` created, up/down column search with the 0.5 block-centre landing, create/destroy/right-click messages), minecart elevator (sneaking mount on a cart parked in an open fence gate pulled up with the mount cancelled, dismount pulled up one tick later), both gated by `OWN_CLAIM_ONLY` (player faction vs faction at the sign/vehicle) and `DISABLED_IN_COMBAT` using the original's shared minecart message keys |
 | ↳ elevator deviations | | the sign rewrite lands in the block entity (`set_front_text`) while the event is cancelled so the typed lines are not applied on top: the client keeps showing what was typed until the chunk reloads, so the checks also accept the typed `[elevator]`/`[e]` + `up`/`down` shorthand; `setUseInteractedBlock(DENY)` maps to cancelling the interact event; `Material.AIR`/`WALL_SIGN`/`SIGN_POST`/`isSolid()` map to the block-state `is_air`/`is_solid` flags and `*_sign` names (cave/void air counts as air); the column search runs from `get_min_y` to `+384` (tallest vanilla column) instead of the fixed 1.8 `getMaxHeight()` 256; the dismount teleport is scheduled one tick later through the host scheduler because the host re-positions the dismounted passenger right after the event |
-| `handlers.limiter.*` (enchant/potion/entity limits) | ⬜ | |
+| `handlers.limiter.*` (enchant/potion/entity limits) | 🟡 | enchantment table (clamped `enchantments_to_add`), anvil results (enchanted-book `stored-enchantments` rewrite, unrepairable-lore denial, over-cap clamp through a next-tick inventory sweep), potion drinking/throwing (`PlayerItemConsumeEvent` denial + hand clear + message), brewing (stand read through the block entity; violating slots restored one tick later), disabled entities cancelled in `EntitySpawnEvent`; `limiters.yml` is parsed lazily with the 1.8 legacy name tables and re-read by `/lazarus reload` |
+| ↳ limiter deviations | | anvil results are clamped one tick after the take (the host hands the guest throw-away clones and drops item mutations), so the sweep covers the player's whole inventory — the `ItemUtils.updateInventory` equivalent; enchanted-book enchantment ids are probed from the server because the guest cannot read the registry (fail-open if the probe finds nothing); splash potions are denied before the throw is created and potions thrown by dispensers/witches cannot be identified (no item on the projectile); `MOBS_SPAWN_ONLY_FROM_SPAWNERS` + `MOB_LIMIT_PER_CHUNK` cannot be enforced; the mob-drop/fishing clamp sites are unreachable |
 | `handlers.logger.*` (combat logger) | ⬜ | |
 | `handlers.kitmap.*` (KitmapHandler, KillstreakHandler) | 🟡 | kitmap mode fully wired: config sync from raw `config.yml`, deathban/DTR-loss skips, safezone drop denial, item-clear task, kill reward + killstreaks (console commands + broadcast), PvP-timer clearing/gating, first-join spawn teleport, `KITMAP_STATS` sidebar block, KITMAP-only kits restricted to safezones; `/spawn` teleport, `/topkillstreaks` and the Miner kitmap renames pending (below) |
 | `handlers.leaderboard.*` | 🟡 | `/f top` + `/f list` faithful (hover/click, relation colours, pagination); leaderboard holograms TODO |
@@ -192,6 +193,29 @@ context):
   the item refund is not implemented.
 * `CreatureSpawnEvent` — the gate is ported but the host does not fire it for
   every spawn path, so the SOTW spawner-only rule is best-effort.
+* Natural spawns and the limiter spawn rules — the host's natural spawner
+  registers mobs without firing `EntitySpawnEvent`, there is no spawn reason
+  and no chunk entity query, so `MOBS_SPAWN_ONLY_FROM_SPAWNERS` and
+  `MOB_LIMIT_PER_CHUNK` cannot be enforced; disabling an entity only blocks the
+  spawns that do go through the event (spawn eggs, vehicles, projectiles,
+  drops), while the original's `CreatureSpawnEvent` companion is never fired.
+* Mob-drop enchant clamping — `EntityDeathEvent` carries no drops list, so the
+  enchant limiter cannot rewrite what a mob drops (its fishing branch is dead
+  code on 1.8).
+* Anvil results — the host gives the guest clones of `clicked-item`/`cursor`
+  and ignores item mutations in the returned event, so the result slot cannot
+  be rewritten in place: the port clamps every item the player carries one tick
+  after a result click that needs it (`ItemUtils.updateInventory` equivalent).
+  Unrepairable-lore clicks are still denied exactly like the original, and a
+  result taken to the cursor is only clamped once it lands in the inventory.
+* Enchantment ids — the guest cannot read the server's enchantment registry,
+  so the ids used by the `enchantments`/`stored-enchantments` component codec
+  are probed at the first book using throw-away stacks (books fail open if the
+  probe finds nothing).
+* Splash potions — the host has no splash event carrying the item, so the
+  potion limiter denies throwing in `PlayerItemConsumeEvent` (before the throw
+  entity exists; the potion is cleared and the player told, like the original's
+  splash denial) and potions thrown by dispensers/witches cannot be limited.
 * `Player#getKiller` — the host death event carries no damage source, so the
   killer is the last player recorded by the combat-tag handler (`last_damagers`,
   5-second window, the same window Bukkit's combat tracker uses). A death by
@@ -301,19 +325,28 @@ ban location, and `datetime.rs` for `DATE_FORMAT`/`TIMEZONE`. The elevator
 sector is done as well: the sign elevator (create/destroy/ride with the
 `OWN_CLAIM_ONLY` + combat gates) and the fence-gate minecart elevator (sneak
 mount and dismount pulled up, the dismount one tick later like the original's
-`Tasks.sync`).
+`Tasks.sync`). The limiter sector landed next: the enchantment table clamps the
+rolled `enchantments_to_add` in place, anvil results clamp enchanted books
+(through the `stored-enchantments` codec, with the enchantment ids probed from
+the server), deny unrepairable-lore items and sweep over-cap pieces out of the
+player's inventory one tick after the take, potions are denied when drunk or
+thrown (`PlayerItemConsumeEvent` + the original's message) and brews are rolled
+back one tick later when the result violates the limits, and disabling an entity
+cancels its `EntitySpawnEvent` (1.8 legacy names included).
 
 Still to port (in rough priority order):
 
 1. Combat logger (spawn a mob holding the player's drops on disconnect).
-2. Abilities + PvP classes (Archer/Bard/Miner/Rogue/Mage/Bomber).
-3. Events/games (Koth, Conquest, DTC, Ender Dragon, King of the Hill, Mountain,
+2. Portals (`PortalHandler`, end-portal machinima).
+3. Rank/restore/salvage/settings commands.
+4. Leaderboard holograms (+ `/topdeaths` and the remaining top commands).
+5. Events/games (Koth, Conquest, DTC, Ender Dragon, King of the Hill, Mountain,
    Loot, Schedule) using boss bars + the world API.
-4. Mob stacking (the remaining block handler; the filter stays blocked by the
+6. Abilities + PvP classes (Archer/Bard/Miner/Rogue/Mage/Bomber).
+7. Mob stacking (the remaining block handler; the filter stays blocked by the
    missing player pickup event).
-5. Limiters (enchant/potion/entity limits), custom recipes, sign shops.
-6. World border, portals/end-exit, safezone food/potion rules.
-7. Leaderboard holograms.
+8. Custom recipes, sign shops.
+9. World border, safezone food/potion rules.
 
 ## 6. Files
 
@@ -338,6 +371,7 @@ src/
 ├── death.rs            death messages, stattrak, head drops, death signs
 ├── deathban.rs         deathban / lives handling
 ├── elevator.rs         sign + minecart elevators
+├── limiters.rs         enchant/potion/entity limits (limiters.yml)
 ├── tasks.rs            repeating tick (timers, DTR, teleports, glass, sidebar, tab)
 ├── userdata.rs         Userdata + UserdataManager
 ├── factions/
