@@ -486,6 +486,69 @@ pub fn send_death_message(
     }
 }
 
+/// `PlayerFaction#onDeath` plus the silent warmup cancels, both guarded by the
+/// faction check in `PlayerEventListener#onPlayerDeath`. Shared by the player
+/// death listener and the combat logger's offline victim; returns the faction
+/// id and the `FACTIONS.MEMBER_DEATH` message for the caller to deliver.
+pub(crate) fn faction_on_death(
+    guard: &mut crate::state::AppState,
+    uuid: &str,
+    name: &str,
+    world: &str,
+    config: &crate::config::Config,
+) -> Option<(String, String)> {
+    let faction_id = guard.factions.by_member(uuid).map(|f| f.id.clone())?;
+    let frozen = guard.timers.is_frozen(&faction_id);
+
+    // Kitmap can disable DTR loss (and the freeze) entirely, while still
+    // awarding the death points and sending the message with a zero loss.
+    let skip_dtr_loss = config.kitmap.enabled && config.kitmap.disable_dtr_loss;
+    let loss = if skip_dtr_loss {
+        0.0
+    } else {
+        match core::dimension_of(world) {
+            core::Dimension::Overworld => config.factions.dtr_death_loss.overworld,
+            core::Dimension::Nether => config.factions.dtr_death_loss.nether,
+            core::Dimension::End => config.factions.dtr_death_loss.end,
+        }
+    };
+    let template = guard.raw.language.string("FACTIONS.MEMBER_DEATH");
+
+    let faction = guard.factions.get_mut(&faction_id)?;
+    if !skip_dtr_loss {
+        let amount = faction.dtr - loss;
+        faction.set_dtr(config, amount);
+    }
+    faction.change_points(
+        faction.points + config.factions.points_per_death,
+        config.factions.allow_negative_points,
+    );
+
+    let loss_string = format!("-{}", crate::util::java_double(loss));
+    let dtr_string = faction.dtr_string(config, frozen);
+    let max_dtr_string = faction.max_dtr_string(config);
+    let message = crate::util::replace_all(
+        &template,
+        &[
+            ("<player>", name),
+            ("<dtrLoss>", &loss_string),
+            ("<dtr>", &dtr_string),
+            ("<maxDtr>", &max_dtr_string),
+        ],
+    );
+
+    // `FactionFreezeTimer#activate(this)`.
+    if !skip_dtr_loss {
+        guard
+            .timers
+            .freeze_faction(&faction_id, config.factions.freeze_duration_minutes * 60);
+    }
+
+    guard.timers.clear_pending(uuid);
+
+    Some((faction_id, message))
+}
+
 // ---------------------------------------------------------------------------
 // Stattrak
 // ---------------------------------------------------------------------------

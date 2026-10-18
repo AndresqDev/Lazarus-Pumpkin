@@ -174,17 +174,87 @@ pub fn apply_on_death(player: &Player, reason: &str) {
         return;
     }
 
-    let now = util::now_millis();
     let mut guard = state().write().unwrap();
-
-    // `ClaimManager.getInstance().getFactionAt(player).isDeathban()`.
-    let territory = crate::core::territory_at_guard(
-        &guard,
+    store_deathban(
+        &mut guard,
+        &uuid,
         &location.world,
         location.block_x(),
+        location.block_y(),
         location.block_z(),
+        millis,
+        reason,
     );
-    if !crate::core::territory_deathbans_guard(&guard, &territory) {
+}
+
+/// `DeathbanManager#getBanTime` resolved for a still-online player (the combat
+/// logger captures it at logout, while the permissions are valid).
+pub fn ban_time_millis(player: &Player) -> i64 {
+    let (ban_times, default_ban_time) = {
+        let guard = state().read().unwrap();
+        (
+            guard.config.deathban.ban_times.clone(),
+            guard.config.deathban.default_ban_time,
+        )
+    };
+
+    let mut millis = default_ban_time as i64 * 60_000;
+    for entry in &ban_times {
+        if player.has_permission(&entry.permission) {
+            millis = entry.minutes as i64 * 60_000;
+            break;
+        }
+    }
+    millis
+}
+
+/// `DeathbanManager#deathbanPlayer` for the offline combat-logger victim: the
+/// original's `hasPermission` on a logged-out player always resolved to false,
+/// so the bypass check is skipped and the ban time captured at logout is used.
+pub fn apply_logger_death(
+    uuid: &str,
+    world: &str,
+    block_x: i32,
+    block_y: i32,
+    block_z: i32,
+    millis: i64,
+    reason: &str,
+) {
+    let (enabled, kitmap_disables_deathban) = {
+        let guard = state().read().unwrap();
+        (
+            guard.config.deathban.enabled,
+            guard.config.kitmap.enabled && guard.config.kitmap.disable_deathban,
+        )
+    };
+    if !enabled || kitmap_disables_deathban {
+        return;
+    }
+    if millis == 0 {
+        return;
+    }
+
+    let mut guard = state().write().unwrap();
+    store_deathban(&mut guard, uuid, world, block_x, block_y, block_z, millis, reason);
+}
+
+/// Shared tail of `DeathbanManager#deathbanPlayer`: territory check, faction
+/// auto-revive, stored ban and the ~1s kick.
+fn store_deathban(
+    guard: &mut AppState,
+    uuid: &str,
+    world: &str,
+    block_x: i32,
+    block_y: i32,
+    block_z: i32,
+    millis: i64,
+    reason: &str,
+) {
+    let now = util::now_millis();
+
+    // `ClaimManager.getInstance().getFactionAt(player).isDeathban()`.
+    let territory = crate::core::territory_at_guard(guard, world, block_x, block_z);
+    if !crate::core::territory_deathbans_guard(guard, &territory) {
         return;
     }
 
@@ -192,7 +262,7 @@ pub fn apply_on_death(player: &Player, reason: &str) {
     // (port of the `PlayerDeathbanEvent` auto-revive handler).
     let auto_revive = guard
         .factions
-        .by_member(&uuid)
+        .by_member(uuid)
         .map(|faction| faction.id.clone())
         .filter(|id| {
             guard
@@ -211,11 +281,11 @@ pub fn apply_on_death(player: &Player, reason: &str) {
     // `DeathbanManager#kickPlayer`: during EOTW the kick shows the EOTW message
     // instead of the ban message.
     let message = if guard.eotw_active {
-        eotw_message(&guard)
+        eotw_message(guard)
     } else {
         util::replace(
             &util::replace(
-                &ban_message(&guard),
+                &ban_message(guard),
                 "<time>",
                 &util::format_duration_words(millis),
             ),
@@ -224,21 +294,17 @@ pub fn apply_on_death(player: &Player, reason: &str) {
         )
     };
 
-    if let Some(user) = guard.userdata.get_mut(&uuid) {
+    if let Some(user) = guard.userdata.get_mut(uuid) {
         user.deathban(
             millis,
             reason.to_string(),
-            format!(
-                "{}, {}, {} ({})",
-                location.block_x(),
-                location.block_y(),
-                location.block_z(),
-                location.world
-            ),
+            format!("{block_x}, {block_y}, {block_z} ({world})"),
         );
     }
 
-    guard.pending_kicks.push(PendingKick { uuid, message, at: now + 1000 });
+    guard
+        .pending_kicks
+        .push(PendingKick { uuid: uuid.to_string(), message, at: now + 1000 });
 }
 
 /// Fires the kicks scheduled by [`apply_on_death`].

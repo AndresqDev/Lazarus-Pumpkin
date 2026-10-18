@@ -66,6 +66,11 @@ pub struct Userdata {
     /// `StringUtils#getLocationNameWithWorld` of the death location.
     #[serde(default)]
     pub deathban_location: Option<String>,
+    /// Set when a combat logger died while the owner was offline: `die()`
+    /// cleared their inventory, which the WASM API can only do from an event
+    /// with the player online — so it happens on the next join.
+    #[serde(default)]
+    pub pending_logger_clear: bool,
 
     pub ignoring: Vec<String>,
     pub notes: Vec<String>,
@@ -92,6 +97,7 @@ impl Userdata {
             deathban_until: None,
             deathban_reason: None,
             deathban_location: None,
+            pending_logger_clear: false,
             ignoring: Vec::new(),
             notes: Vec::new(),
             last_kills: Vec::new(),

@@ -14,6 +14,7 @@ use pumpkin_plugin_api::events::EventPriority;
 use pumpkin_plugin_api::Context;
 
 use crate::blockhandlers;
+use crate::combatlogger;
 use crate::death;
 use crate::elevator;
 use crate::limiters;
@@ -22,6 +23,14 @@ use crate::limiters;
 pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(player::JoinListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::LeaveListener, EventPriority::Normal, true)?;
+    // Combat logger quit handling (`CombatLoggerHandler#onPlayerQuit` ran at
+    // LOWEST in the original): after `LeaveListener` so the banked state is
+    // already stored when the logger is built.
+    context.register_event_handler(
+        combatlogger::CombatLoggerQuitListener,
+        EventPriority::Lowest,
+        true,
+    )?;
     context.register_event_handler(player::MoveListener, EventPriority::Normal, true)?;
 
     // Death handlers (`handlers.death.*`) that react to the death itself: they
@@ -33,6 +42,8 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(death::DeathSignDeathListener, EventPriority::Normal, true)?;
 
     context.register_event_handler(player::DeathListener, EventPriority::Normal, true)?;
+    // Combat logger entity deaths (`VillagerCombatLogger_1_8#die`).
+    context.register_event_handler(combatlogger::CombatLoggerDeathListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::RespawnListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::SpawnLocationListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::SpawnChangeListener, EventPriority::Normal, true)?;
@@ -40,6 +51,16 @@ pub fn register(context: &Context) -> Result<(), String> {
 
     context.register_event_handler(chat::ChatListener, EventPriority::Normal, true)?;
     context.register_event_handler(kitmap::DropItemListener, EventPriority::Normal, true)?;
+
+    // Combat logger damage rules: registered before the shared combat
+    // listeners so the by-entity handler consumes the tracked projectile
+    // shooter first (the combat listener would otherwise take it).
+    context.register_event_handler(
+        combatlogger::CombatLoggerDamageByEntityListener,
+        EventPriority::High,
+        true,
+    )?;
+    context.register_event_handler(combatlogger::CombatLoggerDamageListener, EventPriority::High, true)?;
 
     context.register_event_handler(combat::EntityDamageByEntityListener, EventPriority::High, true)?;
     context.register_event_handler(combat::EntityDamageListener, EventPriority::High, true)?;

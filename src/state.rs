@@ -153,6 +153,16 @@ pub struct AppState {
     /// Transient: last damage taken by each player (port of Bukkit's
     /// `Player#getLastDamageCause`), used to build the death messages.
     pub last_damage: std::collections::BTreeMap<String, LastDamage>,
+    /// Live combat logger entities (`CombatLoggerHandler#combatLoggers`),
+    /// keyed by the victim uuid. Memory only, like the original (restarting
+    /// the server loses the loggers).
+    pub combat_loggers: std::collections::BTreeMap<String, crate::combatlogger::CombatLogger>,
+    /// `CombatLoggerHandler#kickAll`: set while EOTW shuts the server down, so
+    /// no loggers spawn (`setKickAll`).
+    pub combat_logger_kick_all: bool,
+    /// Players that completed a safe logout warmup (`player.hasMetadata("logout")`
+    /// in the original); cleared on the next join.
+    pub safe_logouts: std::collections::BTreeSet<String>,
 }
 
 /// The last damage dealt to a player, recorded by the combat listeners.
@@ -264,6 +274,9 @@ pub fn init(data_folder: String) -> Result<(), String> {
             deathban_confirm: std::collections::BTreeSet::new(),
             last_damagers: std::collections::BTreeMap::new(),
             last_damage: std::collections::BTreeMap::new(),
+            combat_loggers: std::collections::BTreeMap::new(),
+            combat_logger_kick_all: false,
+            safe_logouts: std::collections::BTreeSet::new(),
         }))
         .map_err(|_| "state already initialised".to_string())
 }

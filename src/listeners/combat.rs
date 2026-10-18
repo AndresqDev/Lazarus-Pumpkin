@@ -596,6 +596,18 @@ impl EventHandler<EntityDamageEvent> for EntityDamageListener {
                             .string("FACTIONS.STUCK_COMMAND.TELEPORT_CANCELLED.DAMAGED"),
                     )
                 }
+                // `LogoutHandler#onPlayerDamage`.
+                Some(TimerType::Logout) => {
+                    guard.timers.clear_pending(&uuid);
+                    Some(format!(
+                        "{}{}",
+                        guard.raw.language.string("PREFIX"),
+                        guard
+                            .raw
+                            .language
+                            .string("LOGOUT.TELEPORT_CANCELLED_DAMAGED")
+                    ))
+                }
                 _ => None,
             }
         };
@@ -695,7 +707,7 @@ fn set_projectile_shooter(entity_id: i32, shooter: Shooter) {
         .insert(entity_id, shooter);
 }
 
-fn take_projectile_shooter(entity_id: i32) -> Option<Shooter> {
+pub(crate) fn take_projectile_shooter(entity_id: i32) -> Option<Shooter> {
     let mut guard = PROJECTILE_SHOOTERS.lock().unwrap();
     guard.as_mut().and_then(|map| map.remove(&entity_id))
 }

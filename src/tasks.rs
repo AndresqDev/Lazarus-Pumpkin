@@ -284,6 +284,12 @@ fn process_pending(server: &Server) {
                     core::send(&player, "&aYou have been teleported to a safe location.");
                 }
             }
+            TimerType::Logout => {
+                // `LogoutTimer#activate` completion: the quit counts as safe
+                // (`player.setMetadata("logout", ...)`) and the player is kicked
+                // (`LogoutHandler` reads the flag in the quit handler).
+                crate::combatlogger::finish_logout(&player);
+            }
             _ => {}
         }
     }

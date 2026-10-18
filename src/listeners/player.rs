@@ -88,6 +88,11 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
             return event;
         }
 
+        // Combat logger (`CombatLoggerHandler#onPlayerJoin`): clears the
+        // safe-logout flag, applies the deferred inventory wipe of a dead logger
+        // and restores a live one.
+        crate::combatlogger::on_join(&server, &event.player);
+
         // Hide vanished staff from the joiner.
         state().read().unwrap().staff.apply_vanish_to(&server, &event.player);
 
@@ -207,7 +212,7 @@ fn check_movement(
         return;
     }
 
-    let (home_message, stuck_message, announce) = {
+    let (home_message, stuck_message, logout_message, announce) = {
         let mut guard = state().write().unwrap();
 
         // `checkFactionHomeAndStuckOnMove(player)`: any block move cancels the
@@ -216,6 +221,7 @@ fn check_movement(
         // compared against the 3D distance just like `hasExceededStuckLimit`).
         let mut home_message = None;
         let mut stuck_message = None;
+        let mut logout_message = None;
         let prefix = guard.raw.language.string("FACTION_PREFIX");
 
         match guard.timers.pending(uuid).cloned() {
@@ -242,6 +248,22 @@ fn check_movement(
                             .raw
                             .language
                             .string("FACTIONS.STUCK_COMMAND.TELEPORT_CANCELLED.MOVED")
+                    ));
+                }
+            }
+            Some(action) if action.timer_type == TimerType::Logout => {
+                // `LogoutHandler#checkPlayerMove`: only horizontal block moves
+                // cancel the logout warmup (the outer guard above only requires
+                // *some* block coordinate to change).
+                if fx.floor() != tx.floor() || fz.floor() != tz.floor() {
+                    guard.timers.clear_pending(uuid);
+                    logout_message = Some(format!(
+                        "{}{}",
+                        guard.raw.language.string("PREFIX"),
+                        guard
+                            .raw
+                            .language
+                            .string("LOGOUT.TELEPORT_CANCELLED_MOVED")
                     ));
                 }
             }
@@ -305,13 +327,16 @@ fn check_movement(
             ChunkState { world: world.to_string(), cx, cz, territory: to_territory },
         );
 
-        (home_message, stuck_message, announce)
+        (home_message, stuck_message, logout_message, announce)
     };
 
     if let Some(message) = home_message {
         core::send(player, message);
     }
     if let Some(message) = stuck_message {
+        core::send(player, message);
+    }
+    if let Some(message) = logout_message {
         core::send(player, message);
     }
     if let Some((leaving, entering)) = announce {
@@ -415,7 +440,6 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
         let uuid = core::uuid_of(&event.player);
         let name = core::name_of(&event.player);
         let world = core::world_name(&event.player);
-        let environment = core::dimension_of(&world);
 
         // `Player#getKiller` replacement: the last player to damage the victim
         // within the combat window.
@@ -513,63 +537,12 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
                 guard.timers.cancel_pvp(&uuid);
             }
 
-            let victim_faction = guard.factions.by_member(&uuid).map(|f| f.id.clone());
-
-            // `PlayerFaction#onDeath` + the silent warmup cancels, both guarded by
-            // the faction check in `PlayerEventListener#onPlayerDeath`.
-            if let Some(faction_id) = &victim_faction {
-                let frozen = guard.timers.is_frozen(faction_id);
-                // Kitmap can disable DTR loss (and the freeze) entirely, while
-                // still awarding the death points and sending the message with a
-                // zero loss (`PlayerFaction#onDeath`).
-                let skip_dtr_loss = config.kitmap.enabled && config.kitmap.disable_dtr_loss;
-                let loss = if skip_dtr_loss {
-                    0.0
-                } else {
-                    match environment {
-                        core::Dimension::Overworld => config.factions.dtr_death_loss.overworld,
-                        core::Dimension::Nether => config.factions.dtr_death_loss.nether,
-                        core::Dimension::End => config.factions.dtr_death_loss.end,
-                    }
-                };
-                let template = guard.raw.language.string("FACTIONS.MEMBER_DEATH");
-
-                if let Some(faction) = guard.factions.get_mut(faction_id) {
-                    if !skip_dtr_loss {
-                        let amount = faction.dtr - loss;
-                        faction.set_dtr(&config, amount);
-                    }
-                    faction.change_points(
-                        faction.points + config.factions.points_per_death,
-                        config.factions.allow_negative_points,
-                    );
-
-                    let loss_string = format!("-{}", crate::util::java_double(loss));
-                    let dtr_string = faction.dtr_string(&config, frozen);
-                    let max_dtr_string = faction.max_dtr_string(&config);
-                    messages.push((
-                        faction_id.clone(),
-                        crate::util::replace_all(
-                            &template,
-                            &[
-                                ("<player>", &name),
-                                ("<dtrLoss>", &loss_string),
-                                ("<dtr>", &dtr_string),
-                                ("<maxDtr>", &max_dtr_string),
-                            ],
-                        ),
-                    ));
-                }
-
-                // `FactionFreezeTimer#activate(this)`.
-                if !skip_dtr_loss {
-                    guard.timers.freeze_faction(
-                        faction_id,
-                        config.factions.freeze_duration_minutes * 60,
-                    );
-                }
-
-                guard.timers.clear_pending(&uuid);
+            // `PlayerFaction#onDeath` + the silent warmup cancels (shared with
+            // the combat logger's offline victim).
+            if let Some((faction_id, message)) =
+                crate::death::faction_on_death(&mut guard, &uuid, &name, &world, &config)
+            {
+                messages.push((faction_id, message));
             }
 
             // Killer faction (port of the `PlayerEventListener#onPlayerDeath`

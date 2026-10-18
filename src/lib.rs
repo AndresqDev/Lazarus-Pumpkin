@@ -19,6 +19,7 @@ mod commands;
 mod config;
 mod core;
 mod blockhandlers;
+mod combatlogger;
 mod datetime;
 mod death;
 mod deathban;
@@ -86,6 +87,8 @@ impl Plugin for LazarusPlugin {
         // permission is registered and the vanilla broadcast is turned off (the
         // host has no per-death silent flag, see `death::init`).
         death::init(&context, &server);
+        // Combat logger bypass node (`lazarus.combatlogger.bypass`).
+        combatlogger::init(&context);
         tasks::start(&context);
 
         // KitmapHandler constructor: clear every PvP protection on startup so

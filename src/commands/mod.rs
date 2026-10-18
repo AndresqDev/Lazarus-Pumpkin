@@ -10,6 +10,7 @@ pub mod hologram;
 pub mod kit;
 pub mod lastdeaths;
 pub mod lives;
+pub mod logout;
 pub mod pvp;
 pub mod sotw;
 pub mod staff;
@@ -51,6 +52,7 @@ pub fn register(context: &Context) -> Result<(), String> {
     faction::register(context)?;
     lastdeaths::register(context)?;
     lives::register(context)?;
+    logout::register(context)?;
     staff::register(context)?;
     hologram::register(context)?;
     kit::register(context)?;
