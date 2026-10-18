@@ -112,6 +112,22 @@ pub struct AppState {
     pub hologram_entities: std::collections::BTreeMap<String, Vec<Entity>>,
     pub kits: KitsManager,
     pub classes: crate::classes::PvpClassManager,
+    /// `PLAYER_SETTINGS.SETTINGS.*` entries, parsed once at startup like the
+    /// original `SettingsHandler` constructor.
+    pub settings: Vec<crate::handlers::settings::SettingsEntry>,
+    /// Open `/settings` windows per player
+    /// (`SettingsHandler#settingsInventories`, built on join in the original).
+    pub settings_sessions:
+        std::collections::BTreeMap<String, crate::handlers::settings::SettingsSession>,
+    /// `InventoryRestoreManager#inventories`.
+    pub restore: crate::handlers::restore::RestoreStore,
+    /// Open `/inventoryrestore` previews per viewer (port-only, see the module).
+    pub restore_sessions:
+        std::collections::BTreeMap<String, crate::handlers::restore::RestoreSession>,
+    /// `RANK_REVIVE_COMMAND` entries, parsed once at startup.
+    pub rank_revives: Vec<crate::handlers::rank::RankReviveEntry>,
+    /// `ONLINE_RANK_ANNOUNCER` entries, parsed once at startup.
+    pub rank_announcements: Vec<crate::handlers::rank::RankAnnouncementEntry>,
     /// Transient: last chunk each player occupied, for territory-entry messages.
     pub chunk_cache: std::collections::BTreeMap<String, ChunkState>,
     /// Transient: last tab lines sent per viewer (for the packet-based tab list).
@@ -252,6 +268,12 @@ pub fn init(data_folder: String) -> Result<(), String> {
     let mut classes = crate::classes::PvpClassManager::new();
     classes.load(&raw.classes);
 
+    // Parsed once at startup, exactly like the original handler constructors
+    // (a `/lazarus reload` does not rebuild any of them).
+    let settings = crate::handlers::settings::load_entries(&raw.config);
+    let rank_revives = crate::handlers::rank::load_rank_revive_entries(&raw.config);
+    let rank_announcements = crate::handlers::rank::load_announcement_entries(&raw.config);
+
     let sotw = crate::handlers::timer::sotw::SotwState::new(config.sotw.hide_players);
 
     // The selection wands are parsed once at startup from `CLAIM_WAND` /
@@ -282,6 +304,12 @@ pub fn init(data_folder: String) -> Result<(), String> {
             hologram_entities: std::collections::BTreeMap::new(),
             kits,
             classes,
+            settings,
+            settings_sessions: std::collections::BTreeMap::new(),
+            restore: crate::handlers::restore::RestoreStore::default(),
+            restore_sessions: std::collections::BTreeMap::new(),
+            rank_revives,
+            rank_announcements,
             chunk_cache: std::collections::BTreeMap::new(),
             tab_cache: std::collections::BTreeMap::new(),
             spawn_centers: std::collections::BTreeMap::new(),
@@ -302,7 +330,14 @@ pub fn init(data_folder: String) -> Result<(), String> {
             combat_logger_kick_all: false,
             safe_logouts: std::collections::BTreeSet::new(),
         }))
-        .map_err(|_| "state already initialised".to_string())
+        .map_err(|_| "state already initialised".to_string())?;
+
+    // `InventoryRestoreManager#loadInventories`: needs the freshly installed
+    // state (config keys + data folder) for the purge window.
+    let folder = state().read().unwrap().data_folder.clone();
+    crate::handlers::restore::load_inventories(&folder);
+
+    Ok(())
 }
 
 /// Access the global state. Panics if [`init`] has not run yet.

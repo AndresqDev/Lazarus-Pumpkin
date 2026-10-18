@@ -23,6 +23,7 @@ pub enum TimerType {
     Home,
     Stuck,
     Logout,
+    RankRevive,
 }
 
 impl TimerType {
@@ -37,6 +38,7 @@ impl TimerType {
             TimerType::Home => "&bHome",
             TimerType::Stuck => "&bStuck",
             TimerType::Logout => "&bLogout",
+            TimerType::RankRevive => "&bRank Revive",
         }
     }
 }

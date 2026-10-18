@@ -68,6 +68,7 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `userdata.Userdata`, `UserdataManager` | ✅ | JSON persistence (Mongo dropped; sandbox only exposes the data folder) |
 | `timer.*` (combat tag, apple, enderpearl, pvp prot, home, stuck, logout) | ✅ | timer storage, scoreboard + consumption hooks (pearl/apple); `/logout` warmup with the `LogoutHandler` move/damage/quit cancels |
 | `timer.cooldown.DtrRegenTimer` | ✅ | one `REGEN_PER_MINUTE` step per minute; `setDtr` clamp + 2-decimal rounding |
+| `timer.cooldown.RankReviveTimer` | ✅ | persisted player timer (`TimerType::RankRevive`), `MM:SS` dynamic clock in the cooldown message, expiry message through the tick |
 | `timer.custom.CustomTimer` | ✅ | `/customtimer start/cancel/list` + sidebar lines; stored as expiry millis (the original was memory-only) |
 | `scoreboard.*` | ✅ | config template (`scoreboard.toml`) + placeholders + teams |
 | `tab.*` | ✅ | header/footer + per-player name/order/latency (`tab.toml`) |
@@ -88,6 +89,10 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `handlers.portal.*` (PortalHandler, EndPortalHandler, NetherPortalTrapHandler) | ✅ | nether travel translation (`NETHER_PORTAL_POSITION_TRANSLATION`: ÷/×`VALUE` on X/Z, Y and rotation kept), portals inside the spawn safezone redirected to `NETHER_SPAWN`/`NETHER_EXIT`, end entry/exit to `END_SPAWN`/`END_EXIT` (world-spawn fallbacks); `/endportal` hands out the `SELECTION` wand (`toggleSelectionProcess` always restarts) and its check validates end portal frames, equal elevation and a 2–4 block X/Z span before filling the rectangle with end portals (frames kept, selection + wand removed, position message still sent); the trap fix sends fake air for the portal blocks around a right-clicked portal while both feet and eye blocks are portals |
 | ↳ portal deviations | | the host never fires `PlayerPortalEvent`: the travel rules hook `PlayerChangeWorldEvent` (`Player::teleport_world`, which reads `position`/`yaw`/`pitch` back) and infer the portal kind from the block the player stands in (feet/eye, where the original's `from` location sat); the host's own travel agent runs *before* the event, so its vanilla 1:8 portal search/creation (and the end-side obsidian platform rebuild) still happens at the vanilla destination before the player is moved to the configured one; the destination world cannot be swapped to the entry's world token (only position/rotation are applied) |
 | `handlers.kitmap.*` (KitmapHandler, KillstreakHandler) | 🟡 | kitmap mode fully wired: config sync from raw `config.yml`, deathban/DTR-loss skips, safezone drop denial, item-clear task, kill reward + killstreaks (console commands + broadcast), PvP-timer clearing/gating, first-join spawn teleport, `KITMAP_STATS` sidebar block, KITMAP-only kits restricted to safezones; `/spawn` teleport, `/topkillstreaks` and the Miner kitmap renames pending (below) |
+| `handlers.salvage.*` (SalvageHandler) + `/salvage` | ✅ | 1.8 `Bukkit.getRecipesFor` data inlined per output (material + stick, bow stick→string, 1.8 pattern cell counts, planks→`oak_planks`), `ItemUtils#isSalvageable` tier/kind composite, durability from the `Damage` component + the 1.8 max damage table (`<durability>` percentage like `Double.toString`), enchanted books keep their `stored-enchantments`, ingredient names from the raw `items.yml` reverse lookup |
+| `handlers.settings.*` (SettingsHandler) + `/settings` | ✅ | `PLAYER_SETTINGS` parsed once at startup, GUI built at open (session per player, click by plain display name), toggle runs the shared `/toggle*` path and refreshes the lore, every click in the window cancelled like the original (outside clicks stay vanilla) |
+| `handlers.restore.*` (InventoryRestoreManager) + `/inventoryrestore` | ✅ | `saveInventoryUponDeath` hooked into both death flows (player death + combat-logger death, from the captured record before the wipe), JSON snapshot per death (`<dataFolder>/restore/<uuid>.json`, 36 slots + armor), `FILE_CACHE` purge at load, 54-slot preview (armor 45-48, placeholders, `Rollback` in 53), rollback into the (online) target + `RESTORED_SENDER`/`RESTORED_PLAYER` messages, file deleted on restore |
+| `handlers.rank.*` (RankReviveHandler, RankAnnouncerHandler) + `/rankrevive` | ✅ | per-rank `RANK_REVIVE_COMMAND` entries (first matching permission wins), cooldown through the persisted `RankReviveTimer`, deathban + revive + activation + broadcast (`<rankName>`/`<player>`/`<target>` to console + all players); donators announcer with `ONLINE_RANK_ANNOUNCER` entries, op skip, config-order groups joined with `DELIMITER`, `MESSAGE` lines with `<donators>` |
 | `handlers.leaderboard.*` | 🟡 | `/f top` + `/f list` faithful (hover/click, relation colours, pagination); leaderboard holograms TODO |
 | `abilities.*` | ⬜ | large subsystem; ported last |
 | `classes.*` (Archer, Bard, Miner, Rogue, Mage, Bomber) | ⬜ | |
@@ -306,6 +311,24 @@ context):
 * Respawn rotation — `PlayerSpawnLocationEvent` carries only the position, so the
   `WORLD_SPAWN` yaw/pitch are applied on the first-join teleport but respawns keep
   the host's world-spawn rotation.
+* Salvage full-inventory leftovers — `PlayerUtils#addToInventoryOrDropToFloor`
+  dropped them on the ground; the WASM API cannot spawn item entities, so a full
+  inventory loses the ingredient (durability/enchantments are read off the hand
+  stack before it is consumed, like Java reading the still-referenced object).
+* `/settings` — the original cached one inventory per player on join and matched
+  clicks by the window title; the port builds the window when the command runs and
+  matches clicks by the item's plain display name through a per-player session
+  (the same `getSetting(displayName)` lookup). Sizes 9/18 map to `Generic9x2`
+  because the host sizes `Generic9x1` as a 5-slot hopper.
+* Inventory restore — snapshots are written to `<dataFolder>/restore/<uuid>.json`
+  on every death (the original kept them in memory and only wrote files on
+  disable), stored as registry key + count + data components (an unknown component
+  name is dropped); there is no API to close a window, so `Close Preview` cannot
+  close the preview (Escape does) and a rollback clears the preview instead of
+  closing it.
+* Permission-targeted broadcasts (`Messages.sendMessage(message, permission)`: the
+  deathban revive and the inventory-restore notices) reach the staff players only —
+  the port does not mirror server-console message lines.
 
 ## 5. Roadmap
 
@@ -362,21 +385,29 @@ translation (`NETHER_PORTAL_POSITION_TRANSLATION`), the spawn/exit redirections
 frame/elevation/size check that fills the rectangle with end portals, the
 nether-portal trap fix (fake air around the clicked portal), and
 `SelectionManager#onPlayerChangedWorld` (any world change drops the selection).
+The rank / restore / salvage / settings sector landed next: `/salvage` rebuilds
+the 1.8 `Bukkit.getRecipesFor` data (inlined recipe table, 1.8 pattern cell
+counts, durability + enchantment preservation, `items.yml` ingredient names),
+`/settings` opens the `PLAYER_SETTINGS` GUI (startup-parsed entries,
+click-by-display-name, lore refresh through the shared `/toggle*` toggles),
+inventory restore snapshots every death into `<data>/restore/<uuid>.json`
+(`INVENTORY_RESTORE.*`, `FILE_CACHE` purge at load, combat-logger deaths included
+through the captured record), the 54-slot preview shows contents/armor with the
+original placeholders and rolls back into an online target with the staff
+broadcast, and the rank sector adds `/rankrevive` (per-rank permission +
+persisted `RankReviveTimer` cooldown, broadcast with `<rankName>`) plus the
+online donators announcer (`ONLINE_RANK_ANNOUNCER`, op skip, delimiter join).
 
 Still to port (in rough priority order):
 
-1. Rank/restore/salvage/settings commands — the restore sector must hook
-   `InventoryRestoreManager#saveInventoryUponDeath` into both death flows
-   (`deathban::apply_on_death` and `combatlogger::apply_logger_death`, the
-   latter saving the captured inventory before the wipe).
-2. Leaderboard holograms (+ `/topdeaths` and the remaining top commands).
-3. Events/games (Koth, Conquest, DTC, Ender Dragon, King of the Hill, Mountain,
+1. Leaderboard holograms (+ `/topdeaths` and the remaining top commands).
+2. Events/games (Koth, Conquest, DTC, Ender Dragon, King of the Hill, Mountain,
    Loot, Schedule) using boss bars + the world API.
-4. Abilities + PvP classes (Archer/Bard/Miner/Rogue/Mage/Bomber).
-5. Mob stacking (the remaining block handler; the filter stays blocked by the
+3. Abilities + PvP classes (Archer/Bard/Miner/Rogue/Mage/Bomber).
+4. Mob stacking (the remaining block handler; the filter stays blocked by the
    missing player pickup event).
-6. Custom recipes, sign shops.
-7. World border, safezone food/potion rules.
+5. Custom recipes, sign shops.
+6. World border, safezone food/potion rules.
 
 ## 6. Files
 
@@ -399,7 +430,9 @@ src/
 ├── utils/
 │   ├── mod.rs          colour/string/time helpers
 │   ├── core.rs         host-API bridge + territory resolution
+│   ├── components.rs   WIT `DataComponent` <-> kebab-name table (restore snapshots)
 │   ├── datetime.rs     `DATE_FORMAT`/`TIMEZONE` formatter (FastDateFormat subset)
+│   ├── legacy_items.rs 1.8 item ids <-> registry keys + `items.yml` names
 │   ├── nbt.rs          NBT tree helpers for the host bridge
 │   └── potion_components.rs  native potion-component table bridge
 ├── classes/            PvP classes (Archer/Bard/Miner/Rogue/Mage/Bomber)
@@ -429,6 +462,10 @@ src/
 │   ├── limiter/        enchant/potion/entity limits (limiters.yml)
 │   ├── logger/         combat loggers + /logout warmup
 │   ├── portal/         portal travel rules, /endportal check, nether trap fix
+│   ├── rank/           rank revive + online donators announcer
+│   ├── restore/        death-inventory snapshots + preview/rollback
+│   ├── salvage/        1.8 recipe salvage
+│   ├── settings/       /settings GUI
 │   └── timer/          enderpearl / golden apple cooldowns + SOTW
 ├── commands/
 │   ├── mod.rs          registration helpers
@@ -444,7 +481,11 @@ src/
 │   ├── logout.rs       /logout (safe logout warmup)
 │   ├── staff.rs        /vanish, /staffmode
 │   ├── hologram.rs     /hologram
+│   ├── inventoryrestore.rs  /inventoryrestore (aliases invrestore/lastinv/invrollback)
 │   ├── pvp.rs          /pvp (enable / time)
+│   ├── rankrevive.rs   /rankrevive
+│   ├── salvage.rs      /salvage
+│   ├── settings.rs     /settings
 │   ├── sotw.rs         /sotw (start/stop/hideplayers/enable/time)
 │   └── kit.rs          /kit
 └── listeners/

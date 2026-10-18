@@ -8,11 +8,15 @@ pub mod economy;
 pub mod endportal;
 pub mod faction;
 pub mod hologram;
+pub mod inventoryrestore;
 pub mod kit;
 pub mod lastdeaths;
 pub mod lives;
 pub mod logout;
 pub mod pvp;
+pub mod rankrevive;
+pub mod salvage;
+pub mod settings;
 pub mod sotw;
 pub mod staff;
 
@@ -57,8 +61,12 @@ pub fn register(context: &Context) -> Result<(), String> {
     logout::register(context)?;
     staff::register(context)?;
     hologram::register(context)?;
+    inventoryrestore::register(context)?;
     kit::register(context)?;
     pvp::register(context)?;
+    rankrevive::register(context)?;
+    salvage::register(context)?;
+    settings::register(context)?;
     sotw::register(context)?;
     Ok(())
 }

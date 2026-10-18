@@ -95,6 +95,26 @@ pub fn start(context: &Context) {
             context.schedule_repeating_task(period, period, |server| clear_items(&server));
         }
     }
+
+    // Online donators announcer (`RankAnnouncerHandler#setupAnnouncementTask`):
+    // the original scheduled an async timer with delay 0 and period
+    // `INTERVAL * 20`; the port waits half a second so the first pass lands
+    // with the server up.
+    {
+        let (enabled, interval) = {
+            let guard = state().read().unwrap();
+            (
+                guard.raw.config.bool("ONLINE_RANK_ANNOUNCER_ENABLED"),
+                guard.raw.config.int("ONLINE_RANK_ANNOUNCER_INTERVAL"),
+            )
+        };
+        if enabled {
+            let period = (interval.max(1) * 20) as u64;
+            context.schedule_repeating_task(10, period, |server| {
+                crate::handlers::rank::announce(&server);
+            });
+        }
+    }
 }
 
 /// Deletes every item entity in every world (port of
@@ -239,6 +259,14 @@ fn announce_expired(server: &Server, expired: &[(String, TimerType)]) {
             TimerType::CombatTag => Some("&aYou are no longer combat tagged.".to_string()),
             TimerType::PvpProtection => {
                 Some(state().read().unwrap().lang.pvp_protection_expired.clone())
+            }
+            TimerType::RankRevive => {
+                let guard = state().read().unwrap();
+                Some(format!(
+                    "{}{}",
+                    guard.raw.language.string("PREFIX"),
+                    guard.raw.language.string("RANK_REVIVE_COMMAND.COOLDOWN_EXPIRED")
+                ))
             }
             _ => None,
         };

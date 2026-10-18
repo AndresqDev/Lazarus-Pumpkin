@@ -793,6 +793,12 @@ impl EventHandler<EntityDeathEvent> for CombatLoggerDeathListener {
         let killer_uuid = killer.as_ref().map(core::uuid_of);
         let killer_name = killer.as_ref().map(core::name_of);
 
+        // `VillagerCombatLogger_1_8#die` → `deathbanPlayer` →
+        // `saveInventoryUponDeath`: the original read the (still intact)
+        // offline player inventory; the port snapshots the logger's capture
+        // right before it is drained into the killer.
+        crate::handlers::restore::save_captured(&uuid, &record.contents, &record.armor);
+
         // `dropPlayerItems(this.contents, this.armor, location)`: the WASM API
         // cannot spawn item entities, so both arrays go to the killer's
         // inventory (contents first, like the two drop streams).

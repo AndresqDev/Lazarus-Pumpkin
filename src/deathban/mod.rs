@@ -135,6 +135,10 @@ pub fn enforce_on_join(player: &Player) -> bool {
 /// auto-revives using the faction's lives. When a ban is applied, the kick is
 /// queued ~1s later via [`process_pending_kicks`].
 pub fn apply_on_death(player: &Player, reason: &str) {
+    // `DeathbanManager#deathbanPlayer` saved the inventory first thing, before
+    // every early return (bypass permission included).
+    crate::handlers::restore::save_inventory_upon_death(player);
+
     let uuid = crate::utils::core::uuid_of(player);
     let location = crate::utils::core::location(player);
 

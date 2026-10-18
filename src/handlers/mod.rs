@@ -10,4 +10,8 @@ pub mod kitmap;
 pub mod limiter;
 pub mod logger;
 pub mod portal;
+pub mod rank;
+pub mod restore;
+pub mod salvage;
+pub mod settings;
 pub mod timer;

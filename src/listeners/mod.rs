@@ -22,6 +22,8 @@ use crate::handlers::kitmap;
 use crate::handlers::limiter as limiters;
 use crate::handlers::logger as combatlogger;
 use crate::handlers::portal;
+use crate::handlers::restore;
+use crate::handlers::settings;
 use crate::handlers::timer::items;
 use crate::selection;
 
@@ -174,6 +176,15 @@ pub fn register(context: &Context) -> Result<(), String> {
 
     context.register_event_handler(items::EnderPearlListener, EventPriority::Normal, true)?;
     context.register_event_handler(items::GoldenAppleListener, EventPriority::Normal, true)?;
+
+    // `/settings` GUI (`SettingsHandler#onInventoryClick` ran at `LOW`) and the
+    // `/inventoryrestore` preview (`InventoryRestoreManager#onInventoryClick`
+    // ran at the default priority). The close listeners are port-only session
+    // bookkeeping (see the handler modules).
+    context.register_event_handler(settings::SettingsClickListener, EventPriority::Low, true)?;
+    context.register_event_handler(settings::SettingsCloseListener, EventPriority::Normal, true)?;
+    context.register_event_handler(restore::RestoreClickListener, EventPriority::Normal, true)?;
+    context.register_event_handler(restore::RestoreCloseListener, EventPriority::Normal, true)?;
 
     Ok(())
 }

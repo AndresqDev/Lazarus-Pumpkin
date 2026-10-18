@@ -4,8 +4,10 @@
 //! `TextComponent::from_legacy_string_with_code`, which does the same job for
 //! legacy `&`-prefixed color/format codes.
 
+pub mod components;
 pub mod core;
 pub mod datetime;
+pub mod legacy_items;
 pub mod nbt;
 pub mod potion_components;
 

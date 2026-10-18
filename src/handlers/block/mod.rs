@@ -436,18 +436,10 @@ fn legacy_block_key(id: u32) -> Option<&'static str> {
     })
 }
 
-/// `ItemUtils#getMaterialName`: the `items.yml` key for a config entry
+/// `ItemUtils#getMaterialName`: the `items.yml` key for an `id:data` entry
 /// (e.g. `"137:0"` -> `"CommandBlock"`).
 fn items_name(entry: &str) -> String {
-    let guard = state().read().unwrap();
-
-    for key in guard.raw.items.root_keys() {
-        if guard.raw.items.string(&key) == entry {
-            return key;
-        }
-    }
-
-    entry.to_string()
+    crate::utils::legacy_items::items_name(entry)
 }
 
 // ---------------------------------------------------------------------------
@@ -1231,36 +1223,13 @@ fn crowbar_item_key() -> String {
 /// Minimal 1.8 item-id table for `CROWBAR.MATERIAL_ID`-style configs; see
 /// [`legacy_block_key`] for the rationale.
 fn legacy_item_key(id: u32) -> Option<&'static str> {
-    Some(match id {
-        280 => "minecraft:stick",
-        294 => "minecraft:golden_hoe",
-        339 => "minecraft:paper",
-        346 => "minecraft:fishing_rod",
-        352 => "minecraft:bone",
-        369 => "minecraft:blaze_rod",
-        _ => return None,
-    })
+    crate::utils::legacy_items::key_of(id, 0)
 }
 
 /// Legacy 1.8 `id:meta` to a modern registry key (`resolve_block_key` for
 /// items).
 fn resolve_item_key(entry: &str) -> Option<String> {
-    let entry = entry.trim();
-    if entry.is_empty() {
-        return None;
-    }
-
-    if let Some((id, _)) = entry.split_once(':')
-        && let Ok(id) = id.parse::<u32>()
-    {
-        return legacy_item_key(id).map(str::to_string);
-    }
-
-    if entry.contains(':') {
-        Some(entry.to_string())
-    } else {
-        Some(format!("minecraft:{entry}"))
-    }
+    crate::utils::legacy_items::parse(entry)
 }
 
 /// `Config.CROWBAR_NAME`.

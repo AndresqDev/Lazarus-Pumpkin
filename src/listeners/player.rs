@@ -187,6 +187,10 @@ impl EventHandler<PlayerLeaveEvent> for LeaveListener {
         guard.chunk_cache.remove(&uuid);
         guard.selection.forget(&uuid);
         guard.glass.forget(&uuid);
+        // `/settings` and `/inventoryrestore` sessions (the original dropped the
+        // settings inventory on quit; the restore manager kept no viewer state).
+        guard.settings_sessions.remove(&uuid);
+        guard.restore_sessions.remove(&uuid);
         // PvP protection banks while offline (port of `PvpProtHandler#onPlayerQuit`).
         guard.timers.bank_pvp(&uuid);
 
