@@ -44,6 +44,10 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(player::DeathListener, EventPriority::Normal, true)?;
     // Combat logger entity deaths (`VillagerCombatLogger_1_8#die`).
     context.register_event_handler(combatlogger::CombatLoggerDeathListener, EventPriority::Normal, true)?;
+    // Vanilla drops of a dead logger (`dropDeathLoot` was empty and
+    // `expToDrop` stayed 0 on the original entity).
+    context.register_event_handler(combatlogger::CombatLoggerLootListener, EventPriority::Normal, true)?;
+    context.register_event_handler(combatlogger::CombatLoggerExpListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::RespawnListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::SpawnLocationListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::SpawnChangeListener, EventPriority::Normal, true)?;

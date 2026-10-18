@@ -23,12 +23,17 @@
 //! * the equipment displayed on the entity is cleared right before the host
 //!   computes its death drops (the death event fires first), so the vanilla
 //!   random equipment drops cannot duplicate the hand-out — the original
-//!   emptied `dropDeathLoot` for the same reason.
+//!   emptied `dropDeathLoot` for the same reason; the remaining vanilla loot
+//!   (bones/arrows) and the experience orbs of that death flow are cancelled
+//!   through `ItemSpawnEvent`/`EntitySpawnEvent` markers, replicating the
+//!   empty `dropDeathLoot` override and `expToDrop = 0`.
+
+use std::sync::Mutex;
 
 use pumpkin_plugin_api::common::{BlockPos, Hand};
 use pumpkin_plugin_api::events::{
-    EntityDamageByEntityEvent, EntityDamageEvent, EntityDeathEvent, EventData, EventHandler,
-    PlayerLeaveEvent,
+    EntityDamageByEntityEvent, EntityDamageEvent, EntityDeathEvent, EntitySpawnEvent, EventData,
+    EventHandler, ItemSpawnEvent, PlayerLeaveEvent,
 };
 use pumpkin_plugin_api::scheduler::SchedulerExt;
 use pumpkin_plugin_api::wit::pumpkin::plugin::status_effect::{
@@ -711,14 +716,20 @@ impl EventHandler<EntityDeathEvent> for CombatLoggerDeathListener {
             return event;
         };
 
-        // The host fires this event before computing the drops: clearing the
-        // equipment keeps the vanilla random equipment drop from handing the
-        // same items out twice (`dropDeathLoot` was empty in the original).
+        // The host fires this event *before* computing the death drops:
+        // clearing the equipment keeps the vanilla random equipment drop from
+        // handing the same items out twice, and the position marker swallows
+        // the vanilla loot table and experience orbs (`dropDeathLoot` was an
+        // empty override and `expToDrop` stayed 0 in the original). Both use
+        // the entity's live position, like `this.bukkitEntity.getLocation()`.
+        let mut death_position = (record.x, record.y, record.z);
         if let Some(entity) = resolve_entity(&server, &record.world, record.entity_id) {
+            death_position = entity.get_position();
             if let Some(living) = entity.as_living() {
                 living.clear_equipment();
             }
         }
+        mark_vanilla_drop(&record.world, death_position);
 
         freeze_effects(&mut record);
 
@@ -881,13 +892,107 @@ impl EventHandler<EntityDeathEvent> for CombatLoggerDeathListener {
         crate::deathban::apply_logger_death(
             &uuid,
             &record.world,
-            record.x.floor() as i32,
-            record.y.floor() as i32,
-            record.z.floor() as i32,
+            death_position.0.floor() as i32,
+            death_position.1.floor() as i32,
+            death_position.2.floor() as i32,
             record.deathban_millis,
             &reason,
         );
 
+        event
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Vanilla drop suppression
+// ---------------------------------------------------------------------------
+
+/// Live markers for the vanilla drops of a dead logger: `(world, x, y, z,
+/// expires_at_millis)`. The host computes `drop_loot`/`drop_equipment` and the
+/// experience orbs in the same call stack as `EntityDeathEvent`, right after
+/// the handlers return, so a marker only has to outlive the event call.
+static VANILLA_DROP_MARKERS: Mutex<Vec<(String, f64, f64, f64, i64)>> = Mutex::new(Vec::new());
+
+/// Grace period of a marker; the spawns it must catch happen immediately after
+/// the death event, this is pure scheduling margin.
+const VANILLA_DROP_MARKER_MILLIS: i64 = 500;
+
+fn mark_vanilla_drop(world: &str, position: (f64, f64, f64)) {
+    let now = util::now_millis();
+    let mut markers = VANILLA_DROP_MARKERS.lock().unwrap();
+    markers.retain(|(_, _, _, _, expires)| *expires > now);
+    markers.push((
+        world.to_string(),
+        position.0,
+        position.1,
+        position.2,
+        now + VANILLA_DROP_MARKER_MILLIS,
+    ));
+}
+
+/// Whether a spawn at `position` belongs to a dead logger's vanilla drops.
+/// `ItemSpawnEvent` carries no world (the item entity does not exist yet), so
+/// the item check passes `None`; the float coordinates make a cross-world
+/// collision of a live marker impossible in practice.
+fn is_vanilla_logger_drop(world: Option<&str>, position: (f64, f64, f64)) -> bool {
+    let now = util::now_millis();
+    let mut markers = VANILLA_DROP_MARKERS.lock().unwrap();
+    markers.retain(|(_, _, _, _, expires)| *expires > now);
+
+    markers.iter().any(|(marker_world, x, y, z, _)| {
+        if let Some(world) = world
+            && world != marker_world
+        {
+            return false;
+        }
+
+        let dx = position.0 - x;
+        let dy = position.1 - y;
+        let dz = position.2 - z;
+        // 1.5-block radius: `dropItemNaturally` jitters a stack around its
+        // block while the experience orbs spawn on the entity itself.
+        dx * dx + dy * dy + dz * dz <= 2.25
+    })
+}
+
+/// `EntityLiving#dropDeathLoot` was an empty override in the NMS logger, so
+/// the loot table of the underlying mob is swallowed (skeletons drop bones and
+/// arrows, villagers drop nothing).
+pub struct CombatLoggerLootListener;
+
+impl EventHandler<ItemSpawnEvent> for CombatLoggerLootListener {
+    fn handle(
+        &self,
+        _server: Server,
+        mut event: EventData<ItemSpawnEvent>,
+    ) -> EventData<ItemSpawnEvent> {
+        if is_skeleton_loot(&event.item_name) && is_vanilla_logger_drop(None, event.position) {
+            event.cancelled = true;
+        }
+        event
+    }
+}
+
+fn is_skeleton_loot(item_name: &str) -> bool {
+    let name = item_name.strip_prefix("minecraft:").unwrap_or(item_name);
+    matches!(name, "bone" | "arrow")
+}
+
+/// The original entity's `expToDrop` was 0, so the `get_experience_reward`
+/// hand-out of the host's death flow is swallowed too.
+pub struct CombatLoggerExpListener;
+
+impl EventHandler<EntitySpawnEvent> for CombatLoggerExpListener {
+    fn handle(
+        &self,
+        _server: Server,
+        mut event: EventData<EntitySpawnEvent>,
+    ) -> EventData<EntitySpawnEvent> {
+        if core::entity_type_name(&event.entity_type) == Some("experience_orb")
+            && is_vanilla_logger_drop(Some(&event.target_world.get_name()), event.position)
+        {
+            event.cancelled = true;
+        }
         event
     }
 }
