@@ -174,7 +174,9 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   handler's kitmap block. Config values are synced from the raw `config.yml` on
   every load (`KITMAP_MODE`, `KITMAP_CLEAR_ITEMS`, `KITMAP_KILL_REWARD`,
   `KITMAP_KILLSTREAK.KILLS`), and the sidebar adds the `KITMAP_STATS` block from the
-  raw `scoreboard.yml`.
+  raw `scoreboard.yml`. A port **addition** — `KITMAP_STATS.ONLY_IN_SPAWN`
+  (default `true`) — keeps that block visible only inside a safezone territory;
+  `false` restores the original always-on behaviour.
 * **The spawn is `utilities.yml` `WORLD_SPAWN`, and it owns every spawn path.**
   Joins (first join only, like `PvpProtHandler#onPlayerJoin`), respawns (port of
   `DynamicEventHandler#onPlayerRespawn`'s `setRespawnLocation`, applied through

@@ -53,6 +53,9 @@ SALE_PLACEHOLDER: "&6&lSale&7: &c"
 KEYSALE_PLACEHOLDER: "&b&lKeySale&7: &c"
 
 KITMAP_STATS:
+  # Should this block only be shown while inside a safezone (spawn)?
+  # [Lazarus-Pumpkin addition — the original shows it whenever kitmap mode is on]
+  ONLY_IN_SPAWN: true
   TITLE_PLACEHOLDER: "&4&lInformation"
   KILLS_PLACEHOLDER: " &7* &4&lKills&7: "
   DEATHS_PLACEHOLDER: " &7* &4&lDeaths&7: "

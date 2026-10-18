@@ -175,6 +175,9 @@ impl<'a> SidebarBuilder<'a> {
 
         if !self.last_line {
             if self.s.footer_enabled {
+                // `addFooter` pushes an invisible `AQUA + RESET` spacer row
+                // before the footer text.
+                self.lines.push(String::new());
                 self.lines.push(self.s.footer.clone());
             }
             if !self.s.line_invisible {
@@ -215,9 +218,121 @@ fn build_lines(guard: &AppState, player: &Player, server: &Server, uuid: &str) -
         b.add_line("&3");
     }
 
-    // ---- PvP class section ----
+    // ---- Territory + kitmap stats (applyMiscellaneousPlaceholders) ----
+    {
+        let location = crate::utils::core::location(player);
+        // Guard-based helpers: never re-enter the state lock (the caller already
+        // holds it) or the scheduler task deadlocks.
+        let territory = crate::utils::core::territory_at_guard(
+            guard,
+            &location.world,
+            location.block_x(),
+            location.block_z(),
+        );
+        let viewer = guard.factions.by_member(uuid).map(|f| f.id.clone());
+        let display = crate::utils::core::territory_display_guard(guard, &territory, viewer.as_deref());
+
+        // Kitmap mode prepends the `KITMAP_STATS` block (title, kills, deaths,
+        // balance and — only while streaking — the killstreak) and an extra
+        // spacer line before the claim. `KITMAP_STATS.ONLY_IN_SPAWN` (port
+        // addition, default true) hides the whole block outside safezones.
+        if guard.config.kitmap.enabled {
+            let only_in_spawn = !guard.raw.scoreboard.has("KITMAP_STATS.ONLY_IN_SPAWN")
+                || guard.raw.scoreboard.bool("KITMAP_STATS.ONLY_IN_SPAWN");
+            let show_stats =
+                !only_in_spawn || matches!(territory, crate::utils::core::Territory::Safezone);
+
+            if show_stats {
+                if let Some(user) = guard.userdata.get(uuid) {
+                    let sb = &guard.raw.scoreboard;
+                    b.add(&sb.string("KITMAP_STATS.TITLE_PLACEHOLDER"), "");
+                    b.add(
+                        &sb.string("KITMAP_STATS.KILLS_PLACEHOLDER"),
+                        &user.kills.to_string(),
+                    );
+                    b.add(
+                        &sb.string("KITMAP_STATS.DEATHS_PLACEHOLDER"),
+                        &user.deaths.to_string(),
+                    );
+                    b.add(
+                        &sb.string("KITMAP_STATS.BALANCE_PLACEHOLDER"),
+                        &user.balance.to_string(),
+                    );
+                    if user.killstreak > 0 {
+                        b.add(
+                            &sb.string("KITMAP_STATS.KILLSTREAK_PLACEHOLDER"),
+                            &user.killstreak.to_string(),
+                        );
+                    }
+                }
+
+                if !s.claim.is_empty() {
+                    b.add_empty_line("&4");
+                }
+            }
+
+            if !s.claim.is_empty() {
+                b.add(&s.claim, &display);
+            }
+            b.add_line("&5");
+        } else {
+            b.add(&s.claim, &display);
+        }
+    }
+
+    // ---- Custom timers (port of `CustomTimer#handleScoreboardUpdate`; the
+    // original applies them right after the claim line) ----
+    {
+        let now = crate::utils::now_millis();
+        for timer in &guard.timers.custom {
+            let remaining = timer.expiry - now;
+            if remaining > 0 {
+                // The stored placeholder already carries its trailing space
+                // (`placeholder + " "` in the original).
+                b.add(&timer.placeholder, &utils::format_clock(remaining));
+            }
+        }
+    }
+
+    // ---- Scoreboard timers (applyScoreboardTimerPlaceholders), in
+    // TimerManager order: sale, keySale, `sotw`, eotw, purge, `pvpProt`,
+    // `combatTag`, `enderPearl`, archerTag, home, stuck, teleport, logout,
+    // gApple, apple. Only the ported timers render here, and the SOTW line
+    // comes before the rest.
+    let sotw_remaining = guard.timers.sotw_remaining();
+    if sotw_remaining > 0 {
+        // Port of `SotwTimer`: while the global timer runs the line shows the
+        // dynamic time left, using the struck-through placeholder for players
+        // that opted out with `/sotw enable`.
+        let placeholder = if guard.sotw.enabled_players.contains(uuid) {
+            &s.sotw_enabled
+        } else {
+            &s.sotw
+        };
+        b.add(placeholder, &utils::format_clock(sotw_remaining));
+    }
+    for (placeholder, timer_type) in [
+        (&s.pvp_protection, TimerType::PvpProtection),
+        (&s.combat_tag, TimerType::CombatTag),
+        (&s.enderpearl, TimerType::Enderpearl),
+        (&s.home, TimerType::Home),
+        (&s.stuck, TimerType::Stuck),
+        (&s.logout, TimerType::Logout),
+        (&s.gapple, TimerType::Gapple),
+        (&s.apple, TimerType::Apple),
+    ] {
+        let remaining = guard.timers.remaining(uuid, timer_type);
+        if remaining > 0 {
+            b.add(placeholder, &utils::format_duration(remaining));
+        }
+    }
+
+    // ---- PvP class (applyPvpClassPlaceholders): the original applies it after
+    // the scoreboard timers (and the faction focus/rally section), just before
+    // abilities — the BLUE separator goes *before* its lines.
     if let Some(kind) = guard.classes.active_class(uuid) {
         use crate::classes::ClassKind;
+        b.add_line("&9");
         b.add(
             &guard.raw.scoreboard.string("PVPCLASS_ACTIVE_PLACEHOLDER"),
             kind.name(),
@@ -238,11 +353,15 @@ fn build_lines(guard: &AppState, player: &Player, server: &Server, uuid: &str) -
                 );
             }
             ClassKind::Miner => {
-                let diamonds = guard.userdata.get(uuid).map(|u| u.diamonds_mined).unwrap_or(0);
-                b.add(
-                    &guard.raw.scoreboard.string("MINER_DIAMOND_COUNT_PLACEHOLDER"),
-                    &diamonds.to_string(),
-                );
+                // `Miner#applyActiveScoreboardLines` only adds the diamonds line
+                // outside kitmap mode.
+                if !guard.config.kitmap.enabled {
+                    let diamonds = guard.userdata.get(uuid).map(|u| u.diamonds_mined).unwrap_or(0);
+                    b.add(
+                        &guard.raw.scoreboard.string("MINER_DIAMOND_COUNT_PLACEHOLDER"),
+                        &diamonds.to_string(),
+                    );
+                }
             }
             _ => {}
         }
@@ -253,107 +372,12 @@ fn build_lines(guard: &AppState, player: &Player, server: &Server, uuid: &str) -
             );
         }
     } else if let Some((kind, seconds)) = guard.classes.warmup_info(uuid) {
+        b.add_line("&9");
         b.add(
             &guard.raw.scoreboard.string("PVPCLASS_WARMUP_PLACEHOLDER"),
             &format!("{} &7({seconds}s)", kind.name()),
         );
     }
-    b.add_line("&9");
-
-    // ---- Territory + kitmap stats (applyMiscellaneousPlaceholders) ----
-    {
-        let location = crate::utils::core::location(player);
-        // Guard-based helpers: never re-enter the state lock (the caller already
-        // holds it) or the scheduler task deadlocks.
-        let territory = crate::utils::core::territory_at_guard(
-            guard,
-            &location.world,
-            location.block_x(),
-            location.block_z(),
-        );
-        let viewer = guard.factions.by_member(uuid).map(|f| f.id.clone());
-        let display = crate::utils::core::territory_display_guard(guard, &territory, viewer.as_deref());
-
-        // Kitmap mode prepends the `KITMAP_STATS` block (title, kills, deaths,
-        // balance and — only while streaking — the killstreak) and an extra
-        // spacer line before the claim.
-        if guard.config.kitmap.enabled {
-            if let Some(user) = guard.userdata.get(uuid) {
-                let sb = &guard.raw.scoreboard;
-                b.add(&sb.string("KITMAP_STATS.TITLE_PLACEHOLDER"), "");
-                b.add(
-                    &sb.string("KITMAP_STATS.KILLS_PLACEHOLDER"),
-                    &user.kills.to_string(),
-                );
-                b.add(
-                    &sb.string("KITMAP_STATS.DEATHS_PLACEHOLDER"),
-                    &user.deaths.to_string(),
-                );
-                b.add(
-                    &sb.string("KITMAP_STATS.BALANCE_PLACEHOLDER"),
-                    &user.balance.to_string(),
-                );
-                if user.killstreak > 0 {
-                    b.add(
-                        &sb.string("KITMAP_STATS.KILLSTREAK_PLACEHOLDER"),
-                        &user.killstreak.to_string(),
-                    );
-                }
-            }
-
-            if !s.claim.is_empty() {
-                b.add_empty_line("&4");
-            }
-        }
-
-        b.add(&s.claim, &display);
-        b.add_line("&5");
-    }
-
-    // ---- Custom timers (port of `CustomTimer#handleScoreboardUpdate`; the
-    // original applies them right after the claim line) ----
-    {
-        let now = crate::utils::now_millis();
-        for timer in &guard.timers.custom {
-            let remaining = timer.expiry - now;
-            if remaining > 0 {
-                // The stored placeholder already carries its trailing space
-                // (`placeholder + " "` in the original).
-                b.add(&timer.placeholder, &utils::format_clock(remaining));
-            }
-        }
-    }
-
-    // ---- Timers (applyScoreboardTimerPlaceholders), in TimerManager order ----
-    for (placeholder, timer_type) in [
-        (&s.pvp_protection, TimerType::PvpProtection),
-        (&s.combat_tag, TimerType::CombatTag),
-        (&s.enderpearl, TimerType::Enderpearl),
-        (&s.home, TimerType::Home),
-        (&s.stuck, TimerType::Stuck),
-        (&s.logout, TimerType::Logout),
-        (&s.gapple, TimerType::Gapple),
-        (&s.apple, TimerType::Apple),
-    ] {
-        let remaining = guard.timers.remaining(uuid, timer_type);
-        if remaining > 0 {
-            b.add(placeholder, &utils::format_duration(remaining));
-        }
-    }
-
-    // ---- SOTW timer (port of `SotwTimer`): while the global timer runs the line
-    // shows the dynamic time left, using the struck-through placeholder for
-    // players that opted out with `/sotw enable`.
-    let sotw_remaining = guard.timers.sotw_remaining();
-    if sotw_remaining > 0 {
-        let placeholder = if guard.sotw.enabled_players.contains(uuid) {
-            &s.sotw_enabled
-        } else {
-            &s.sotw
-        };
-        b.add(placeholder, &utils::format_clock(sotw_remaining));
-    }
-    b.add_line("&3");
 
     b.finish()
 }
