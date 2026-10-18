@@ -17,7 +17,8 @@ use pumpkin_plugin_api::{Player, Server};
 use crate::utils::core::{self, Dimension, Territory};
 use crate::factions::{Claim, ClaimManager, Faction};
 use crate::glass;
-use crate::selection::SelectedPos;
+use crate::handlers::portal::end_portal;
+use crate::selection::{SelectedPos, SelectionKind};
 use crate::state::{state, AppState};
 use crate::utils;
 
@@ -83,15 +84,49 @@ impl EventHandler<PlayerInteractEvent> for InteractListener {
             return event;
         }
 
+        let kind = state().read().unwrap().selection.get(&uuid).map(|s| s.kind.clone());
+
+        // Non-claim selections (`SelectionManager#onPlayerInteract`): the
+        // `/endportal` wand only reacts to block clicks, and air clicks are left
+        // uncancelled (the original returns before `setCancelled`). The check
+        // (`EndPortalHandler#createSelectionCheck`) sends its own failure
+        // messages and ends the selection process on success.
+        if matches!(kind, Some(SelectionKind::Selection)) {
+            let left_click = match action {
+                InteractAction::LeftClickBlock => true,
+                InteractAction::RightClickBlock => false,
+                _ => return event,
+            };
+
+            event.cancelled = true;
+
+            if let Some(pos) = clicked
+                && end_portal::check(&server, &event.player, &uuid, pos, left_click)
+            {
+                let (prefix, message) = {
+                    let guard = state().read().unwrap();
+                    (
+                        guard.raw.language.string("PREFIX"),
+                        guard.raw.language.string(if left_click {
+                            "SELECTION.LOCATION_ONE_SET"
+                        } else {
+                            "SELECTION.LOCATION_TWO_SET"
+                        }),
+                    )
+                };
+
+                core::send(&event.player, format!("{prefix}{message}"));
+            }
+
+            return event;
+        }
+
         event.cancelled = true;
 
         let sneaking = state().read().unwrap().selection.is_sneaking(&uuid);
         // System selections (`/f claimfor`) never buy through sneaking: the claim is
         // created by re-running the command (original `SelectionManager`).
-        let is_system = matches!(
-            state().read().unwrap().selection.get(&uuid).map(|s| s.kind.clone()),
-            Some(crate::selection::SelectionKind::System(_))
-        );
+        let is_system = matches!(kind, Some(SelectionKind::System(_)));
 
         match action {
             InteractAction::LeftClickBlock => match clicked {

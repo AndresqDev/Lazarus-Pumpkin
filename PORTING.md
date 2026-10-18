@@ -85,6 +85,8 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | ↳ limiter deviations | | anvil results are clamped one tick after the take (the host hands the guest throw-away clones and drops item mutations), so the sweep covers the player's whole inventory — the `ItemUtils.updateInventory` equivalent; enchanted-book enchantment ids are probed from the server because the guest cannot read the registry (fail-open if the probe finds nothing); splash potions are denied before the throw is created and potions thrown by dispensers/witches cannot be identified (no item on the projectile); `MOBS_SPAWN_ONLY_FROM_SPAWNERS` + `MOB_LIMIT_PER_CHUNK` cannot be enforced; the mob-drop/fishing clamp sites are unreachable |
 | `handlers.logger.*` (combat logger) | 🟡 | quit spawn (skeleton/villager per `COMBAT_LOGGER.TYPE` + `VILLAGER_PROFESSION`, name format, copied health/36-slot + armor inventory/effects ≤ 12000 ticks, feet-block spawn rule, no AI), full damage rules (fire immunity, indirect magic, own-damager, SOTW / PvP-prot / staff / vanish / same-faction / ally denies with the original messages, combat-tag activation, killing-blow bookkeeping for the killer), death flow (captured items to the killer, `REASON_COMBATLOGGER` / `_KILLER` messages + targeted delivery, kill/death stats with dated entries, killstreak + kitmap rewards + faction points, `faction.onDeath` DTR/points/freeze shared with the player death flow, offline deathban from the ban time resolved at logout, deferred inventory wipe), 15 s expiry removal, rejoin restore (safe-logout flag, health/position/effects, entity removal); `/logout` warmup with the `LogoutHandler` move/damage/quit cancels and `LOGOUT.KICK_MESSAGE` kick |
 | ↳ logger deviations | | no item-entity spawn API: the captured inventory goes straight to the killer's inventory (items that do not fit, and every item when no *player* dealt the killing blow, are lost instead of dropping on the ground); the equipment displayed on the entity is cleared right before the host computes the death drops so the vanilla random equipment drops cannot duplicate the hand-out, and the remaining vanilla loot (bones/arrows) and the experience orbs of that death flow are cancelled through `ItemSpawnEvent`/`EntitySpawnEvent` position markers (replicating the empty `dropDeathLoot` override and `expToDrop = 0`); the host serialises entities away *immediately* when the last chunk watcher leaves (no unload delay), so an expiry/rejoin removal that misses the live entity is queued and retried by the 1 s tick until the chunk loads again (host entity ids are never reused; entries expire after 10 minutes), with the display equipment cleared on the retry — no ghost logger remains; offline player data is unreachable, so `die()`'s inventory clear is deferred to the victim's next join (`Userdata#pending_logger_clear`) and the offline position/health-0 update is skipped (they log back in on the logger spot anyway); potion effects cannot be applied to non-player entities, so the logger only stores them for `handleEffectChanges`; an expired logger (and a rejoin) removes the entity without the death flow, exactly like the original, but items never exist on the ground; `CombatLoggerSpawnEvent` has no host equivalent (nothing cancels it); the logout warmup lives in the shared pending-warmup slot and `/logout` registers a public node (the original's `lazarus.logout` node was undefined); `lazarus.combatlogger.bypass` also accepts the registered `lazarus:combatlogger.bypass` spelling |
+| `handlers.portal.*` (PortalHandler, EndPortalHandler, NetherPortalTrapHandler) | ✅ | nether travel translation (`NETHER_PORTAL_POSITION_TRANSLATION`: ÷/×`VALUE` on X/Z, Y and rotation kept), portals inside the spawn safezone redirected to `NETHER_SPAWN`/`NETHER_EXIT`, end entry/exit to `END_SPAWN`/`END_EXIT` (world-spawn fallbacks); `/endportal` hands out the `SELECTION` wand (`toggleSelectionProcess` always restarts) and its check validates end portal frames, equal elevation and a 2–4 block X/Z span before filling the rectangle with end portals (frames kept, selection + wand removed, position message still sent); the trap fix sends fake air for the portal blocks around a right-clicked portal while both feet and eye blocks are portals |
+| ↳ portal deviations | | the host never fires `PlayerPortalEvent`: the travel rules hook `PlayerChangeWorldEvent` (`Player::teleport_world`, which reads `position`/`yaw`/`pitch` back) and infer the portal kind from the block the player stands in (feet/eye, where the original's `from` location sat); the host's own travel agent runs *before* the event, so its vanilla 1:8 portal search/creation (and the end-side obsidian platform rebuild) still happens at the vanilla destination before the player is moved to the configured one; the destination world cannot be swapped to the entry's world token (only position/rotation are applied) |
 | `handlers.kitmap.*` (KitmapHandler, KillstreakHandler) | 🟡 | kitmap mode fully wired: config sync from raw `config.yml`, deathban/DTR-loss skips, safezone drop denial, item-clear task, kill reward + killstreaks (console commands + broadcast), PvP-timer clearing/gating, first-join spawn teleport, `KITMAP_STATS` sidebar block, KITMAP-only kits restricted to safezones; `/spawn` teleport, `/topkillstreaks` and the Miner kitmap renames pending (below) |
 | `handlers.leaderboard.*` | 🟡 | `/f top` + `/f list` faithful (hover/click, relation colours, pagination); leaderboard holograms TODO |
 | `abilities.*` | ⬜ | large subsystem; ported last |
@@ -95,7 +97,8 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `deathban.*` | ✅ | faithful prelogin flow (first join with lives = join-again prompt, second join consumes a life, EOTW lockout for stored bans), per-permission `BAN_TIMES`, faction auto-revive, `deathban_until` + `deathban_reason` + `deathban_location` on userdata, `/lives` (+ `/f livesrevive`, deposit/withdraw), `/deathban check|revive` (offline lookups through `userdata.json`) |
 | `staffmode.*`, `VanishManager` | 🟡 | vanish via `hide_player/show_player`; staff-mode flag |
 | `glass.*`, claim pillars, `/f map` visuals | ✅ | client-side `send_block_change` engine |
-| `selection.*` (WorldEdit-style wand) | ✅ | `/f claim` wand with sneak-purchase |
+| `selection.*` (WorldEdit-style wand) | ✅ | `/f claim` wand with sneak-purchase; `/endportal` `SELECTION` wand whose clicks run the end-portal check (clone-revert on failure; `SYSTEM_CLAIM` shares the selection wand, like the original); attacking while holding the wand cancels the hit and ends the selection, dropping the wand is denied and any world change drops the selection process (claim pillars cleared); both wands parsed once at startup from `CLAIM_WAND` / `SELECTION_WAND` |
+| ↳ selection deviations | | the host reports only the dropped stack's registry key `PlayerDropItemEvent`, so the drop denial matches any wand-kind item while a selection is active (the original compared the whole `ItemStack`); the attack denial skips projectiles, which the host attributes directly to the shooter player |
 | `integration.Chat_*` (permission plugins) | ⬜ | Pumpkin has its own permission system |
 | `lunarclient.*` | 🚫 | omitted as requested |
 | Knockback tuning | 🚫 | omitted as requested |
@@ -352,23 +355,28 @@ with the ban time resolved while the permissions were still valid (the
 inventory wipe runs on the next join), the logger expires after `TIME` seconds
 and the next join restores health/position/effects and removes the entity — and
 `/logout` landed with it (warmup + move/damage/quit cancels + the safe-logout
-flag the quit gate reads).
+flag the quit gate reads). The portal sector followed: the nether travel
+translation (`NETHER_PORTAL_POSITION_TRANSLATION`), the spawn/exit redirections
+(`NETHER_SPAWN`/`NETHER_EXIT`/`END_SPAWN`/`END_EXIT`) driven by
+`PlayerChangedWorldEvent`, the `/endportal` `SELECTION` wand with the
+frame/elevation/size check that fills the rectangle with end portals, the
+nether-portal trap fix (fake air around the clicked portal), and
+`SelectionManager#onPlayerChangedWorld` (any world change drops the selection).
 
 Still to port (in rough priority order):
 
-1. Portals (`PortalHandler`, end-portal machinima).
-2. Rank/restore/salvage/settings commands — the restore sector must hook
+1. Rank/restore/salvage/settings commands — the restore sector must hook
    `InventoryRestoreManager#saveInventoryUponDeath` into both death flows
    (`deathban::apply_on_death` and `combatlogger::apply_logger_death`, the
    latter saving the captured inventory before the wipe).
-3. Leaderboard holograms (+ `/topdeaths` and the remaining top commands).
-4. Events/games (Koth, Conquest, DTC, Ender Dragon, King of the Hill, Mountain,
+2. Leaderboard holograms (+ `/topdeaths` and the remaining top commands).
+3. Events/games (Koth, Conquest, DTC, Ender Dragon, King of the Hill, Mountain,
    Loot, Schedule) using boss bars + the world API.
-5. Abilities + PvP classes (Archer/Bard/Miner/Rogue/Mage/Bomber).
-6. Mob stacking (the remaining block handler; the filter stays blocked by the
+4. Abilities + PvP classes (Archer/Bard/Miner/Rogue/Mage/Bomber).
+5. Mob stacking (the remaining block handler; the filter stays blocked by the
    missing player pickup event).
-7. Custom recipes, sign shops.
-8. World border, safezone food/potion rules.
+6. Custom recipes, sign shops.
+7. World border, safezone food/potion rules.
 
 ## 6. Files
 
@@ -400,7 +408,7 @@ src/
 ├── hologram/           TextDisplay holograms
 ├── kits/               inventory kits (lore + enchantments)
 ├── scoreboard/         sidebar renderer (placeholders + teams)
-├── selection/          claim wand + selection state
+├── selection/          claim + selection wands and selection state
 ├── staffmode/          vanish + staff mode
 ├── tab/
 │   ├── mod.rs          tab list driver (native companion state)
@@ -420,6 +428,7 @@ src/
 │   ├── kitmap/         kitmap mode (safezone item-drop denial)
 │   ├── limiter/        enchant/potion/entity limits (limiters.yml)
 │   ├── logger/         combat loggers + /logout warmup
+│   ├── portal/         portal travel rules, /endportal check, nether trap fix
 │   └── timer/          enderpearl / golden apple cooldowns + SOTW
 ├── commands/
 │   ├── mod.rs          registration helpers
@@ -428,6 +437,7 @@ src/
 │   ├── customtimer.rs  /customtimer (start/cancel/list)
 │   ├── deathban.rs     /deathban check|revive
 │   ├── economy.rs      /balance + economy admin commands
+│   ├── endportal.rs    /endportal (SELECTION wand)
 │   ├── lastdeaths.rs   /lastdeaths + /lastkills
 │   ├── faction.rs      /f command tree (+ admin subcommands)
 │   ├── lives.rs        /lives

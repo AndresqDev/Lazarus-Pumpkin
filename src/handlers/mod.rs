@@ -9,4 +9,5 @@ pub mod elevator;
 pub mod kitmap;
 pub mod limiter;
 pub mod logger;
+pub mod portal;
 pub mod timer;

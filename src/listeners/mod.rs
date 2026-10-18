@@ -21,7 +21,9 @@ use crate::handlers::elevator;
 use crate::handlers::kitmap;
 use crate::handlers::limiter as limiters;
 use crate::handlers::logger as combatlogger;
+use crate::handlers::portal;
 use crate::handlers::timer::items;
+use crate::selection;
 
 /// Registers every ported event handler.
 pub fn register(context: &Context) -> Result<(), String> {
@@ -58,6 +60,10 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(player::TeleportListener, EventPriority::Normal, true)?;
 
     context.register_event_handler(chat::ChatListener, EventPriority::Normal, true)?;
+    // `SelectionManager#onPlayerDropItem` ran at LOWEST (before the kitmap
+    // denial), so the wand drop is cancelled first and the kitmap gate skips
+    // the already-cancelled event.
+    context.register_event_handler(selection::WandDropListener, EventPriority::Lowest, true)?;
     context.register_event_handler(kitmap::DropItemListener, EventPriority::Normal, true)?;
 
     // Combat logger damage rules: registered before the shared combat
@@ -77,6 +83,9 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(combat::ProjectileHitListener, EventPriority::Normal, true)?;
     context.register_event_handler(combat::ShootBowListener, EventPriority::Normal, true)?;
     context.register_event_handler(combat::MilkListener, EventPriority::Normal, true)?;
+    // `SelectionManager#onEntityDamageByEntity` ran at NORMAL (after the HIGH
+    // combat listeners): hits they deny skip the wand removal (`ignoreCancelled`).
+    context.register_event_handler(selection::WandAttackListener, EventPriority::Normal, true)?;
 
     context.register_event_handler(entity::EntityTargetListener, EventPriority::High, true)?;
     context.register_event_handler(entity::CreatureSpawnListener, EventPriority::High, true)?;
@@ -143,6 +152,15 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(elevator::SignElevatorSignChangeListener, EventPriority::Normal, true)?;
     context.register_event_handler(elevator::MinecartElevatorEnterListener, EventPriority::Normal, true)?;
     context.register_event_handler(elevator::MinecartElevatorExitListener, EventPriority::Normal, true)?;
+
+    // Portals (`handlers.portal.*`): the trap fix is `ignoreCancelled` in the
+    // original, so it runs after the territory/use listeners above. The travel
+    // overrides replace the original's `PlayerPortalEvent` pair (the host fires
+    // `PlayerChangeWorldEvent` on portal travel instead), and the change-world
+    // selection cleanup mirrors `SelectionManager#onPlayerChangedWorld`.
+    context.register_event_handler(portal::NetherPortalTrapListener, EventPriority::Normal, true)?;
+    context.register_event_handler(portal::PortalChangeWorldListener, EventPriority::Normal, true)?;
+    context.register_event_handler(selection::WorldChangeListener, EventPriority::Normal, true)?;
 
     // Death handlers reacting to blocks (`ignoreCancelled` in the original):
     // they run after the territory listeners, and the head/sign placements

@@ -5,6 +5,7 @@ pub mod crowbar;
 pub mod customtimer;
 pub mod deathban;
 pub mod economy;
+pub mod endportal;
 pub mod faction;
 pub mod hologram;
 pub mod kit;
@@ -49,6 +50,7 @@ pub fn register(context: &Context) -> Result<(), String> {
     customtimer::register(context)?;
     deathban::register(context)?;
     economy::register(context)?;
+    endportal::register(context)?;
     faction::register(context)?;
     lastdeaths::register(context)?;
     lives::register(context)?;

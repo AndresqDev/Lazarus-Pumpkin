@@ -151,9 +151,19 @@ pub fn refresh_spawn_centers(server: &Server) {
 pub fn configured_spawn(
     server: &Server,
 ) -> Option<(pumpkin_plugin_api::World, (f64, f64, f64), f32, f32)> {
+    configured_location(server, "WORLD_SPAWN")
+}
+
+/// Resolves any `utilities.yml` location entry (`NETHER_SPAWN`, `NETHER_EXIT`,
+/// `END_SPAWN`, `END_EXIT`, ...) the same way [`configured_spawn`] resolves
+/// `WORLD_SPAWN`.
+pub fn configured_location(
+    server: &Server,
+    key: &str,
+) -> Option<(pumpkin_plugin_api::World, (f64, f64, f64), f32, f32)> {
     let value = {
         let guard = state().read().unwrap();
-        guard.raw.utilities.string("WORLD_SPAWN")
+        guard.raw.utilities.string(key)
     };
     let (world_name, x, y, z, yaw, pitch) = parse_utilities_location(&value)?;
     let world = resolve_world(server, &world_name)?;

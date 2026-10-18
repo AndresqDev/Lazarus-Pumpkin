@@ -254,6 +254,14 @@ pub fn init(data_folder: String) -> Result<(), String> {
 
     let sotw = crate::handlers::timer::sotw::SotwState::new(config.sotw.hide_players);
 
+    // The selection wands are parsed once at startup from `CLAIM_WAND` /
+    // `SELECTION_WAND`, like the `SelectionManager` constructor in the original.
+    let selection = SelectionManager {
+        claim_wand: Some(crate::selection::claim_wand_text(Some(&raw.config))),
+        selection_wand: Some(crate::selection::selection_wand_text(Some(&raw.config))),
+        ..SelectionManager::default()
+    };
+
     STATE
         .set(RwLock::new(AppState {
             data_folder,
@@ -268,7 +276,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
             timers,
             sotw,
             glass: GlassManager::default(),
-            selection: SelectionManager::default(),
+            selection,
             staff: StaffManager::default(),
             holograms,
             hologram_entities: std::collections::BTreeMap::new(),
