@@ -35,6 +35,11 @@ impl Default for FactionsManager {
 impl FactionsManager {
     /// Ensures the special system factions exist. Idempotent.
     pub fn init_system_factions(&mut self) {
+        // `FactionsManager#setupInitialFactions` also registers the four road
+        // factions (plain `SystemFaction`s with the road colour) on every load;
+        // `createDefaultFaction` skips names that already exist.
+        self.ensure_road_factions();
+
         if self.initialized {
             return;
         }
@@ -65,6 +70,22 @@ impl FactionsManager {
         self.factions.insert(warzone.id.clone(), warzone);
         self.factions.insert(safezone.id.clone(), safezone);
         self.initialized = true;
+    }
+
+    /// `setupInitialFactions` → `createDefaultFaction(new RoadFaction(...))`:
+    /// the four road system factions exist on every install (the name check
+    /// mirrors the original's create-default guard).
+    fn ensure_road_factions(&mut self) {
+        for name in ["NorthRoad", "EastRoad", "SouthRoad", "WestRoad"] {
+            if self.by_name(name).is_some() {
+                continue;
+            }
+
+            let id = new_id();
+            let faction =
+                Faction::new_system(id.clone(), name.to_string(), FactionKind::Road, "&c".into());
+            self.factions.insert(id, faction);
+        }
     }
 
     /// Port of `FactionsManager#additionalFactionSetup` for the spawn faction:

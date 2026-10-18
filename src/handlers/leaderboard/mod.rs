@@ -506,6 +506,12 @@ pub fn on_faction_created(state: &mut AppState, faction_id: &str) {
 
 /// `FactionRenameEvent` handling: `LeaderboardHandler#handleFactionNameChange`.
 pub fn on_faction_renamed(state: &mut AppState, faction_id: &str) {
+    // `LeaderboardHandler#onFactionRename` ignores non-player factions, so a
+    // system-faction rename never creates a board entry.
+    if !state.factions.get(faction_id).is_some_and(|faction| faction.is_player()) {
+        return;
+    }
+
     for board in Board::FACTION_BOARDS {
         refresh_entry(state, board, faction_id);
     }

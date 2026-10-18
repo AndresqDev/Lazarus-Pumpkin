@@ -243,9 +243,21 @@ pub fn register(context: &Context) -> Result<(), String> {
                 .execute(FactionExecutor(Action::ShowSelf))
                 .then(str_node("faction").execute(FactionExecutor(Action::ShowNamed))),
         )
-        .then(CommandNode::literal("i").execute(FactionExecutor(Action::ShowSelf)))
-        .then(CommandNode::literal("info").execute(FactionExecutor(Action::ShowSelf)))
-        .then(CommandNode::literal("who").execute(FactionExecutor(Action::ShowSelf)))
+        .then(
+            CommandNode::literal("i")
+                .execute(FactionExecutor(Action::ShowSelf))
+                .then(str_node("faction").execute(FactionExecutor(Action::ShowNamed))),
+        )
+        .then(
+            CommandNode::literal("info")
+                .execute(FactionExecutor(Action::ShowSelf))
+                .then(str_node("faction").execute(FactionExecutor(Action::ShowNamed))),
+        )
+        .then(
+            CommandNode::literal("who")
+                .execute(FactionExecutor(Action::ShowSelf))
+                .then(str_node("faction").execute(FactionExecutor(Action::ShowNamed))),
+        )
         .then(
             CommandNode::literal("list")
                 .execute(FactionExecutor(Action::List))
@@ -1679,17 +1691,68 @@ fn toggle_open(sender: &CommandSender, server: &Server, uuid: &str) {
 
 fn show(sender: &CommandSender, server: &Server, uuid: &str, name: Option<String>) {
     let guard = state().read().unwrap();
+
+    // `ShowCommand`: without arguments the sender's own `PlayerFaction` is
+    // shown (players only). With an argument the original resolves BOTH
+    // `getFactionByName(args[0])` and `getPlayerFaction(args[0])` — the latter
+    // accepts a player name — and prints every match, so a system faction falls
+    // back to its own `showInformation` panel.
+    let targets: Vec<Faction> = match &name {
+        Some(name) => {
+            let mut targets: Vec<Faction> = Vec::new();
+
+            // `FactionsManager#getFactionByName(args[0])`.
+            if let Some(faction) = guard.factions.by_name(name) {
+                targets.push(faction.clone());
+            }
+            // `FactionsManager#getPlayerFaction(args[0])` — by player name.
+            if let Some(user) = guard.userdata.find_by_name(name)
+                && let Some(faction) = guard.factions.by_member(&user.uuid)
+            {
+                targets.push(faction.clone());
+            }
+
+            if targets.is_empty() {
+                let message = utils::replace(&guard.lang.faction_doesnt_exist, "<argument>", name);
+                drop(guard);
+                return reply(sender, message);
+            }
+
+            targets
+        }
+        None => {
+            let Some(faction) = guard
+                .factions
+                .by_member(uuid)
+                .filter(|faction| faction.is_player())
+                .cloned()
+            else {
+                let message = guard.lang.faction_not_in.clone();
+                drop(guard);
+                return reply(sender, &message);
+            };
+            vec![faction]
+        }
+    };
+
+    for faction in &targets {
+        if faction.is_player() {
+            show_player_faction(sender, server, &guard, uuid, faction);
+        } else {
+            show_system_faction(sender, &guard, faction);
+        }
+    }
+}
+
+/// `PlayerFaction#showInformation`.
+fn show_player_faction(
+    sender: &CommandSender,
+    server: &Server,
+    guard: &AppState,
+    uuid: &str,
+    faction: &Faction,
+) {
     let lang = guard.lang.clone();
-
-    let faction = match &name {
-        Some(name) => guard.factions.by_name(name).cloned(),
-        None => guard.factions.by_member(uuid).cloned(),
-    };
-
-    let Some(faction) = faction else {
-        reply(sender, &lang.faction_not_in);
-        return;
-    };
 
     // Relation colour for the faction name (as seen by the sender).
     let display = {
@@ -1799,6 +1862,94 @@ fn show(sender: &CommandSender, server: &Server, uuid: &str, name: Option<String
         faction.dtr_color()
     ));
     reply(sender, &sep);
+}
+
+/// `SystemFaction#showInformation` (and `RoadFaction#showInformation`, which
+/// renders the toggles with `String.valueOf` and leaves the `<abilities>`
+/// placeholder untouched).
+fn show_system_faction(sender: &CommandSender, guard: &AppState, faction: &Faction) {
+    let raw = &guard.raw.language;
+    let claim_format = raw.string("FACTIONS.SHOW_COMMAND.SYSTEM_CLAIM_FORMAT");
+    let none = raw.string("NONE_PLACEHOLDER");
+
+    let is_road = faction.kind == crate::factions::FactionKind::Road;
+
+    // `Faction#getDeathbanString()`.
+    let deathban = if faction.deathban { "&cDeathban" } else { "&aNon-Deathban" };
+
+    // `<claims>`: one `SYSTEM_CLAIM_FORMAT` line per claim, or a single
+    // `NONE_PLACEHOLDER` line when the faction owns none. Road factions never
+    // list their claims.
+    let claims = if is_road {
+        utils::replace(&claim_format, "<claimLocation>", &none)
+    } else {
+        let lines: Vec<String> = guard
+            .claims
+            .claims
+            .get(&faction.id)
+            .map(|claims| {
+                claims
+                    .iter()
+                    .map(|claim| {
+                        // `Claim#getCenter` + `StringUtils#getLocationNameWithWorldWithoutY`.
+                        let x = claim.min_x + (claim.max_x + 1 - claim.min_x) / 2;
+                        let z = claim.min_z + (claim.max_z + 1 - claim.min_z) / 2;
+                        let world = match core::dimension_of(&claim.world) {
+                            core::Dimension::Overworld => raw.string("WORLD_NAMES.OVERWORLD"),
+                            core::Dimension::Nether => raw.string("WORLD_NAMES.NETHER"),
+                            core::Dimension::End => raw.string("WORLD_NAMES.THE_END"),
+                        };
+
+                        utils::replace(
+                            &claim_format,
+                            "<claimLocation>",
+                            &format!("{x}, {z} ({world})"),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if lines.is_empty() {
+            utils::replace(&claim_format, "<claimLocation>", &none)
+        } else {
+            lines.join("\n")
+        }
+    };
+
+    // `SystemFaction#getName(sender)`: the legacy system colour + raw name.
+    let faction_name = format!("{}{}", faction.color, faction.name);
+
+    for template in raw.string_list("FACTIONS.SHOW_COMMAND.SYSTEM_FACTION_MESSAGE") {
+        let line = template
+            .replace("<factionName>", &faction_name)
+            .replace("<deathban>", deathban)
+            .replace("<claims>", &claims);
+
+        let line = if is_road {
+            line.replace("<safezone>", &faction.safezone.to_string())
+                .replace("<enderpearls>", &faction.enderpearls.to_string())
+        } else {
+            let safezone = if faction.safezone {
+                raw.string("TRUE_PLACEHOLDER")
+            } else {
+                raw.string("FALSE_PLACEHOLDER")
+            };
+            let enabled = raw.string("ENABLED_PLACEHOLDER");
+            let disabled = raw.string("DISABLED_PLACEHOLDER");
+            let pearls = if faction.enderpearls { enabled.clone() } else { disabled.clone() };
+            let abilities = if faction.abilities { enabled } else { disabled };
+
+            line.replace("<safezone>", &safezone)
+                .replace("<enderpearls>", &pearls)
+                .replace("<abilities>", &abilities)
+        };
+
+        // The `<claims>` block embeds one line per claim.
+        for sub_line in line.split('\n') {
+            reply(sender, sub_line);
+        }
+    }
 }
 
 /// One line of a paginated/leaderboard listing: either plain chat text or a
@@ -2733,13 +2884,16 @@ fn admin_system_create(sender: &CommandSender, server: &Server, args: &ConsumedA
 }
 
 fn admin_system_list(sender: &CommandSender) {
+    // `Comparator.comparing(faction -> faction.getClass().getSimpleName())`:
+    // RoadFaction < SpawnFaction < SystemFaction < WarzoneFaction <
+    // WildernessFaction.
     fn kind_order(kind: crate::factions::FactionKind) -> u8 {
         match kind {
-            crate::factions::FactionKind::System => 0,
+            crate::factions::FactionKind::Road => 0,
             crate::factions::FactionKind::Safezone => 1,
-            crate::factions::FactionKind::Warzone => 2,
-            crate::factions::FactionKind::Wilderness => 3,
-            crate::factions::FactionKind::Road => 4,
+            crate::factions::FactionKind::System => 2,
+            crate::factions::FactionKind::Warzone => 3,
+            crate::factions::FactionKind::Wilderness => 4,
             crate::factions::FactionKind::Player => 5,
         }
     }
@@ -3911,8 +4065,13 @@ fn lives_revive(sender: &CommandSender, server: &Server, uuid: &str, args: &Cons
 /// to the faction of the player with that name (`getPlayerFaction(String)`
 /// resolves the name to the player's uuid).
 fn search_player_faction(guard: &crate::state::AppState, name: &str) -> Option<String> {
-    if let Some(faction) = guard.factions.by_name(name) {
-        return faction.is_player().then(|| faction.id.clone());
+    // `FactionsManager#searchForFaction`: a faction-name match only counts when
+    // it is a `PlayerFaction` (a system faction match falls through to the
+    // player-name lookup), then the argument is tried as a player name.
+    if let Some(faction) = guard.factions.by_name(name)
+        && faction.is_player()
+    {
+        return Some(faction.id.clone());
     }
 
     let uuid = guard

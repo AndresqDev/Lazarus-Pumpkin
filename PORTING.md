@@ -61,7 +61,7 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | :--- | :---: | :--- |
 | `config.Config`, `config.Language` | ✅ | now TOML; legacy `MATERIAL_ID` (`"294:0"`) replaced by registry keys |
 | `factions.*` (model, manager, claims, roles, relations) | ✅ | flattened `Faction` + `FactionKind`; fast chunk claim index |
-| `factions.commands.player.*` | ✅ | core + admin subcommands; selection-wand claiming (see below) |
+| `factions.commands.player.*` | ✅ | core + admin subcommands; `/f show`/`i`/`info`/`who [faction\|player]` with the original's dual lookup (`getFactionByName` + `getPlayerFaction`) and the `SystemFaction`/`RoadFaction` information panels (claims block included; roads reproduce the original's raw `true`/`false` toggles and literal `<abilities>` placeholder); selection-wand claiming (see below) |
 | `factions.commands.admin.*` | ✅ | setdtr/adddtr/removedtr/setpoints/setbalance/setlives/setkills/setfreeze(`setregen`)/thaw/forcekick/forceleader/forcerename/system*/color/deathban/save/… — messages + usage from the raw `language.yml` |
 | `factions.listeners.*` | 🟡 | join/leave/move/death/chat/block (break/place/bucket/grief) + block-use protection/damage/command/wand ported; hanging (paintings/item frames) + `PHYSICAL` interacts pending |
 | `factions.event.*` (Bukkit events) | ⬜ | replaced by direct calls; no custom Bukkit event bus in Pumpkin |
@@ -160,9 +160,11 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   `hide_players`) and persists only the timer (`timers.json` →
   `sotw_remaining_millis`), matching `timers.yml` `SotwTimer`.
 * **The spawn safezone is never claimed automatically.** Like the original, a fresh
-  install only creates the system factions (Wilderness, Warzone and the
-  `SpawnFaction` — kind `Safezone`); the spawn claim itself is made manually
-  (`/f claimfor Spawn`, admin wand, …). `additionalFactionSetup` is ported as
+  install only creates the system factions (Wilderness, Warzone, the
+  `SpawnFaction` — kind `Safezone` — and the four road factions from
+  `setupInitialFactions`: NorthRoad, EastRoad, SouthRoad, WestRoad); the spawn
+  claim itself is made manually (`/f claimfor Spawn`, admin wand, …).
+  `additionalFactionSetup` is ported as
   `normalize_system_factions`: it forces `safezone = true` / `deathban = false` on
   the spawn faction on every load but **does not rename it**, so `/f rename` on
   the spawn faction persists like in the original.
