@@ -49,7 +49,7 @@ pub fn setup(player: &Player) {
     board.set_display_slot(DisplaySlot::Sidebar, OBJECTIVE);
 
     for slot in 0..SLOTS {
-        board.create_team(&team_name(slot), team_settings(""));
+        board.create_team(&team_name(slot), team_settings("", ""));
     }
 }
 
@@ -118,7 +118,8 @@ fn render(player: &Player, previous: Option<&[String]>, lines: &[String]) {
 
         match new {
             Some(line) => {
-                board.update_team(&team, team_settings(line));
+                let (prefix, suffix) = split_line(line);
+                board.update_team(&team, team_settings(&prefix, &suffix));
                 board.add_player_to_team(&team, &entry);
                 board.update_score(&entry, OBJECTIVE, (SLOTS - slot) as i32, None);
             }
@@ -126,7 +127,7 @@ fn render(player: &Player, previous: Option<&[String]>, lines: &[String]) {
                 // Remove the row entirely so no blank line is reserved.
                 board.remove_score(&entry, OBJECTIVE);
                 board.remove_player_from_team(&team, &entry);
-                board.update_team(&team, team_settings(""));
+                board.update_team(&team, team_settings("", ""));
             }
         }
     }
@@ -437,7 +438,7 @@ fn entry_name(slot: usize) -> String {
     format!("\u{00a7}{}\u{00a7}r", colors[slot % colors.len()] as char)
 }
 
-fn team_settings(line: &str) -> TeamSettings {
+fn team_settings(prefix: &str, suffix: &str) -> TeamSettings {
     TeamSettings {
         display_name: TextComponent::text(""),
         friendly_fire: true,
@@ -445,9 +446,85 @@ fn team_settings(line: &str) -> TeamSettings {
         nametag_visibility: NametagVisibility::Always,
         collision_rule: CollisionRule::Always,
         color: NamedColor::White,
-        prefix: utils::text(line),
-        suffix: TextComponent::text(""),
+        prefix: utils::text(prefix),
+        suffix: utils::text(suffix),
     }
+}
+
+/// Splits a rendered line into the two 1.8 team fields.
+///
+/// The original `PlayerScoreboard_1_8` never sent more than 16 characters in a
+/// team prefix/suffix: long values were split into `prefix + entry + suffix`
+/// (`ScoreboardInput`). The port renders the visible text through the team
+/// prefix, which modern clients accept at any length but 1.8 (and the whole
+/// 1.9–1.12 range) caps at 16 — ViaVersion simply truncates, which is what cut
+/// the sidebar lines for 1.8 clients. We mirror the original limits with the
+/// same colour continuation the original's 1.7 tab used
+/// (`ChatColor.getLastColors(prefix)`), since the invisible entry between the
+/// two fields resets the formatting.
+fn split_line(line: &str) -> (String, String) {
+    let chars: Vec<char> = line.chars().collect();
+    if chars.len() <= 16 {
+        return (line.to_string(), String::new());
+    }
+
+    // Never cut a `&x` sequence in half (same guard as the original tab).
+    let split = if chars[15] == '&' || chars[15] == '\u{00a7}' {
+        15
+    } else {
+        16
+    };
+
+    let prefix: String = chars[..split].iter().collect();
+    let rest: String = chars[split..].iter().collect();
+
+    let mut suffix: Vec<char> = last_colors(&prefix).chars().chain(rest.chars()).collect();
+    if suffix.len() > 16 {
+        suffix.truncate(16);
+        if matches!(suffix.last(), Some('&' | '\u{00a7}')) {
+            suffix.pop();
+        }
+    }
+
+    (prefix, suffix.into_iter().collect())
+}
+
+/// Bukkit's `ChatColor.getLastColors`: the last colour code plus the
+/// formatting codes that follow it (`&r` clears both).
+fn last_colors(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let mut color: Option<char> = None;
+    let mut formats: Vec<char> = Vec::new();
+
+    let mut i = 0;
+    while i + 1 < chars.len() {
+        if chars[i] == '&' || chars[i] == '\u{00a7}' {
+            let code = chars[i + 1].to_ascii_lowercase();
+            if "0123456789abcdef".contains(code) {
+                color = Some(code);
+                formats.clear();
+            } else if "klmno".contains(code) {
+                formats.push(code);
+            } else if code == 'r' {
+                color = None;
+                formats.clear();
+            }
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+
+    let mut out = String::new();
+    if let Some(code) = color {
+        out.push('&');
+        out.push(code);
+    }
+    for code in formats {
+        out.push('&');
+        out.push(code);
+    }
+    out
 }
 
 /// Rounds to one decimal (the way the original shows Bard/Mage energy).

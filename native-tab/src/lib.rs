@@ -38,7 +38,8 @@ use pumpkin::plugin::{Context, PLUGIN_API_VERSION};
 use pumpkin::server::Server;
 use pumpkin_api_macros::{plugin_impl, plugin_method};
 use pumpkin_protocol::java::client::play::{
-    CPlayerInfoUpdate, CRemovePlayerInfo, Player, PlayerAction, PlayerInfoFlags,
+    CPlayerInfoUpdate, CRemovePlayerInfo, CSetPlayerTeam, Player, PlayerAction, PlayerInfoFlags,
+    TeamMethod, TeamParameters,
 };
 use pumpkin_protocol::{Property, VarInt};
 use pumpkin_util::text::TextComponent;
@@ -49,6 +50,15 @@ use uuid::Uuid;
 const COLUMN_HEIGHT: usize = 20;
 const SLOTS: usize = 80;
 const STATE_FILE: &str = "plugins/data/lazarus/tab_state.json";
+/// Team that holds every real player on the client side.
+///
+/// The 1.8 tab sorts by team name before profile name and only renders the
+/// first 80 entries (see `GuiPlayerTabOverlay.PlayerComparator` and its
+/// `subList(0, min(size, 80))`). The 80 artificial slots belong to no team, so
+/// real players (sorted into this named team) always fall behind them and are
+/// cut off by the 80-entry cap. ViaVersion drops the modern `listed` flag for
+/// 1.8 clients, so this is the only way to keep them out of the tab there.
+const REAL_TEAM: &str = "lzreal";
 
 #[derive(Clone, Deserialize, PartialEq)]
 struct Skin {
@@ -139,9 +149,12 @@ pub struct NativeTab {
 fn run(server: Arc<Server>, state: Arc<Mutex<Rendered>>, log_ctx: Arc<Context>) {
     let mut known: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
     let mut last_signature: Option<(u64, u64)> = None;
-    // Players that joined recently: re-send their full state for a few seconds so
-    // the packets survive the client's join/readiness window.
+    // Players that joined recently: re-send their full state once so the
+    // packets survive the client's join/readiness window.
     let mut pending_full: std::collections::HashMap<Uuid, u8> = std::collections::HashMap::new();
+    // Last set of real player names that was pushed to the clients' scoreboard
+    // teams (see `REAL_TEAM`).
+    let mut team_signature: Option<Vec<String>> = None;
 
     loop {
         let players = server.get_all_players();
@@ -149,12 +162,12 @@ fn run(server: Arc<Server>, state: Arc<Mutex<Rendered>>, log_ctx: Arc<Context>) 
             players.iter().map(|p| p.gameprofile.id).collect();
 
         for uuid in current.difference(&known) {
-            pending_full.insert(*uuid, 8);
+            pending_full.insert(*uuid, 1);
             log_ctx.log(format!("NativeTab: queued full resend for {uuid}"));
         }
         pending_full.retain(|uuid, _| current.contains(uuid));
 
-        hide_real_players(&server);
+        hide_real_players(&server, &mut team_signature);
 
         // Apply the state file when it changes.
         if let Some(signature) = file_signature()
@@ -164,17 +177,20 @@ fn run(server: Arc<Server>, state: Arc<Mutex<Rendered>>, log_ctx: Arc<Context>) 
             apply_file(&server, &state);
         }
 
-        // Retry full per-viewer sends for recent joiners (client may drop the
-        // first packets while still finishing the join sequence).
+        // Retry the full per-viewer send for recent joiners (the client may
+        // drop the first packets while still finishing the join sequence).
+        // Only the *first* add carries the skin property, so this cannot
+        // restart the 1.8 skin download (see `send_slot_to`).
         let retry: Vec<Uuid> = pending_full
             .iter()
             .filter(|(_, remaining)| **remaining > 0)
             .map(|(uuid, _)| *uuid)
             .collect();
         for uuid in retry {
-            send_full_viewer(&server, &state, uuid);
-            if let Some(remaining) = pending_full.get_mut(&uuid) {
-                *remaining -= 1;
+            if send_full_viewer(&server, &state, uuid) {
+                if let Some(remaining) = pending_full.get_mut(&uuid) {
+                    *remaining -= 1;
+                }
             }
         }
 
@@ -215,7 +231,11 @@ fn apply_file(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>) {
 
     for (slot, spec) in &desired_global {
         if rendered.global.get(slot) != Some(spec) {
-            send_slot_broadcast(server, *slot, spec);
+            // Only the first add for a slot carries the skin property; later
+            // updates must not re-add the profile or 1.8 clients restart the
+            // skin download on every text change.
+            let first = !rendered.global.contains_key(slot);
+            send_slot_broadcast(server, *slot, spec, first);
         }
     }
     for slot in rendered.global.keys() {
@@ -256,7 +276,8 @@ fn apply_file(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>) {
         let previous = rendered.viewers.get(uuid);
         for (slot, spec) in slots {
             if previous.and_then(|p| p.get(slot)) != Some(spec) {
-                send_slot_to(server, Some(*uuid), *slot, spec);
+                let first = previous.map(|p| !p.contains_key(slot)).unwrap_or(true);
+                send_slot_to(server, Some(*uuid), *slot, spec, first);
             }
         }
     }
@@ -265,51 +286,64 @@ fn apply_file(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>) {
 }
 
 /// Sends every slot of a single viewer's state to that player.
-fn send_full_viewer(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>, viewer: Uuid) {
+/// Returns `false` when the WASM side has not published this viewer yet.
+fn send_full_viewer(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>, viewer: Uuid) -> bool {
     let slots: Vec<(u8, SlotSpec)> = {
         let rendered = state.lock().unwrap();
         match rendered.viewers.get(&viewer) {
             Some(map) => map.iter().map(|(slot, spec)| (*slot, spec.clone())).collect(),
-            None => return,
+            None => return false,
         }
     };
 
     for (slot, spec) in slots {
-        send_slot_to(server, Some(viewer), slot, &spec);
+        send_slot_to(server, Some(viewer), slot, &spec, true);
     }
+    true
 }
 
 // ---------------------------------------------------------------------------
 // Packets
 // ---------------------------------------------------------------------------
 
-fn send_slot_broadcast(server: &Arc<Server>, slot: u8, spec: &SlotSpec) {
+fn send_slot_broadcast(server: &Arc<Server>, slot: u8, spec: &SlotSpec, full: bool) {
     let name = spec.profile_name(slot);
     let text = TextComponent::from_legacy_string_with_code(&spec.text, '&');
     let properties = properties(spec);
-    let actions = vec![
-        PlayerAction::AddPlayer {
-            name: &name,
-            properties: &properties,
-        },
-        PlayerAction::UpdateListed(true),
-        PlayerAction::UpdateDisplayName(Some(&text)),
-        PlayerAction::UpdateListOrder(VarInt(spec.order(slot))),
-    ];
+    let actions = if full {
+        vec![
+            PlayerAction::AddPlayer {
+                name: &name,
+                properties: &properties,
+            },
+            PlayerAction::UpdateListed(true),
+            PlayerAction::UpdateDisplayName(Some(&text)),
+            PlayerAction::UpdateListOrder(VarInt(spec.order(slot))),
+        ]
+    } else {
+        vec![
+            PlayerAction::UpdateDisplayName(Some(&text)),
+            PlayerAction::UpdateListOrder(VarInt(spec.order(slot))),
+        ]
+    };
     let players = [Player {
         uuid: entry_uuid(slot as usize),
         actions: &actions,
     }];
-    let flags = PlayerInfoFlags::ADD_PLAYER
-        | PlayerInfoFlags::UPDATE_LISTED
-        | PlayerInfoFlags::UPDATE_DISPLAY_NAME
-        | PlayerInfoFlags::UPDATE_LIST_PRIORITY;
+    let flags = if full {
+        PlayerInfoFlags::ADD_PLAYER
+            | PlayerInfoFlags::UPDATE_LISTED
+            | PlayerInfoFlags::UPDATE_DISPLAY_NAME
+            | PlayerInfoFlags::UPDATE_LIST_PRIORITY
+    } else {
+        PlayerInfoFlags::UPDATE_DISPLAY_NAME | PlayerInfoFlags::UPDATE_LIST_PRIORITY
+    };
     server.broadcast_packet_all(&CPlayerInfoUpdate::new(flags.bits(), &players));
 }
 
-fn send_slot_to(server: &Arc<Server>, viewer: Option<Uuid>, slot: u8, spec: &SlotSpec) {
+fn send_slot_to(server: &Arc<Server>, viewer: Option<Uuid>, slot: u8, spec: &SlotSpec, full: bool) {
     let Some(uuid) = viewer else {
-        send_slot_broadcast(server, slot, spec);
+        send_slot_broadcast(server, slot, spec, full);
         return;
     };
     let Some(player) = server.get_player_by_uuid(uuid) else {
@@ -319,23 +353,34 @@ fn send_slot_to(server: &Arc<Server>, viewer: Option<Uuid>, slot: u8, spec: &Slo
     let name = spec.profile_name(slot);
     let text = TextComponent::from_legacy_string_with_code(&spec.text, '&');
     let properties = properties(spec);
-    let actions = vec![
-        PlayerAction::AddPlayer {
-            name: &name,
-            properties: &properties,
-        },
-        PlayerAction::UpdateListed(true),
-        PlayerAction::UpdateDisplayName(Some(&text)),
-        PlayerAction::UpdateListOrder(VarInt(spec.order(slot))),
-    ];
+    let actions = if full {
+        vec![
+            PlayerAction::AddPlayer {
+                name: &name,
+                properties: &properties,
+            },
+            PlayerAction::UpdateListed(true),
+            PlayerAction::UpdateDisplayName(Some(&text)),
+            PlayerAction::UpdateListOrder(VarInt(spec.order(slot))),
+        ]
+    } else {
+        vec![
+            PlayerAction::UpdateDisplayName(Some(&text)),
+            PlayerAction::UpdateListOrder(VarInt(spec.order(slot))),
+        ]
+    };
     let players = [Player {
         uuid: entry_uuid(slot as usize),
         actions: &actions,
     }];
-    let flags = PlayerInfoFlags::ADD_PLAYER
-        | PlayerInfoFlags::UPDATE_LISTED
-        | PlayerInfoFlags::UPDATE_DISPLAY_NAME
-        | PlayerInfoFlags::UPDATE_LIST_PRIORITY;
+    let flags = if full {
+        PlayerInfoFlags::ADD_PLAYER
+            | PlayerInfoFlags::UPDATE_LISTED
+            | PlayerInfoFlags::UPDATE_DISPLAY_NAME
+            | PlayerInfoFlags::UPDATE_LIST_PRIORITY
+    } else {
+        PlayerInfoFlags::UPDATE_DISPLAY_NAME | PlayerInfoFlags::UPDATE_LIST_PRIORITY
+    };
     let packet = CPlayerInfoUpdate::new(flags.bits(), &players);
 
     let _ = crate::GLOBAL_RUNTIME.block_on(async move {
@@ -370,11 +415,25 @@ fn properties(spec: &SlotSpec) -> Vec<Property> {
         .collect()
 }
 
-fn hide_real_players(server: &Arc<Server>) {
+fn hide_real_players(server: &Arc<Server>, team_signature: &mut Option<Vec<String>>) {
     let real = server.get_all_players();
     if real.is_empty() {
+        *team_signature = None;
         return;
     }
+
+    // 1.8 tab order: team name → profile name, capped at 80 entries. The
+    // artificial slots have no team, so a named team always sorts after them
+    // and pushes every real player past the cap (see `REAL_TEAM`).
+    let mut names: Vec<String> = real.iter().map(|p| p.gameprofile.name.clone()).collect();
+    names.sort();
+    if team_signature.as_ref() != Some(&names) {
+        *team_signature = Some(names.clone());
+        send_real_team(server, &names);
+    }
+
+    // Modern clients (1.19.3+) honour the listed flag; ViaVersion drops it for
+    // older protocols, where the team ordering above hides the entries.
     let actions: Vec<Vec<PlayerAction>> = real
         .iter()
         .map(|_| vec![PlayerAction::UpdateListed(false)])
@@ -391,6 +450,40 @@ fn hide_real_players(server: &Arc<Server>) {
         PlayerInfoFlags::UPDATE_LISTED.bits(),
         &players,
     ));
+}
+
+/// (Re)creates the client-side team that holds every real player.
+fn send_real_team(server: &Arc<Server>, names: &[String]) {
+    // Recreate instead of updating so a stale copy from an earlier session
+    // cannot keep removed players.
+    server.broadcast_packet_all(&CSetPlayerTeam {
+        team_name: REAL_TEAM.to_string(),
+        method: TeamMethod::Remove,
+        parameters: None,
+        players: Box::new([]),
+    });
+
+    let display = TextComponent::text(REAL_TEAM);
+    let empty = TextComponent::text("");
+    let parameters = TeamParameters {
+        display_name: &display,
+        // 0x01 = friendly fire allowed, 0x02 = see friendly invisibles.
+        // Keep both vanilla defaults: no PvP or invisibility change.
+        options: 0x01,
+        nametag_visibility: "always",
+        collision_rule: "always",
+        // White is the default player name colour.
+        color: 15,
+        player_prefix: &empty,
+        player_suffix: &empty,
+    };
+
+    server.broadcast_packet_all(&CSetPlayerTeam {
+        team_name: REAL_TEAM.to_string(),
+        method: TeamMethod::Create,
+        parameters: Some(parameters),
+        players: names.to_vec().into_boxed_slice(),
+    });
 }
 
 // ---------------------------------------------------------------------------

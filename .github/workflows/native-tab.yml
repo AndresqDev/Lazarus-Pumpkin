@@ -5,8 +5,13 @@ name: native-tab
 # in native-tab/ is only a reference; here we inject it as a workspace member with
 # path dependencies.
 #
-# Produces one artifact: native_tab_x86_64 (libnative_tab.so).
+# Produces one artifact per architecture:
+#   native_tab_x86_64  (libnative_tab.so, desktop/dev servers)
+#   native_tab_aarch64 (libnative_tab.so, the aarch64 VPS)
 # Put it in the server's plugins/ folder as native_tab.so.
+#
+# The .so files are built exclusively here: local builds are not allowed (the
+# full Pumpkin workspace build is very heavy).
 
 on:
   workflow_dispatch:
@@ -21,7 +26,19 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: native_tab_x86_64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: native_tab_aarch64
+
+    runs-on: ${{ matrix.runner }}
+
     steps:
       - name: Checkout plugin repo
         uses: actions/checkout@v4
@@ -69,11 +86,11 @@ jobs:
 
       - name: Build native plugin
         working-directory: Pumpkin
-        run: cargo build --release -p native_tab --target x86_64-unknown-linux-gnu
+        run: cargo build --release -p native_tab --target ${{ matrix.target }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: native_tab_x86_64
-          path: Pumpkin/target/x86_64-unknown-linux-gnu/release/libnative_tab.so
+          name: ${{ matrix.artifact }}
+          path: Pumpkin/target/${{ matrix.target }}/release/libnative_tab.so
           if-no-files-found: error
