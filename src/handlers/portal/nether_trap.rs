@@ -31,7 +31,7 @@ impl EventHandler<PlayerInteractEvent> for NetherPortalTrapListener {
             return event;
         }
 
-        let Some(clicked) = event.clicked_pos.clone() else {
+        let Some(clicked) = event.clicked_pos else {
             return event;
         };
 
@@ -55,7 +55,7 @@ impl EventHandler<PlayerInteractEvent> for NetherPortalTrapListener {
             return event;
         }
 
-        if world.get_block_state(clicked.clone()).block_name != NETHER_PORTAL {
+        if world.get_block_state(clicked).block_name != NETHER_PORTAL {
             return event;
         }
 
@@ -73,7 +73,7 @@ impl EventHandler<PlayerInteractEvent> for NetherPortalTrapListener {
                         z: clicked.z + dz,
                     };
 
-                    if world.get_block_state(pos.clone()).block_name != NETHER_PORTAL {
+                    if world.get_block_state(pos).block_name != NETHER_PORTAL {
                         continue;
                     }
 

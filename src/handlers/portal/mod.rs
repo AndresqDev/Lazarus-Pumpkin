@@ -9,6 +9,8 @@
 
 pub mod end_portal;
 pub mod nether_trap;
+// File named after the original `PortalHandler` class.
+#[allow(clippy::module_inception)]
 pub mod portal;
 
 pub use nether_trap::NetherPortalTrapListener;

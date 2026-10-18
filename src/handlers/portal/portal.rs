@@ -92,7 +92,7 @@ impl EventHandler<PlayerChangeWorldEvent> for PortalChangeWorldListener {
 
         // HIGHEST rule: a portal inside the spawn safezone ignores the travel
         // agent and jumps to `NETHER_SPAWN` / `NETHER_EXIT`.
-        if core::territory_at(&core::world_name(&player), block_x, block_z) == Territory::Safezone {
+        if core::territory_at(&core::world_name(player), block_x, block_z) == Territory::Safezone {
             let key = if from == Dimension::Overworld {
                 "NETHER_SPAWN"
             } else {
