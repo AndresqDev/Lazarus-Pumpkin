@@ -144,6 +144,8 @@ pub struct AppState {
     /// Transient: players kicked with the deathban message at 1s after death
     /// (port of `Tasks.syncLater(() -> kickPlayer(...), 20L)`).
     pub pending_kicks: Vec<PendingKick>,
+    /// Combat-logger removals retried by the tick (see [`PendingLoggerRemoval`]).
+    pub pending_logger_removals: Vec<PendingLoggerRemoval>,
     /// Transient: players that already saw the "join again to use life" deathban
     /// kick (port of `DeathbanManager#confirmations`).
     pub deathban_confirm: std::collections::BTreeSet<String>,
@@ -185,6 +187,19 @@ pub struct PendingKick {
     pub uuid: String,
     pub message: String,
     pub at: i64,
+}
+
+/// A combat-logger entity removal that missed the live entity: the host
+/// serialises entities away with their chunk (`remove_entities_in_chunks`, no
+/// unload delay once the last watcher leaves), so the expiry/rejoin removal is
+/// retried from the 1s tick until the chunk loads again. Host entity ids are
+/// never reused, so matching by id stays unambiguous.
+pub struct PendingLoggerRemoval {
+    pub world: String,
+    pub entity_id: i32,
+    /// Deadline; older entries are dropped (the ghost then survives, exactly
+    /// like a state loss would leave it).
+    pub expires: i64,
 }
 
 /// Tracks a player's last known chunk + the territory there (identity, so the
@@ -271,6 +286,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
             eotw_active: false,
             subclaim_creators: std::collections::BTreeMap::new(),
             pending_kicks: Vec::new(),
+            pending_logger_removals: Vec::new(),
             deathban_confirm: std::collections::BTreeSet::new(),
             last_damagers: std::collections::BTreeMap::new(),
             last_damage: std::collections::BTreeMap::new(),

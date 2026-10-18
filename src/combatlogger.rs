@@ -48,7 +48,7 @@ use pumpkin_plugin_api::{
 use crate::core;
 use crate::factions::Relation;
 use crate::listeners::combat::Shooter;
-use crate::state::{state, AppState};
+use crate::state::{state, AppState, PendingLoggerRemoval};
 use crate::timers::{PendingAction, TimerType};
 use crate::util;
 
@@ -131,9 +131,60 @@ fn resolve_entity(server: &Server, world_name: &str, entity_id: i32) -> Option<E
         .find(|entity| entity.get_id() as i32 == entity_id)
 }
 
+/// TTL of a deferred logger removal; a chunk that stays unloaded beyond this
+/// keeps the ghost entity, exactly like a plugin restart would.
+const PENDING_REMOVAL_TTL_MILLIS: i64 = 10 * 60 * 1000;
+
 fn remove_entity(server: &Server, world_name: &str, entity_id: i32) {
     if let Some(entity) = resolve_entity(server, world_name, entity_id) {
         entity.remove();
+        return;
+    }
+
+    // The host serialises an entity away as soon as its chunk loses its last
+    // watcher (`remove_entities_in_chunks`, without the usual unload delay), so
+    // a logger that expires while its owner walked away is not live anymore.
+    // Queue the removal for the tick, which retries until the chunk loads.
+    let mut guard = state().write().unwrap();
+    guard.pending_logger_removals.push(PendingLoggerRemoval {
+        world: world_name.to_string(),
+        entity_id,
+        expires: util::now_millis() + PENDING_REMOVAL_TTL_MILLIS,
+    });
+}
+
+/// Retries the deferred removals (1s tick). Runs only while entries exist.
+pub fn process_pending_removals(server: &Server) {
+    let now = util::now_millis();
+    let pending = {
+        let mut guard = state().write().unwrap();
+        std::mem::take(&mut guard.pending_logger_removals)
+    };
+
+    if pending.is_empty() {
+        return;
+    }
+
+    let mut keep = Vec::new();
+    for entry in pending {
+        if entry.expires <= now {
+            continue;
+        }
+
+        if let Some(entity) = resolve_entity(server, &entry.world, entry.entity_id) {
+            // Safety net: a ghost that turns live again must not carry the
+            // display equipment into the world's drop table.
+            if let Some(living) = entity.as_living() {
+                living.clear_equipment();
+            }
+            entity.remove();
+        } else {
+            keep.push(entry);
+        }
+    }
+
+    if !keep.is_empty() {
+        state().write().unwrap().pending_logger_removals.extend(keep);
     }
 }
 

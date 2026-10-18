@@ -129,6 +129,7 @@ fn tick(server: &Server) {
     process_protection_ejects(server);
     process_respawn_fixes(server);
     crate::deathban::process_pending_kicks(server);
+    crate::combatlogger::process_pending_removals(server);
 
     for player in server.get_all_players() {
         scoreboard::update(&player, server);
