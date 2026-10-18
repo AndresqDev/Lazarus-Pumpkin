@@ -50,7 +50,9 @@ impl EventHandler<EntityDamageByEntityEvent> for EntityDamageByEntityListener {
         if let Some(victim) = &victim {
             let entity_key = match &shooter {
                 Some(Shooter::Entity(key)) => Some(key.clone()),
-                None if direct.is_none() => crate::handlers::death::entity_key_by_id(event.damager_id),
+                None if direct.is_none() => {
+                    crate::handlers::death::entity_key_by_id(&server, event.damager_id)
+                }
                 _ => None,
             };
             let damager_uuid = direct.as_ref().map(core::uuid_of).or_else(|| match &shooter {
@@ -725,7 +727,7 @@ impl EventHandler<ProjectileLaunchEvent> for ProjectileLaunchListener {
         if let Some(shooter_id) = event.shooter_id {
             if let Some(shooter) = core::player_by_entity(&server, shooter_id) {
                 set_projectile_shooter(event.entity_id, Shooter::Player(core::uuid_of(&shooter)));
-            } else if let Some(key) = crate::handlers::death::entity_key_by_id(shooter_id) {
+            } else if let Some(key) = crate::handlers::death::entity_key_by_id(&server, shooter_id) {
                 set_projectile_shooter(event.entity_id, Shooter::Entity(key));
             }
         }

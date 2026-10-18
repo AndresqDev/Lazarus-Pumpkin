@@ -21,8 +21,11 @@
 //!   the original's `sign.update()`) while the client keeps showing its editor
 //!   until the chunk reloads (the same applies to edits, which are discarded
 //!   like the original cancels them).
-//! * Entity names in death messages come from an `EntitySpawnEvent` registry
-//!   (the WIT has no entity lookup by id).
+//! * Entity names in death messages are resolved by scanning the world entity
+//!   lists for the id (the WIT has no entity lookup by id) and cached for the
+//!   session. An `EntitySpawnEvent` registry would be cheaper but registering
+//!   that event deadlocks the host when the plugin spawns entities (see
+//!   `crate::hologram`).
 //! * The vanilla death-message broadcast is disabled at load
 //!   (`showDeathMessages`): the host has no per-death silent flag, so the
 //!   plugin replicates the original's targeted delivery itself.
@@ -34,8 +37,8 @@ use pumpkin_plugin_api::block_entity::BlockEntityType;
 use pumpkin_plugin_api::common::{BlockPos, Hand};
 use pumpkin_plugin_api::data_components::DataComponent;
 use pumpkin_plugin_api::events::{
-    BlockBreakEvent, BlockPlaceEvent, EntitySpawnEvent, EventData, EventHandler, InteractAction,
-    PlayerDeathEvent, PlayerInteractEvent, SignChangeEvent,
+    BlockBreakEvent, BlockPlaceEvent, EventData, EventHandler, InteractAction, PlayerDeathEvent,
+    PlayerInteractEvent, SignChangeEvent,
 };
 use pumpkin_plugin_api::text::TextComponent;
 use pumpkin_plugin_api::{Context, GameRule, GameRuleValue, ItemStack, Player, Server};
@@ -48,9 +51,10 @@ use crate::utils;
 /// entries only matter while a block/item is in active use.
 const TRACKED_LIMIT: usize = 4096;
 
-/// Spawned-entity types recorded from `EntitySpawnEvent` (`entity_id` ->
-/// registry name). The WIT has no entity lookup by id, so mob names in death
-/// messages are resolved from here.
+/// Resolved entity ids (`entity_id` -> registry name). The WIT has no entity
+/// lookup by id, so the first hit costs one scan over the world entity lists;
+/// the host allocates entity ids from a monotonic counter, so it can then be
+/// cached for the rest of the session.
 static ENTITY_TYPES: Mutex<Option<HashMap<i32, String>>> = Mutex::new(None);
 
 /// Placed player heads (`(world, x, y, z)` -> owner name). `SkullBlockEntity`
@@ -132,43 +136,31 @@ pub fn normalize_cause(raw: &str) -> String {
     }
 }
 
-/// Records the type of every spawned entity (`EntityNameListener` is a port
-/// mechanism, not an original handler).
-pub struct EntityNameListener;
-
-impl EventHandler<EntitySpawnEvent> for EntityNameListener {
-    fn handle(
-        &self,
-        _server: Server,
-        event: EventData<EntitySpawnEvent>,
-    ) -> EventData<EntitySpawnEvent> {
-        let mut guard = ENTITY_TYPES.lock().unwrap();
-        let map = guard.get_or_insert_with(HashMap::new);
-        if map.len() >= TRACKED_LIMIT * 2 {
-            map.clear();
+/// Registry name of a live entity, resolved from the world entity lists (used
+/// by the combat listeners for mob damage and for projectiles whose shooter is
+/// not a player). Misses (already despawned entities) are not cached, so a
+/// later reuse of the sphere of life resolves it again.
+pub(crate) fn entity_key_by_id(server: &Server, entity_id: i32) -> Option<String> {
+    {
+        let guard = ENTITY_TYPES.lock().unwrap();
+        if let Some(name) = guard.as_ref().and_then(|map| map.get(&entity_id)) {
+            return Some(name.clone());
         }
-        map.insert(event.entity_id, event.entity_type.clone());
-        event
     }
-}
 
-/// Registry name of a spawned entity, resolved through the spawn registry
-/// (used by the combat listeners for projectiles whose shooter is not a
-/// player).
-pub(crate) fn entity_key_by_id(entity_id: i32) -> Option<String> {
-    let raw = ENTITY_TYPES
-        .lock()
-        .unwrap()
-        .as_ref()?
-        .get(&entity_id)
-        .cloned()?;
+    let entity = core::entity_by_id(server, entity_id)?;
 
-    // The host fills `EntitySpawnEvent.entity_type` with the numeric registry
-    // id; resolve it to the vanilla name used by the death messages.
-    Some(match crate::utils::core::entity_type_name(&raw) {
-        Some(name) => name.to_string(),
-        None => raw,
-    })
+    // The world list carries the host's `EntityType`; resolve it to the
+    // vanilla resource name used by the death messages.
+    let name = core::entity_type_key(&entity.get_type());
+
+    let mut guard = ENTITY_TYPES.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    if map.len() >= TRACKED_LIMIT * 2 {
+        map.clear();
+    }
+    map.insert(entity_id, name.clone());
+    Some(name)
 }
 
 /// `StringUtils#getEntityName`: lower-cased, `_` turned into spaces, otherwise
@@ -433,7 +425,7 @@ pub fn build_message(server: &Server, victim: &Player, killer: Option<&Player>) 
 
     match cause {
         "explosion" | "player_explosion" | "bad_respawn_point" => {
-            if damage.entity_key.as_deref() == Some("minecraft:tnt") {
+            if damage.entity_key.as_deref() == Some("tnt") {
                 fill(&language.string(&reason("BLOCK_EXPLOSION")), &[("<player>", &victim_display)])
             } else {
                 fill(&language.string(&reason("ENTITY_EXPLOSION")), &[("<player>", &victim_display)])
@@ -514,16 +506,17 @@ pub(crate) fn faction_on_death(
     };
     let template = guard.raw.language.string("FACTIONS.MEMBER_DEATH");
 
-    let faction = guard.factions.get_mut(&faction_id)?;
     if !skip_dtr_loss {
+        let faction = guard.factions.get_mut(&faction_id)?;
         let amount = faction.dtr - loss;
         faction.set_dtr(config, amount);
     }
-    faction.change_points(
-        faction.points + config.factions.points_per_death,
-        config.factions.allow_negative_points,
-    );
 
+    // `PlayerFaction#changePoints` (fires the faction points leaderboard).
+    let points = guard.factions.get(&faction_id)?.points + config.factions.points_per_death;
+    crate::handlers::leaderboard::faction_change_points(guard, &faction_id, points);
+
+    let faction = guard.factions.get(&faction_id)?;
     let loss_string = format!("-{}", crate::utils::java_double(loss));
     let dtr_string = faction.dtr_string(config, frozen);
     let max_dtr_string = faction.max_dtr_string(config);

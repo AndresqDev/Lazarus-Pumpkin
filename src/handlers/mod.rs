@@ -7,6 +7,7 @@ pub mod chat;
 pub mod death;
 pub mod elevator;
 pub mod kitmap;
+pub mod leaderboard;
 pub mod limiter;
 pub mod logger;
 pub mod portal;

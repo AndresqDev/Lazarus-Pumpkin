@@ -1,7 +1,7 @@
 //! High-level helpers that bridge the domain model with the Pumpkin host API.
 
 use pumpkin_plugin_api::text::TextComponent;
-use pumpkin_plugin_api::{Player, Server};
+use pumpkin_plugin_api::{Entity, EntityType, Player, Server};
 
 use crate::factions::{Faction, FactionKind, Location, Relation};
 use crate::state::state;
@@ -18,6 +18,14 @@ pub fn name_of(player: &Player) -> String {
 
 pub fn world_name(player: &Player) -> String {
     player.get_world().get_name()
+}
+
+/// Dimension id of a player's world (`minecraft:overworld`, ...). Holograms
+/// persist this instead of the level name, because Pumpkin names every
+/// dimension's level folder `world` — `Server#get_world_by_name` accepts both
+/// forms, but only the dimension id tells the dimensions apart.
+pub fn world_dimension(player: &Player) -> String {
+    player.get_world().get_dimension()
 }
 
 /// Snapshot of a player's position as a serialisable [`Location`].
@@ -75,6 +83,45 @@ pub fn player_by_entity(server: &Server, entity_id: i32) -> Option<Player> {
         .get_all_players()
         .into_iter()
         .find(|player| player.as_entity().get_id() as i32 == entity_id)
+}
+
+/// Finds a loaded entity by its host entity id, scanning every dimension (the
+/// WIT exposes no lookup by id). Host entity ids come from a single monotonic
+/// counter, so resolving one is enough to key a session-long cache on it.
+pub fn entity_by_id(server: &Server, entity_id: i32) -> Option<Entity> {
+    for world in server.get_all_worlds() {
+        if let Some(entity) = world
+            .get_entities()
+            .into_iter()
+            .find(|entity| entity.get_id() as i32 == entity_id)
+        {
+            return Some(entity);
+        }
+    }
+    None
+}
+
+/// Registry name of an [`EntityType`] (`ExperienceOrb` -> `experience_orb`),
+/// matching the names used by the config files and the language entries.
+///
+/// The WIT bindings format a variant as `EntityType::TextDisplay`, so the
+/// qualified path is stripped and the variant decomposed from camel case.
+pub fn entity_type_key(entity_type: &EntityType) -> String {
+    let debug = format!("{entity_type:?}");
+    let variant = debug.rsplit("::").next().unwrap_or(&debug);
+
+    let mut name = String::with_capacity(variant.len() + 4);
+    for (index, ch) in variant.char_indices() {
+        if ch.is_ascii_uppercase() {
+            if index != 0 {
+                name.push('_');
+            }
+            name.push(ch.to_ascii_lowercase());
+        } else {
+            name.push(ch);
+        }
+    }
+    name
 }
 
 pub fn find_online(server: &Server, name: &str) -> Option<Player> {
@@ -477,181 +524,3 @@ pub fn eject_intruders(server: &Server, claim: &crate::factions::Claim, owner_id
     }
 }
 
-/// Resolves the entity type carried by `EntitySpawnEvent` to a vanilla resource
-/// name (`zombie`, `oak_boat`, `item`, `player`, ...).
-///
-/// The host fills the event field with the *numeric* registry id
-/// (`entity_type.id.to_string()`, e.g. `"154"`) instead of the name, so the
-/// port keeps its own id→name table. It mirrors
-/// `pumpkin-data/generated/entity_type.rs` of the server the plugin ships
-/// against; ids that are not in the table return `None` and callers fall back
-/// to the raw string (fail-open, so a server update can only make less match,
-/// never the wrong thing).
-pub fn entity_type_name(raw: &str) -> Option<&'static str> {
-    let id: u16 = raw.parse().ok()?;
-
-    Some(match id {
-        0 => "acacia_boat",
-        1 => "acacia_chest_boat",
-        2 => "allay",
-        3 => "area_effect_cloud",
-        4 => "armadillo",
-        5 => "armor_stand",
-        6 => "arrow",
-        7 => "axolotl",
-        8 => "bamboo_chest_raft",
-        9 => "bamboo_raft",
-        10 => "bat",
-        11 => "bee",
-        12 => "birch_boat",
-        13 => "birch_chest_boat",
-        14 => "blaze",
-        15 => "block_display",
-        16 => "bogged",
-        17 => "breeze",
-        18 => "breeze_wind_charge",
-        19 => "camel",
-        20 => "camel_husk",
-        21 => "cat",
-        22 => "cave_spider",
-        23 => "cherry_boat",
-        24 => "cherry_chest_boat",
-        25 => "chest_minecart",
-        26 => "chicken",
-        27 => "cod",
-        28 => "copper_golem",
-        29 => "command_block_minecart",
-        30 => "cow",
-        31 => "creaking",
-        32 => "creeper",
-        33 => "cushion",
-        34 => "dark_oak_boat",
-        35 => "dark_oak_chest_boat",
-        36 => "dolphin",
-        37 => "donkey",
-        38 => "dragon_fireball",
-        39 => "drowned",
-        40 => "egg",
-        41 => "elder_guardian",
-        42 => "enderman",
-        43 => "endermite",
-        44 => "ender_dragon",
-        45 => "ender_pearl",
-        46 => "end_crystal",
-        47 => "evoker",
-        48 => "evoker_fangs",
-        49 => "experience_bottle",
-        50 => "experience_orb",
-        51 => "eye_of_ender",
-        52 => "falling_block",
-        53 => "fireball",
-        54 => "firework_rocket",
-        55 => "fox",
-        56 => "frog",
-        57 => "furnace_minecart",
-        58 => "ghast",
-        59 => "happy_ghast",
-        60 => "giant",
-        61 => "glow_item_frame",
-        62 => "glow_squid",
-        63 => "goat",
-        64 => "guardian",
-        65 => "hoglin",
-        66 => "hopper_minecart",
-        67 => "horse",
-        68 => "husk",
-        69 => "illusioner",
-        70 => "interaction",
-        71 => "iron_golem",
-        72 => "item",
-        73 => "item_display",
-        74 => "item_frame",
-        75 => "jungle_boat",
-        76 => "jungle_chest_boat",
-        77 => "leash_knot",
-        78 => "lightning_bolt",
-        79 => "llama",
-        80 => "llama_spit",
-        81 => "magma_cube",
-        82 => "mangrove_boat",
-        83 => "mangrove_chest_boat",
-        84 => "mannequin",
-        85 => "marker",
-        86 => "minecart",
-        87 => "mooshroom",
-        88 => "mule",
-        89 => "nautilus",
-        90 => "oak_boat",
-        91 => "oak_chest_boat",
-        92 => "ocelot",
-        93 => "ominous_item_spawner",
-        94 => "painting",
-        95 => "pale_oak_boat",
-        96 => "pale_oak_chest_boat",
-        97 => "panda",
-        98 => "parched",
-        99 => "parrot",
-        100 => "phantom",
-        101 => "pig",
-        102 => "piglin",
-        103 => "piglin_brute",
-        104 => "pillager",
-        105 => "polar_bear",
-        106 => "poplar_boat",
-        107 => "poplar_chest_boat",
-        108 => "splash_potion",
-        109 => "lingering_potion",
-        110 => "pufferfish",
-        111 => "rabbit",
-        112 => "ravager",
-        113 => "salmon",
-        114 => "sheep",
-        115 => "shulker",
-        116 => "shulker_bullet",
-        117 => "silverfish",
-        118 => "skeleton",
-        119 => "skeleton_horse",
-        120 => "slime",
-        121 => "small_fireball",
-        122 => "sniffer",
-        123 => "snowball",
-        124 => "snow_golem",
-        125 => "spawner_minecart",
-        126 => "spectral_arrow",
-        127 => "spider",
-        128 => "spruce_boat",
-        129 => "spruce_chest_boat",
-        130 => "squid",
-        131 => "stray",
-        132 => "strider",
-        133 => "sulfur_cube",
-        134 => "tadpole",
-        135 => "text_display",
-        136 => "tnt",
-        137 => "tnt_minecart",
-        138 => "trader_llama",
-        139 => "trident",
-        140 => "tropical_fish",
-        141 => "turtle",
-        142 => "vex",
-        143 => "villager",
-        144 => "vindicator",
-        145 => "wandering_trader",
-        146 => "warden",
-        147 => "wind_charge",
-        148 => "witch",
-        149 => "wither",
-        150 => "wither_skeleton",
-        151 => "wither_skull",
-        152 => "wolf",
-        153 => "zoglin",
-        154 => "zombie",
-        155 => "zombie_horse",
-        156 => "zombie_nautilus",
-        157 => "zombie_villager",
-        158 => "zombified_piglin",
-        159 => "player",
-        160 => "fishing_bobber",
-        _ => return None,
-    })
-}

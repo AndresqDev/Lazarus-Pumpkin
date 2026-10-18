@@ -430,11 +430,12 @@ fn purchase(server: &Server, player: &Player, uuid: &str) {
         }
 
         claims.add_claim(&faction_id, claim.clone());
+        // `PlayerFaction#removeBalance`: the leaderboard row is re-cached
+        // right after this guard closes (the field borrow ends there).
         if let Some(faction) = factions.get_mut(&faction_id) {
             faction.balance -= price;
         }
         created = Some((claim.clone(), faction_id.clone()));
-
         selection.cancel_local(player);
         glass::update_selection(glass, player, None, None);
 
@@ -448,6 +449,16 @@ fn purchase(server: &Server, player: &Player, uuid: &str) {
             ],
         ));
         faction_broadcast(server, &faction, messages.pop().unwrap());
+    }
+
+    // `PlayerFaction#removeBalance` fires the faction balance leaderboard.
+    if let Some((_, owner_id)) = &created {
+        let mut guard = state().write().unwrap();
+        crate::handlers::leaderboard::refresh_faction(
+            &mut guard,
+            crate::handlers::leaderboard::Board::FactionBalance,
+            owner_id,
+        );
     }
 
     for message in messages {

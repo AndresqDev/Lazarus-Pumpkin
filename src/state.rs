@@ -15,6 +15,7 @@ use serde::Serialize;
 
 use crate::config::{Config, SidebarConfig, TabConfig};
 use crate::glass::GlassManager;
+use crate::handlers::leaderboard::{FactionBoards, PlayerBoards};
 use crate::hologram::Hologram;
 use crate::kits::KitsManager;
 use crate::selection::SelectionManager;
@@ -107,9 +108,16 @@ pub struct AppState {
     pub glass: GlassManager,
     pub selection: SelectionManager,
     pub staff: StaffManager,
-    pub holograms: std::collections::BTreeMap<String, Hologram>,
-    /// Runtime display entities per hologram (recreated on startup).
-    pub hologram_entities: std::collections::BTreeMap<String, Vec<Entity>>,
+    /// `HologramManager#holograms`: the numeric-id list persisted at
+    /// `<dataFolder>/holograms/holograms.json`.
+    pub holograms: Vec<Hologram>,
+    /// Runtime display entities per hologram id (recreated on startup).
+    pub hologram_entities: std::collections::BTreeMap<i32, Vec<Entity>>,
+    /// `LeaderboardHandler#playerCacheHolder` (persisted in
+    /// `<dataFolder>/leaderboards/players.json`).
+    pub player_leaderboards: PlayerBoards,
+    /// `LeaderboardHandler#factionCacheHolder`.
+    pub faction_leaderboards: FactionBoards,
     pub kits: KitsManager,
     pub classes: crate::classes::PvpClassManager,
     /// `PLAYER_SETTINGS.SETTINGS.*` entries, parsed once at startup like the
@@ -256,8 +264,9 @@ pub fn init(data_folder: String) -> Result<(), String> {
     } else if let Some(seconds) = timers.sotw_remaining_seconds_legacy.filter(|seconds| *seconds > 0) {
         timers.sotw_until = Some(crate::utils::now_millis() + seconds as i64 * 1000);
     }
-    let holograms: std::collections::BTreeMap<String, Hologram> =
-        load_json(&data_folder, "holograms.json");
+    let holograms: Vec<Hologram> = load_json(&data_folder, "holograms/holograms.json");
+    let player_leaderboards: PlayerBoards = load_json(&data_folder, "leaderboards/players.json");
+    let faction_leaderboards: FactionBoards = load_json(&data_folder, "leaderboards/factions.json");
     // Ship the 9 default kits (converted from the original `kits.yml`) on first run.
     let kits_path = format!("{data_folder}/kits.json");
     if std::fs::metadata(&kits_path).is_err() {
@@ -302,6 +311,8 @@ pub fn init(data_folder: String) -> Result<(), String> {
             staff: StaffManager::default(),
             holograms,
             hologram_entities: std::collections::BTreeMap::new(),
+            player_leaderboards,
+            faction_leaderboards,
             kits,
             classes,
             settings,
@@ -359,8 +370,9 @@ pub fn save_all() {
 
 /// Frequent flush of the gameplay-volatile stores: timers (per-player, faction
 /// freeze and the global SOTW timer, all stored as absolute epoch millis),
-/// factions, claims and userdata. The rarely-changed, admin-edited stores
-/// (`kits.json`, `holograms.json`) are only rewritten by [`save_all`].
+/// factions, claims, userdata and the leaderboard caches. The rarely-changed,
+/// admin-edited stores (`kits.json`, `holograms/holograms.json`) are only
+/// rewritten by [`save_all`].
 pub fn save_hot() {
     persist(false);
 }
@@ -399,11 +411,23 @@ fn persist(full: bool) {
         push(&mut payloads, "factions.json", &guard.factions, false);
         push(&mut payloads, "claims.json", &guard.claims, false);
         push(&mut payloads, "userdata.json", &guard.userdata, false);
+        push(
+            &mut payloads,
+            "leaderboards/players.json",
+            &guard.player_leaderboards,
+            true,
+        );
+        push(
+            &mut payloads,
+            "leaderboards/factions.json",
+            &guard.faction_leaderboards,
+            true,
+        );
         if full {
             // Compact JSON for the machine stores above; the kits/holograms
             // files stay pretty-printed because admins hand-edit them.
             push(&mut payloads, "kits.json", &guard.kits, true);
-            push(&mut payloads, "holograms.json", &guard.holograms, true);
+            push(&mut payloads, "holograms/holograms.json", &guard.holograms, true);
         }
         (folder, payloads)
     };
@@ -647,6 +671,9 @@ pub fn atomic_write(folder: &str, name: &str, contents: &str) {
     use std::io::Write;
 
     let path = format!("{folder}/{name}");
+    if let Some((directory, _)) = path.rsplit_once('/') {
+        let _ = std::fs::create_dir_all(directory);
+    }
     let tmp = format!("{path}.tmp");
 
     let result = std::fs::File::create(&tmp).and_then(|mut file| {

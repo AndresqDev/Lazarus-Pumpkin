@@ -72,7 +72,7 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | `timer.custom.CustomTimer` | ✅ | `/customtimer start/cancel/list` + sidebar lines; stored as expiry millis (the original was memory-only) |
 | `scoreboard.*` | ✅ | config template (`scoreboard.toml`) + placeholders + teams |
 | `tab.*` | ✅ | header/footer + per-player name/order/latency (`tab.toml`) |
-| `hologram.*` | ✅ | `TextDisplay` entities + `/hologram` commands |
+| `hologram.*` | ✅ | `TextDisplay` entities (normal + leaderboard layouts, the original's numeric-id list with the `decrementId` shift and `BASE - 0.25 * index` line spacing) + `/hologram` commands; `<dataFolder>/holograms/holograms.json` |
 | `handlers.chat.*` | 🟡 | faction/ally chat + format; blocked commands handled |
 | `handlers.timer.*` | ✅ | combat tag, pvp protection (banked/paused in safezones), SOTW timer + hide-players |
 | `handlers.block.*` (auto-smelt, cobweb, counter, crowbar, filter, subclaim, found ore) | 🟡 | auto-smelt (ingot replacement in the host drop event), cobweb remover (1s task, 50/cycle), disabled block placement, found ore (vein count capped at 50, per-player setting + `lazarus.foundore.receive`), subclaim (creation sign, open/break denial, hopper pull block), crowbar (`/crowbar give`, lore-counted spawner/portal-frame extraction with spawner-type restore) ported; filter needs a player pickup event the host does not fire |
@@ -82,18 +82,18 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
 | ↳ death deviations | | the vanilla broadcast is turned off (`showDeathMessages=false`, one shared level data for all dimensions) because the host cannot suppress a per-death message; the plugin replicates the original's targeted delivery and sets `death_message` for the death screen; head/death signs go straight to the killer's inventory (no item-entity spawns); placed heads are tracked from the placing item's `profile` component (no owner on `SkullBlockEntity`); death signs are filled at placement (`sign.update()` equivalent) but the client only sees it after a chunk reload and the editor cannot be closed (a `DEATH_SIGN.LORE` shorter than four lines fills what it has, where the original throws); item names are title-cased registry keys without NMS localization and custom names lose their colors; unknown entity-branch causes fall back to `REASON_CUSTOM` instead of the original's empty message; `lazarus.headdrop`/`lazarus.staff` also accept the registered op-default `lazarus:headdrop`/`lazarus:staff` (the host does not grant undefined nodes to operators) |
 | `handlers.elevator.*` (sign + minecart elevators) | ✅ | sign elevator (`[elevator]`/`[e]` + `up`/`down` created, up/down column search with the 0.5 block-centre landing, create/destroy/right-click messages), minecart elevator (sneaking mount on a cart parked in an open fence gate pulled up with the mount cancelled, dismount pulled up one tick later), both gated by `OWN_CLAIM_ONLY` (player faction vs faction at the sign/vehicle) and `DISABLED_IN_COMBAT` using the original's shared minecart message keys |
 | ↳ elevator deviations | | the sign rewrite lands in the block entity (`set_front_text`) while the event is cancelled so the typed lines are not applied on top: the client keeps showing what was typed until the chunk reloads, so the checks also accept the typed `[elevator]`/`[e]` + `up`/`down` shorthand; `setUseInteractedBlock(DENY)` maps to cancelling the interact event; `Material.AIR`/`WALL_SIGN`/`SIGN_POST`/`isSolid()` map to the block-state `is_air`/`is_solid` flags and `*_sign` names (cave/void air counts as air); the column search runs from `get_min_y` to `+384` (tallest vanilla column) instead of the fixed 1.8 `getMaxHeight()` 256; the dismount teleport is scheduled one tick later through the host scheduler because the host re-positions the dismounted passenger right after the event |
-| `handlers.limiter.*` (enchant/potion/entity limits) | 🟡 | enchantment table (clamped `enchantments_to_add`), anvil results (enchanted-book `stored-enchantments` rewrite, unrepairable-lore denial, over-cap clamp through a next-tick inventory sweep), potion drinking/throwing (`PlayerItemConsumeEvent` denial + hand clear + message), brewing (stand read through the block entity; violating slots restored one tick later), disabled entities cancelled in `EntitySpawnEvent`; `limiters.yml` is parsed lazily with the 1.8 legacy name tables and re-read by `/lazarus reload` |
+| `handlers.limiter.*` (enchant/potion/entity limits) | 🟡 | enchantment table (clamped `enchantments_to_add`), anvil results (enchanted-book `stored-enchantments` rewrite, unrepairable-lore denial, over-cap clamp through a next-tick inventory sweep), potion drinking/throwing (`PlayerItemConsumeEvent` denial + hand clear + message), brewing (stand read through the block entity; violating slots restored one tick later), disabled entities removed by a one-second world sweep; `limiters.yml` is parsed lazily with the 1.8 legacy name tables and re-read by `/lazarus reload` |
 | ↳ limiter deviations | | anvil results are clamped one tick after the take (the host hands the guest throw-away clones and drops item mutations), so the sweep covers the player's whole inventory — the `ItemUtils.updateInventory` equivalent; enchanted-book enchantment ids are probed from the server because the guest cannot read the registry (fail-open if the probe finds nothing); splash potions are denied before the throw is created and potions thrown by dispensers/witches cannot be identified (no item on the projectile); `MOBS_SPAWN_ONLY_FROM_SPAWNERS` + `MOB_LIMIT_PER_CHUNK` cannot be enforced; the mob-drop/fishing clamp sites are unreachable |
 | `handlers.logger.*` (combat logger) | 🟡 | quit spawn (skeleton/villager per `COMBAT_LOGGER.TYPE` + `VILLAGER_PROFESSION`, name format, copied health/36-slot + armor inventory/effects ≤ 12000 ticks, feet-block spawn rule, no AI), full damage rules (fire immunity, indirect magic, own-damager, SOTW / PvP-prot / staff / vanish / same-faction / ally denies with the original messages, combat-tag activation, killing-blow bookkeeping for the killer), death flow (captured items to the killer, `REASON_COMBATLOGGER` / `_KILLER` messages + targeted delivery, kill/death stats with dated entries, killstreak + kitmap rewards + faction points, `faction.onDeath` DTR/points/freeze shared with the player death flow, offline deathban from the ban time resolved at logout, deferred inventory wipe), 15 s expiry removal, rejoin restore (safe-logout flag, health/position/effects, entity removal); `/logout` warmup with the `LogoutHandler` move/damage/quit cancels and `LOGOUT.KICK_MESSAGE` kick |
-| ↳ logger deviations | | no item-entity spawn API: the captured inventory goes straight to the killer's inventory (items that do not fit, and every item when no *player* dealt the killing blow, are lost instead of dropping on the ground); the equipment displayed on the entity is cleared right before the host computes the death drops so the vanilla random equipment drops cannot duplicate the hand-out, and the remaining vanilla loot (bones/arrows) and the experience orbs of that death flow are cancelled through `ItemSpawnEvent`/`EntitySpawnEvent` position markers (replicating the empty `dropDeathLoot` override and `expToDrop = 0`); the host serialises entities away *immediately* when the last chunk watcher leaves (no unload delay), so an expiry/rejoin removal that misses the live entity is queued and retried by the 1 s tick until the chunk loads again (host entity ids are never reused; entries expire after 10 minutes), with the display equipment cleared on the retry — no ghost logger remains; offline player data is unreachable, so `die()`'s inventory clear is deferred to the victim's next join (`Userdata#pending_logger_clear`) and the offline position/health-0 update is skipped (they log back in on the logger spot anyway); potion effects cannot be applied to non-player entities, so the logger only stores them for `handleEffectChanges`; an expired logger (and a rejoin) removes the entity without the death flow, exactly like the original, but items never exist on the ground; `CombatLoggerSpawnEvent` has no host equivalent (nothing cancels it); the logout warmup lives in the shared pending-warmup slot and `/logout` registers a public node (the original's `lazarus.logout` node was undefined); `lazarus.combatlogger.bypass` also accepts the registered `lazarus:combatlogger.bypass` spelling |
+| ↳ logger deviations | | no item-entity spawn API: the captured inventory goes straight to the killer's inventory (items that do not fit, and every item when no *player* dealt the killing blow, are lost instead of dropping on the ground); the equipment displayed on the entity is cleared right before the host computes the death drops so the vanilla random equipment drops cannot duplicate the hand-out, and the remaining vanilla loot (bones/arrows) is cancelled through `ItemSpawnEvent` position markers while the orbs of that death flow are swept one and three ticks after the death (replicating the empty `dropDeathLoot` override and `expToDrop = 0`); the host serialises entities away *immediately* when the last chunk watcher leaves (no unload delay), so an expiry/rejoin removal that misses the live entity is queued and retried by the 1 s tick until the chunk loads again (host entity ids are never reused; entries expire after 10 minutes), with the display equipment cleared on the retry — no ghost logger remains; offline player data is unreachable, so `die()`'s inventory clear is deferred to the victim's next join (`Userdata#pending_logger_clear`) and the offline position/health-0 update is skipped (they log back in on the logger spot anyway); potion effects cannot be applied to non-player entities, so the logger only stores them for `handleEffectChanges`; an expired logger (and a rejoin) removes the entity without the death flow, exactly like the original, but items never exist on the ground; `CombatLoggerSpawnEvent` has no host equivalent (nothing cancels it); the logout warmup lives in the shared pending-warmup slot and `/logout` registers a public node (the original's `lazarus.logout` node was undefined); `lazarus.combatlogger.bypass` also accepts the registered `lazarus:combatlogger.bypass` spelling |
 | `handlers.portal.*` (PortalHandler, EndPortalHandler, NetherPortalTrapHandler) | ✅ | nether travel translation (`NETHER_PORTAL_POSITION_TRANSLATION`: ÷/×`VALUE` on X/Z, Y and rotation kept), portals inside the spawn safezone redirected to `NETHER_SPAWN`/`NETHER_EXIT`, end entry/exit to `END_SPAWN`/`END_EXIT` (world-spawn fallbacks); `/endportal` hands out the `SELECTION` wand (`toggleSelectionProcess` always restarts) and its check validates end portal frames, equal elevation and a 2–4 block X/Z span before filling the rectangle with end portals (frames kept, selection + wand removed, position message still sent); the trap fix sends fake air for the portal blocks around a right-clicked portal while both feet and eye blocks are portals |
 | ↳ portal deviations | | the host never fires `PlayerPortalEvent`: the travel rules hook `PlayerChangeWorldEvent` (`Player::teleport_world`, which reads `position`/`yaw`/`pitch` back) and infer the portal kind from the block the player stands in (feet/eye, where the original's `from` location sat); the host's own travel agent runs *before* the event, so its vanilla 1:8 portal search/creation (and the end-side obsidian platform rebuild) still happens at the vanilla destination before the player is moved to the configured one; the destination world cannot be swapped to the entry's world token (only position/rotation are applied) |
-| `handlers.kitmap.*` (KitmapHandler, KillstreakHandler) | 🟡 | kitmap mode fully wired: config sync from raw `config.yml`, deathban/DTR-loss skips, safezone drop denial, item-clear task, kill reward + killstreaks (console commands + broadcast), PvP-timer clearing/gating, first-join spawn teleport, `KITMAP_STATS` sidebar block, KITMAP-only kits restricted to safezones; `/spawn` teleport, `/topkillstreaks` and the Miner kitmap renames pending (below) |
+| `handlers.kitmap.*` (KitmapHandler, KillstreakHandler) | 🟡 | kitmap mode fully wired: config sync from raw `config.yml`, deathban/DTR-loss skips, safezone drop denial, item-clear task, kill reward + killstreaks (console commands + broadcast), PvP-timer clearing/gating, first-join spawn teleport, `KITMAP_STATS` sidebar block, KITMAP-only kits restricted to safezones; `/spawn` teleport and the Miner kitmap renames pending (below) |
 | `handlers.salvage.*` (SalvageHandler) + `/salvage` | ✅ | 1.8 `Bukkit.getRecipesFor` data inlined per output (material + stick, bow stick→string, 1.8 pattern cell counts, planks→`oak_planks`), `ItemUtils#isSalvageable` tier/kind composite, durability from the `Damage` component + the 1.8 max damage table (`<durability>` percentage like `Double.toString`), enchanted books keep their `stored-enchantments`, ingredient names from the raw `items.yml` reverse lookup |
 | `handlers.settings.*` (SettingsHandler) + `/settings` | ✅ | `PLAYER_SETTINGS` parsed once at startup, GUI built at open (session per player, click by plain display name), toggle runs the shared `/toggle*` path and refreshes the lore, every click in the window cancelled like the original (outside clicks stay vanilla) |
 | `handlers.restore.*` (InventoryRestoreManager) + `/inventoryrestore` | ✅ | `saveInventoryUponDeath` hooked into both death flows (player death + combat-logger death, from the captured record before the wipe), JSON snapshot per death (`<dataFolder>/restore/<uuid>.json`, 36 slots + armor), `FILE_CACHE` purge at load, 54-slot preview (armor 45-48, placeholders, `Rollback` in 53), rollback into the (online) target + `RESTORED_SENDER`/`RESTORED_PLAYER` messages, file deleted on restore |
 | `handlers.rank.*` (RankReviveHandler, RankAnnouncerHandler) + `/rankrevive` | ✅ | per-rank `RANK_REVIVE_COMMAND` entries (first matching permission wins), cooldown through the persisted `RankReviveTimer`, deathban + revive + activation + broadcast (`<rankName>`/`<player>`/`<target>` to console + all players); donators announcer with `ONLINE_RANK_ANNOUNCER` entries, op skip, config-order groups joined with `DELIMITER`, `MESSAGE` lines with `<donators>` |
-| `handlers.leaderboard.*` | 🟡 | `/f top` + `/f list` faithful (hover/click, relation colours, pagination); leaderboard holograms TODO |
+| `handlers.leaderboard.*` | ✅ | eight boards (player kills/deaths/balance/killstreak + faction kills/points/balance/KOTHs) cached as sorted 10-entry lists updated only on change/overflow, `/topkills`, `/topdeaths`, `/topkillstreak(s)`, `/topbalance`, `/leaderboard`, `/f top` + `/f list` (hover/click, relation colours, pagination), leaderboard holograms (header + ten rows + footer, text rewritten in place on updates, kitmap gating through `LEADERBOARDS.KITMAP_MODE_ONLY`); `<dataFolder>/leaderboards/{players,factions}.json` |
 | `abilities.*` | ⬜ | large subsystem; ported last |
 | `classes.*` (Archer, Bard, Miner, Rogue, Mage, Bomber) | ⬜ | |
 | `kits.*` | ✅ | inventory capture/give incl. lore + vanilla enchantments (`kits.json`) |
@@ -127,6 +127,16 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   Selection pillars and claim maps are rendered entirely client-side (`glass.rs`).
 * **A single global `RwLock<AppState>`** mirrors the original singletons. Handlers
   avoid holding the lock across host calls that can re-enter the plugin.
+* **`EntitySpawnEvent` is never handled.** The host re-enters the guest in the
+  middle of a plugin `world.spawn_entity` call when that event has a handler,
+  and its re-entry bookkeeping loses a race often enough (~5–15% of such pumps,
+  measured) to park the call forever: the plugin's store queue is never serviced
+  again and only a restart recovers. With no handler the host's `fire` returns
+  before it can re-enter, so spawning stays a plain blocking pump and a
+  hologram/logger can create its entities inside one root call. The three
+  features the original based on spawn cancellation are ported as
+  scans/sweeps instead (limiter, logger orbs, death-message entity names);
+  future sectors must follow the same rule (`src/listeners/mod.rs` documents it).
 * **Economy** is internal (`Userdata.balance` + `Faction.balance`); Vault does not
   exist on Pumpkin.
 * **Time** is measured in unix milliseconds for timers, using Pumpkin's scheduler
@@ -205,9 +215,11 @@ context):
 * Natural spawns and the limiter spawn rules — the host's natural spawner
   registers mobs without firing `EntitySpawnEvent`, there is no spawn reason
   and no chunk entity query, so `MOBS_SPAWN_ONLY_FROM_SPAWNERS` and
-  `MOB_LIMIT_PER_CHUNK` cannot be enforced; disabling an entity only blocks the
-  spawns that do go through the event (spawn eggs, vehicles, projectiles,
-  drops), while the original's `CreatureSpawnEvent` companion is never fired.
+  `MOB_LIMIT_PER_CHUNK` cannot be enforced; disabled entities are removed by a
+  one-second world sweep instead of cancelling their spawn (the event is off
+  limits — see the design notes — and the original's `CreatureSpawnEvent`
+  companion is never fired either), so a denied mob/vehicle/projectile/drop can
+  exist for up to a second before it disappears.
 * Mob-drop enchant clamping — `EntityDeathEvent` carries no drops list, so the
   enchant limiter cannot rewrite what a mob drops (its fishing branch is dead
   code on 1.8).
@@ -253,6 +265,11 @@ context):
 * Item names in death messages (`NmsUtils#getItemName`) — no NMS localized
   names: the port title-cases the registry key (matches the common items) and
   strips the colors of custom names (the original kept the `§` codes).
+* Entity names in death messages (`StringUtils#getEntityName` callers) — the WIT
+  has no entity lookup by id, so the type behind the damager id is resolved by
+  scanning the loaded world entity lists (`get_all_worlds` → `get_entities`) and
+  cached for the session (host entity ids are monotonic). An attacker that
+  despawned before the lookup yields no name, like a missed spawn event would.
 * Unknown damage causes in the entity branch — the original leaves the message
   empty (nothing is sent, the host cannot replicate that); the port falls back
   to `REASON_CUSTOM`.
@@ -271,13 +288,37 @@ context):
 * Faction leaderboards (`/f top`) — the original fills a 10-entry cache only when
   a faction's value *changes*; the port sorts the live values of factions whose
   metric is non-zero, which shows the same top-10 once factions have activity.
+* Leaderboard holograms — the original rebuilt the whole line set on every
+  update; the port rewrites the text of the existing `TextDisplay` entities in
+  place (the layout is fixed), and it refreshes all ten rows where the original
+  only touched one (same output; the original skipped unchanged rows as an
+  optimisation).
+* Hologram persistence — the stored `world` is the dimension id
+  (`minecraft:overworld`), since every Pumpkin level is named `world`; the
+  original's configured world tokens are accepted when reading the file.
+* Leaderboard storage — one JSON object per holder at
+  `<dataFolder>/leaderboards/players.json` / `factions.json` with the original's
+  `topXxx` keys, each board a sorted array of `key`/`name`/`value`/`timestamp`
+  entries (the original kept a `ConcurrentSkipListSet`); sorting reproduces the
+  collection order, and unlike the original a disbanded faction is also removed
+  from every board it appeared on (the original left the stale entry until the
+  next rebuild).
+* `/top` — the host exposes the motion-blocking heightmap, so the port stands
+  the player on top of that block (+1) instead of inside it, replicating the
+  original's `getHighestBlockAt` teleport plus the `add(0.5, 0, 0.5)` offset.
+* Command pre-processing (`BlockedCommandsHandler`, the combat-tag /
+  PvP-protection command restrictions) — the host never fires
+  `PlayerCommandPreprocessEvent`, so the registered listener is unreachable and
+  the blocked / combat-denied commands stay usable.
 * Combat logger host limits: there is no item-entity spawn API, so a dead
   logger's captured inventory is handed to the killer's inventory — items that
   do not fit, and every item when no *player* dealt the killing blow, are lost
   instead of staying on the ground — and the equipment shown on the entity is
   cleared right before the drops so the vanilla random equipment drop cannot
-  duplicate the hand-out; the rest of the vanilla death drops (loot table +
-  experience orbs) is cancelled through spawn-event position markers. No potion
+  duplicate the hand-out; the rest of the vanilla death drops (the loot table)
+  is cancelled through `ItemSpawnEvent` position markers and the orbs — spawned
+  after the death event returns, with `EntitySpawnEvent` off limits — are swept
+  one and three ticks later within the same radius. No potion
   effects can be applied to entities (the logger only stores them for the
   rejoin restore) and no offline player data can be written (`die()`'s
   inventory clear runs on the victim's next join, the offline
@@ -294,8 +335,10 @@ context):
 * Kitmap `/spawn` (`SpawnTeleportHandler`, `KITMAP_MODE.SPAWN_TELEPORT_DELAY`,
   `SPAWN_COMMAND.TELEPORTED_KITMAP`, the quit teleport-timer cancel) — the config
   value is loaded, the command itself is not ported yet.
-* Kitmap leaderboards (`/topkillstreaks`, `LEADERBOARDS.KITMAP_MODE_ONLY`, the
-  killstreak/highest-killstreak holograms) — pending with the leaderboard holograms.
+* Kitmap killstreak leaderboards (`/topkillstreaks`, the `killstreak` argument
+  of `/leaderboard`, `LEADERBOARDS.KITMAP_MODE_ONLY`) — ported with the
+  leaderboard sector; the faction KOTHs board/hologram is wired but stays empty
+  until the games sector credits captures (`FactionDataChangeEvent` equivalent).
 * Kitmap `Miner`-class renames and ability changes (`SpawnTeleportHandler`,
   `KitmapHandler`-driven class tweaks) — pending with the abilities/classes port.
 * Block *use* protection is ported (`BlockInteractListener`: clickable materials,
@@ -397,17 +440,33 @@ original placeholders and rolls back into an online target with the staff
 broadcast, and the rank sector adds `/rankrevive` (per-rank permission +
 persisted `RankReviveTimer` cooldown, broadcast with `<rankName>`) plus the
 online donators announcer (`ONLINE_RANK_ANNOUNCER`, op skip, delimiter join).
+The leaderboard / hologram sector closed next: the eight boards (player
+kills/deaths/balance/killstreak, faction kills/points/balance/KOTHs) are cached
+as sorted 10-entry lists that only change on a real update (disband cleanup
+included), `/topkills`, `/topdeaths`, `/topkillstreak(s)` and `/topbalance`
+print them with the original's entries, `/top` teleports to the
+motion-blocking height (+1), `/leaderboard` renders a board in chat with the
+kitmap gating, and the `/hologram` subsystem was reworked: one `TextDisplay`
+per line on the original's `BASE - 0.25 * index` layout, numeric ids with the
+`decrementId` shift, normal + leaderboard layouts persisted to
+`<data>/holograms/holograms.json`, in-place text refresh on board updates and a
+per-second rebuild for holograms whose entities vanished (they are never
+persisted). The same pass removed the last `EntitySpawnEvent` handlers: the
+host deadlocks ~5–15% of the plugin's entity-spawn pumps when that event has a
+handler (its re-entry bookkeeping races and parks the call), so disabled-entity
+limiting is a one-second sweep, the logger's experience orbs are swept one and
+three ticks after the death, and death-message entity names resolve by scanning
+the world entity lists — spawning is now a plain blocking pump (see §4).
 
 Still to port (in rough priority order):
 
-1. Leaderboard holograms (+ `/topdeaths` and the remaining top commands).
-2. Events/games (Koth, Conquest, DTC, Ender Dragon, King of the Hill, Mountain,
+1. Events/games (Koth, Conquest, DTC, Ender Dragon, King of the Hill, Mountain,
    Loot, Schedule) using boss bars + the world API.
-3. Abilities + PvP classes (Archer/Bard/Miner/Rogue/Mage/Bomber).
-4. Mob stacking (the remaining block handler; the filter stays blocked by the
+2. Abilities + PvP classes (Archer/Bard/Miner/Rogue/Mage/Bomber).
+3. Mob stacking (the remaining block handler; the filter stays blocked by the
    missing player pickup event).
-5. Custom recipes, sign shops.
-6. World border, safezone food/potion rules.
+4. Custom recipes, sign shops.
+5. World border, safezone food/potion rules.
 
 ## 6. Files
 

@@ -65,13 +65,6 @@ pub fn start(context: &Context) {
         }
     });
 
-    // Recreate hologram display entities once worlds are available.
-    context.schedule_delayed_task(20, |server| {
-        let mut guard = state().write().unwrap();
-        let AppState { holograms, hologram_entities, .. } = &mut *guard;
-        crate::hologram::respawn_all(&server, holograms, hologram_entities);
-    });
-
     // Apply the configured world borders (square, infinite on Y), centred on spawn.
     context.schedule_delayed_task(20, |server| {
         crate::utils::core::refresh_spawn_centers(&server);
@@ -150,6 +143,13 @@ fn tick(server: &Server) {
     process_respawn_fixes(server);
     crate::deathban::process_pending_kicks(server);
     crate::handlers::logger::process_pending_removals(server);
+
+    // Display entities are not persisted: rebuild the missing holograms (and
+    // retry the ones whose dimension was not live at spawn time).
+    crate::hologram::ensure_respawned(server);
+    // The disabled-entity limiter (`limiters.yml`) removes what reaches the
+    // world (spawn cancellation is unavailable, see the limiter module docs).
+    crate::handlers::limiter::enforce_disabled_entities(server);
 
     for player in server.get_all_players() {
         scoreboard::update(&player, server);

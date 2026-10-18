@@ -112,17 +112,20 @@ fn change_balance(sender: &CommandSender, server: &Server, args: &ConsumedArgs, 
     let new_balance = {
         let mut guard = state().write().unwrap();
         let config = guard.config.clone();
-        let Some(user) = guard.userdata.get_mut(&uuid) else {
+        let Some(user) = guard.userdata.get(&uuid) else {
             return;
         };
 
-        user.balance = match change {
+        let balance = match change {
             Change::Give => (user.balance + amount).min(config.economy.max_balance),
             Change::Take => (user.balance - amount).max(0),
             Change::Set => amount.min(config.economy.max_balance),
             Change::Reset => config.economy.default_player_balance,
         };
-        user.balance
+
+        // `Userdata#changeBalance` (fires the player balance leaderboard).
+        crate::handlers::leaderboard::set_player_balance(&mut guard, &uuid, balance);
+        balance
     };
 
     reply(sender, format!("&e{name}'s balance is now &a${new_balance}&e."));

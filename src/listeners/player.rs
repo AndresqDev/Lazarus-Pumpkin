@@ -35,6 +35,19 @@ impl EventHandler<PlayerJoinEvent> for JoinListener {
             let first_join = guard.userdata.get(&uuid).is_none();
             guard.userdata.get_or_create(uuid.clone(), name.clone(), &config);
 
+            // Port of `UserdataManager#createUserdata`/`#checkUsernameChange`:
+            // a new player caches the constructor's zero rows, a renamed one
+            // syncs the stored name and re-caches all four board rows.
+            if first_join {
+                crate::handlers::leaderboard::on_userdata_created(&mut guard, &uuid);
+            } else if guard
+                .userdata
+                .get(&uuid)
+                .is_some_and(|user| user.name != name)
+            {
+                crate::handlers::leaderboard::on_userdata_renamed(&mut guard, &uuid, name.clone());
+            }
+
             (
                 config.join_welcome_message_enabled,
                 guard.lang.join_welcome.clone(),
@@ -488,15 +501,11 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
 
             // Stats (port of `DynamicEventHandler#onPlayerDeath`): every death is
             // recorded; kills only when the killer is online.
-            if let Some(user) = guard.userdata.get_mut(&uuid) {
-                user.add_death(entry.clone());
-            }
-            if killer_player.is_some() {
-                if let Some(killer) = &killer_uuid {
-                    if let Some(user) = guard.userdata.get_mut(killer) {
-                        user.add_kill(entry.clone());
-                    }
-                }
+            crate::handlers::leaderboard::add_death(&mut guard, &uuid, entry.clone());
+            if killer_player.is_some()
+                && let Some(killer) = &killer_uuid
+            {
+                crate::handlers::leaderboard::add_kill(&mut guard, killer, entry.clone());
             }
 
             // Kitmap killstreaks (port of `KillstreakHandler#onPlayerDeath`):
@@ -509,10 +518,13 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
 
                 if killer_player.is_some()
                     && let Some(killer) = &killer_uuid
-                    && let Some(user) = guard.userdata.get_mut(killer)
                 {
-                    user.add_killstreak();
-                    let streak = user.killstreak;
+                    crate::handlers::leaderboard::add_killstreak(&mut guard, killer);
+                    let streak = guard
+                        .userdata
+                        .get(killer)
+                        .map(|user| user.killstreak)
+                        .unwrap_or(0);
 
                     if let Some(commands) = config.kitmap.killstreak_rewards.get(&streak) {
                         killer_killstreak_reward = Some((
@@ -551,18 +563,15 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
 
             // Killer faction (port of the `PlayerEventListener#onPlayerDeath`
             // kill credit).
-            if let Some(killer) = &killer_uuid {
-                if let Some(killer_faction_id) =
-                    guard.factions.by_member(killer).map(|f| f.id.clone())
-                {
-                    if let Some(faction) = guard.factions.get_mut(&killer_faction_id) {
-                        faction.add_kill();
-                        faction.increment_points(
-                            config.factions.points_per_kill as i32,
-                            config.factions.allow_negative_points,
-                        );
-                    }
-                }
+            if let Some(killer) = &killer_uuid
+                && let Some(killer_faction_id) = guard.factions.by_member(killer).map(|f| f.id.clone())
+            {
+                crate::handlers::leaderboard::faction_add_kill(&mut guard, &killer_faction_id);
+                crate::handlers::leaderboard::faction_increment_points(
+                    &mut guard,
+                    &killer_faction_id,
+                    config.factions.points_per_kill as i32,
+                );
             }
         }
 

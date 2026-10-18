@@ -19,6 +19,7 @@ pub mod salvage;
 pub mod settings;
 pub mod sotw;
 pub mod staff;
+pub mod top;
 
 use pumpkin_plugin_api::command::{Arg, Command, ConsumedArgs};
 use pumpkin_plugin_api::permission::{Permission, PermissionDefault, PermissionLevel};
@@ -68,6 +69,7 @@ pub fn register(context: &Context) -> Result<(), String> {
     salvage::register(context)?;
     settings::register(context)?;
     sotw::register(context)?;
+    top::register(context)?;
     Ok(())
 }
 

@@ -28,6 +28,18 @@ use crate::handlers::timer::items;
 use crate::selection;
 
 /// Registers every ported event handler.
+///
+/// **Never register an `EntitySpawnEvent` handler here.** The host deadlocks
+/// when a plugin `world.spawn_entity` call (a *dispatching* pump) re-enters the
+/// guest before the pumping driver has registered its re-entry context: any
+/// registered handler makes such a call re-enter, and the host's
+/// `sender_for`/`register` race then parks the call forever (about 5–15% of
+/// pumps, measured). With no handler the host's `fire` returns before it can
+/// re-enter, so spawning stays a plain blocking pump. Features that the
+/// original based on spawn cancellation are ported as sweeps instead
+/// (`limiters::enforce_disabled_entities`, `combatlogger::sweep_vanilla_orbs`)
+/// and entity names in death messages are resolved by scanning the world
+/// entity lists (`handlers::death::entity_key_by_id`).
 pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(player::JoinListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::LeaveListener, EventPriority::Normal, true)?;
@@ -44,7 +56,6 @@ pub fn register(context: &Context) -> Result<(), String> {
     // Death handlers (`handlers.death.*`) that react to the death itself: they
     // run *before* `DeathListener` so the killer is still resolvable from
     // `last_damagers` (the DeathListener clears it while crediting the stats).
-    context.register_event_handler(death::EntityNameListener, EventPriority::Normal, true)?;
     context.register_event_handler(death::StattrakListener, EventPriority::Normal, true)?;
     context.register_event_handler(death::HeadDropDeathListener, EventPriority::Normal, true)?;
     context.register_event_handler(death::DeathSignDeathListener, EventPriority::Normal, true)?;
@@ -52,10 +63,9 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(player::DeathListener, EventPriority::Normal, true)?;
     // Combat logger entity deaths (`VillagerCombatLogger_1_8#die`).
     context.register_event_handler(combatlogger::CombatLoggerDeathListener, EventPriority::Normal, true)?;
-    // Vanilla drops of a dead logger (`dropDeathLoot` was empty and
-    // `expToDrop` stayed 0 on the original entity).
+    // Vanilla drops of a dead logger (`dropDeathLoot` was empty on the
+    // original entity; its orbs are swept by `schedule_orb_sweep`).
     context.register_event_handler(combatlogger::CombatLoggerLootListener, EventPriority::Normal, true)?;
-    context.register_event_handler(combatlogger::CombatLoggerExpListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::RespawnListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::SpawnLocationListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::SpawnChangeListener, EventPriority::Normal, true)?;
@@ -140,11 +150,12 @@ pub fn register(context: &Context) -> Result<(), String> {
     // potion drinking/throwing/brewing and disabled entity spawns. They run
     // after the interact group and before the elevators, like the original's
     // `HandlerManager` (EnchantLimiter < EntityLimiter < MinecartElevator).
+    // The disabled-entity half of `EntityLimiterHandler` is a world sweep
+    // (`limiters::enforce_disabled_entities`, hooked into the tick task).
     context.register_event_handler(limiters::EnchantTableListener, EventPriority::Normal, true)?;
     context.register_event_handler(limiters::AnvilClickListener, EventPriority::Normal, true)?;
     context.register_event_handler(limiters::PotionConsumeListener, EventPriority::Low, true)?;
     context.register_event_handler(limiters::BrewListener, EventPriority::Normal, true)?;
-    context.register_event_handler(limiters::EntitySpawnLimiterListener, EventPriority::Lowest, true)?;
 
     // Elevators (`handlers.elevator.*`, `ignoreCancelled` in the original):
     // they run after the territory/use listeners above, so denied actions are
@@ -188,3 +199,4 @@ pub fn register(context: &Context) -> Result<(), String> {
 
     Ok(())
 }
+

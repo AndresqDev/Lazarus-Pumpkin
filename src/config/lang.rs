@@ -260,13 +260,6 @@ lang! {
     // ---- Admin factions ----
     faction_admin_value_changed = "&eChanged &c<field> &eto &c<value> &efor faction &c<faction>&e.";
     faction_admin_force_kicked = "&eYou force-kicked &c<player> &efrom their faction.";
-
-    // ---- Holograms ----
-    hologram_created = "&aHologram &e<name> &acreated.";
-    hologram_deleted = "&cHologram &e<name> &cdeleted.";
-    hologram_not_found = "&cHologram &e<name> &cdoes not exist.";
-    hologram_line_added = "&aLine added to hologram &e<name>&a.";
-    hologram_line_removed = "&cLine removed from hologram &e<name>&c.";
 }
 
 impl Lang {

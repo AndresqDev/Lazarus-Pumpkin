@@ -789,6 +789,8 @@ fn create(sender: &CommandSender, _player: &Player, uuid: &str, name: &str, args
 
         let id = guard.factions.create(faction_name.clone(), &config);
         guard.factions.add_member(&id, member(uuid.to_string(), name.to_string(), Role::Leader));
+        // `PlayerFaction` constructor: caches the faction's zero rows.
+        crate::handlers::leaderboard::on_faction_created(&mut guard, &id);
 
         messages = utils::replace(&lang.faction_created, "<name>", &faction_name)
             .replace("<player>", name);
@@ -821,6 +823,9 @@ fn disband(sender: &CommandSender, server: &Server, uuid: &str) {
 
         guard.claims.remove_all(&faction_id);
         guard.factions.disband(&faction_id);
+        // `FactionDisbandEvent` handling: drop the faction from every board and
+        // re-cache the remaining player factions.
+        crate::handlers::leaderboard::on_faction_disbanded(&mut guard, &faction_id);
 
         let message = utils::replace(
             &utils::replace(&lang.faction_disbanded, "<name>", &faction.name),
@@ -991,6 +996,8 @@ fn leave(sender: &CommandSender, server: &Server, player: &Player, uuid: &str, n
         if faction.members.len() <= 1 {
             guard.claims.remove_all(&faction_id);
             guard.factions.disband(&faction_id);
+            // `FactionDisbandEvent` handling (last member left).
+            crate::handlers::leaderboard::on_faction_disbanded(&mut guard, &faction_id);
         }
 
         let broadcast = utils::replace(&lang.faction_member_left, "<player>", name);
@@ -1206,6 +1213,8 @@ fn rename(sender: &CommandSender, uuid: &str, args: &ConsumedArgs) {
         if let Some(faction) = guard.factions.get_mut(&faction_id) {
             faction.name = new_name.clone();
         }
+        // `FactionRenameEvent`: every faction board re-caches the new name.
+        crate::handlers::leaderboard::on_faction_renamed(&mut guard, &faction_id);
         messages = utils::replace(
             &utils::replace(&lang.faction_renamed, "<name>", &faction.name),
             "<newName>",
@@ -1960,103 +1969,70 @@ fn top_usage(sender: &CommandSender) {
     reply(sender, format!("{prefix}{usage}"));
 }
 
-/// Port of `TopCommand`: `kills|points|balance|koths` faction leaderboards.
-/// The original reads a 10-entry cache filled by faction data changes; the port
-/// sorts the live faction values and skips zero entries (a faction only shows up
-/// in the original after its value changed).
+/// Port of `factions.commands.player.TopCommand`: `kills|points|balance|koths`
+/// faction leaderboards. The rows come from the shared leaderboard cache (the
+/// original's `NavigableSet`), not from live faction values.
 fn top(sender: &CommandSender, _server: &Server, uuid: &str, metric: &str) {
-    let (title_key, format_key) = match metric.to_lowercase().as_str() {
-        "kills" => (
-            "LEADERBOARDS.FACTION_TOP_KILLS.TITLE",
-            "LEADERBOARDS.FACTION_TOP_KILLS.LINE_FORMAT",
-        ),
-        "points" => (
-            "LEADERBOARDS.FACTION_TOP_POINTS.TITLE",
-            "LEADERBOARDS.FACTION_TOP_POINTS.LINE_FORMAT",
-        ),
-        "balance" => (
-            "LEADERBOARDS.FACTION_TOP_BALANCE.TITLE",
-            "LEADERBOARDS.FACTION_TOP_BALANCE.LINE_FORMAT",
-        ),
-        "koths" => (
-            "LEADERBOARDS.FACTION_TOP_KOTHS_CAPPED.TITLE",
-            "LEADERBOARDS.FACTION_TOP_KOTHS_CAPPED.LINE_FORMAT",
-        ),
-        _ => {
-            let (prefix, template) = {
-                let guard = state().read().unwrap();
-                (
-                    guard.raw.language.string("PREFIX"),
-                    guard
-                        .raw
-                        .language
-                        .string("LEADERBOARDS.TYPE_DOESNT_EXIST"),
-                )
-            };
-            reply(sender, format!("{prefix}{}", utils::replace(&template, "<type>", metric)));
-            return;
-        }
-    };
-
-    let value_of = |faction: &Faction| -> i64 {
-        match metric.to_lowercase().as_str() {
-            "kills" => faction.kills as i64,
-            "balance" => faction.balance,
-            "koths" => faction.koths_capped as i64,
-            _ => faction.points as i64,
-        }
-    };
-
-    // Snapshot the entries + display names under one lock.
     let (header, title, line_format, footer, hover_template, entries) = {
         let guard = state().read().unwrap();
+
+        let Some(board) = crate::handlers::leaderboard::Board::from_faction_param(metric) else {
+            let message = utils::replace(
+                &guard.raw.language.string("LEADERBOARDS.TYPE_DOESNT_EXIST"),
+                "<type>",
+                metric,
+            );
+            let prefix = guard.raw.language.string("PREFIX");
+            drop(guard);
+            reply(sender, format!("{prefix}{message}"));
+            return;
+        };
+
+        if board.entries(&guard).is_empty() {
+            let prefix = guard.raw.language.string("PREFIX");
+            let message = guard.raw.language.string("LEADERBOARDS.NO_LEADERBOARDS");
+            drop(guard);
+            reply(sender, format!("{prefix}{message}"));
+            return;
+        }
+
         let viewer_faction = guard.factions.by_member(uuid).map(|f| f.id.clone());
 
-        let mut factions: Vec<&Faction> = guard
-            .factions
-            .player_factions()
-            .filter(|faction| value_of(faction) != 0)
-            .collect();
-        factions.sort_by(|a, b| value_of(b).cmp(&value_of(a)).then_with(|| a.name.cmp(&b.name)));
+        let entries: Vec<(String, String, i64)> = board
+            .entries(&guard)
+            .iter()
+            .map(|entry| {
+                // `FactionsManager#getFactionByUuid` + `Faction#getName(sender)`.
+                // A missing faction (stale row) falls back to the cached name,
+                // where the original would throw.
+                let faction = guard.factions.get(&entry.key);
+                let display = faction
+                    .map(|faction| {
+                        core::faction_display_name_guard(
+                            &guard,
+                            faction,
+                            viewer_faction.as_deref(),
+                            &guard.config.relation_colors,
+                        )
+                    })
+                    .unwrap_or_else(|| entry.name.clone());
+                let raw_name = faction
+                    .map(|faction| faction.name.clone())
+                    .unwrap_or_else(|| entry.name.clone());
 
-        let entries: Vec<(String, String, i64)> = factions
-            .into_iter()
-            .take(10)
-            .map(|faction| {
-                (
-                    core::faction_display_name_guard(
-                        &guard,
-                        faction,
-                        viewer_faction.as_deref(),
-                        &guard.config.relation_colors,
-                    ),
-                    faction.name.clone(),
-                    value_of(faction),
-                )
+                (display, raw_name, entry.value)
             })
             .collect();
 
         (
             guard.raw.language.string("LEADERBOARDS.COMMAND_HEADER"),
-            guard.raw.language.string(title_key),
-            guard.raw.language.string(format_key),
+            board.title(&guard),
+            board.line_format(&guard),
             guard.raw.language.string("LEADERBOARDS.COMMAND_FOOTER"),
             guard.raw.language.string("FACTIONS.SHOW_COMMAND.HOVER_TEXT"),
             entries,
         )
     };
-
-    if entries.is_empty() {
-        let (prefix, template) = {
-            let guard = state().read().unwrap();
-            (
-                guard.raw.language.string("PREFIX"),
-                guard.raw.language.string("LEADERBOARDS.NO_LEADERBOARDS"),
-            )
-        };
-        reply(sender, format!("{prefix}{template}"));
-        return;
-    }
 
     reply(sender, header);
     reply(sender, title);
@@ -2166,12 +2142,18 @@ fn transfer_balance(
                 return reply(sender, format!("{prefix}{msg}"));
             }
 
-            if let Some(user) = guard.userdata.get_mut(uuid) {
-                user.balance -= amount;
-            }
-            if let Some(faction) = guard.factions.get_mut(&id) {
-                faction.balance = (faction.balance + amount).min(max_balance);
-            }
+            // `Userdata#changeBalance` / `PlayerFaction#addBalance` (both fire
+            // their leaderboards).
+            crate::handlers::leaderboard::set_player_balance(
+                &mut guard,
+                uuid,
+                user_balance - amount,
+            );
+            crate::handlers::leaderboard::faction_set_balance(
+                &mut guard,
+                &id,
+                (faction_balance + amount).min(max_balance),
+            );
 
             messages = format!(
                 "{prefix}{}",
@@ -2188,12 +2170,16 @@ fn transfer_balance(
                 return reply(sender, format!("{prefix}{msg}"));
             }
 
-            if let Some(faction) = guard.factions.get_mut(&id) {
-                faction.balance -= amount;
-            }
-            if let Some(user) = guard.userdata.get_mut(uuid) {
-                user.balance = (user.balance + amount).min(max_balance);
-            }
+            crate::handlers::leaderboard::faction_set_balance(
+                &mut guard,
+                &id,
+                faction_balance - amount,
+            );
+            crate::handlers::leaderboard::set_player_balance(
+                &mut guard,
+                uuid,
+                (user_balance + amount).min(max_balance),
+            );
 
             messages = format!(
                 "{prefix}{}",
@@ -2694,6 +2680,8 @@ fn admin_force_rename(sender: &CommandSender, server: &Server, args: &ConsumedAr
     if let Some(faction) = guard.factions.get_mut(&id) {
         faction.name = new_name.clone();
     }
+    // `FactionRenameEvent` handling (`/f admin forceRename`).
+    crate::handlers::leaderboard::on_faction_renamed(&mut guard, &id);
     drop(guard);
 
     let message = utils::replace_all(
@@ -3631,9 +3619,8 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
         }
 
         guard.claims.add_claim(&id, claim.clone());
-        if let Some(faction) = guard.factions.get_mut(&id) {
-            faction.balance -= price;
-        }
+        // `PlayerFaction#removeBalance` (fires the faction balance leaderboard).
+        crate::handlers::leaderboard::faction_set_balance(&mut guard, &id, balance - price);
 
         let player_name = core::name_of(player);
         let msg = utils::replace_all(
@@ -4198,6 +4185,8 @@ fn admin_remove(sender: &CommandSender, server: &Server, args: &ConsumedArgs) {
         let mut guard = state().write().unwrap();
         guard.claims.remove_all(&id);
         guard.factions.disband(&id);
+        // `FactionDisbandEvent` handling (`/f admin disband`).
+        crate::handlers::leaderboard::on_faction_disbanded(&mut guard, &id);
     }
 
     reply(
@@ -4438,6 +4427,26 @@ fn admin_set_int(sender: &CommandSender, server: &Server, args: &ConsumedArgs, f
         )
     };
 
+    // `changePoints`/`changeBalance`/`changeKills` fire their leaderboards.
+    match field {
+        AdminField::Points => crate::handlers::leaderboard::refresh_faction(
+            &mut guard,
+            crate::handlers::leaderboard::Board::FactionPoints,
+            &id,
+        ),
+        AdminField::Balance => crate::handlers::leaderboard::refresh_faction(
+            &mut guard,
+            crate::handlers::leaderboard::Board::FactionBalance,
+            &id,
+        ),
+        AdminField::Kills => crate::handlers::leaderboard::refresh_faction(
+            &mut guard,
+            crate::handlers::leaderboard::Board::FactionKills,
+            &id,
+        ),
+        AdminField::Lives => {}
+    }
+
     let amount = amount.to_string();
     let sender_tpl = guard.raw.language.string(match field {
         AdminField::Points => "FACTIONS.SET_POINTS_COMMAND.CHANGED_SENDER",
@@ -4539,6 +4548,8 @@ fn admin_force_kick(sender: &CommandSender, server: &Server, args: &ConsumedArgs
         {
             guard.claims.remove_all(&faction_id);
             guard.factions.disband(&faction_id);
+            // `FactionDisbandEvent` handling (`/f admin forcekick`).
+            crate::handlers::leaderboard::on_faction_disbanded(&mut guard, &faction_id);
         }
 
         messages = (

@@ -24,16 +24,19 @@
 //!   computes its death drops (the death event fires first), so the vanilla
 //!   random equipment drops cannot duplicate the hand-out — the original
 //!   emptied `dropDeathLoot` for the same reason; the remaining vanilla loot
-//!   (bones/arrows) and the experience orbs of that death flow are cancelled
-//!   through `ItemSpawnEvent`/`EntitySpawnEvent` markers, replicating the
-//!   empty `dropDeathLoot` override and `expToDrop = 0`.
+//!   (bones/arrows) is cancelled through `ItemSpawnEvent` markers, replicating
+//!   the empty `dropDeathLoot` override. The experience orbs of that flow
+//!   (`expToDrop = 0` in the original) cannot be intercepted — the host
+//!   spawns them right after the death event and `EntitySpawnEvent` is off
+//!   limits (see `crate::hologram`) — so they are swept one and three ticks
+//!   after the death ([`sweep_vanilla_orbs`]).
 
 use std::sync::Mutex;
 
 use pumpkin_plugin_api::common::{BlockPos, Hand};
 use pumpkin_plugin_api::events::{
-    EntityDamageByEntityEvent, EntityDamageEvent, EntityDeathEvent, EntitySpawnEvent, EventData,
-    EventHandler, ItemSpawnEvent, PlayerLeaveEvent,
+    EntityDamageByEntityEvent, EntityDamageEvent, EntityDeathEvent, EventData, EventHandler,
+    ItemSpawnEvent, PlayerLeaveEvent,
 };
 use pumpkin_plugin_api::scheduler::SchedulerExt;
 use pumpkin_plugin_api::wit::pumpkin::plugin::status_effect::{
@@ -781,6 +784,10 @@ impl EventHandler<EntityDeathEvent> for CombatLoggerDeathListener {
             }
         }
         mark_vanilla_drop(&record.world, death_position);
+        // The orbs themselves appear after this handler returns (the loot
+        // `ItemSpawnEvent` marker cannot catch them), so sweep them shortly
+        // after.
+        schedule_orb_sweep(&server, &record.world, death_position);
 
         freeze_effects(&mut record);
 
@@ -853,8 +860,8 @@ impl EventHandler<EntityDeathEvent> for CombatLoggerDeathListener {
             // (= addDeath + addLastDeath) plus the silent killstreak reset.
             entry = format!("{date} - {}", reason.replace('§', "&"));
 
+            crate::handlers::leaderboard::add_death(&mut guard, &uuid, entry.clone());
             if let Some(user) = guard.userdata.get_mut(&uuid) {
-                user.add_death(entry.clone());
                 user.reset_killstreak();
                 // `die()` clears the offline inventory; the wipe is applied on
                 // the next join (offline data is not writable).
@@ -863,22 +870,23 @@ impl EventHandler<EntityDeathEvent> for CombatLoggerDeathListener {
 
             if let Some(killer_uuid) = &killer_uuid {
                 // `updateKillStats(reason)`.
-                if let Some(user) = guard.userdata.get_mut(killer_uuid) {
-                    user.add_kill(entry.clone());
-                }
+                crate::handlers::leaderboard::add_kill(&mut guard, killer_uuid, entry.clone());
 
                 // `KillstreakHandler#checkKillerKillstreak`.
                 if config.kitmap.enabled && config.kitmap.killstreak_enabled {
-                    if let Some(user) = guard.userdata.get_mut(killer_uuid) {
-                        user.add_killstreak();
-                        let streak = user.killstreak;
-                        if let Some(commands) = config.kitmap.killstreak_rewards.get(&streak) {
-                            killer_streak_reward = Some((
-                                killer_name.clone().unwrap_or_default(),
-                                streak,
-                                commands.clone(),
-                            ));
-                        }
+                    crate::handlers::leaderboard::add_killstreak(&mut guard, killer_uuid);
+                    let streak = guard
+                        .userdata
+                        .get(killer_uuid)
+                        .map(|user| user.killstreak)
+                        .unwrap_or(0);
+
+                    if let Some(commands) = config.kitmap.killstreak_rewards.get(&streak) {
+                        killer_streak_reward = Some((
+                            killer_name.clone().unwrap_or_default(),
+                            streak,
+                            commands.clone(),
+                        ));
                     }
                 }
 
@@ -889,12 +897,11 @@ impl EventHandler<EntityDeathEvent> for CombatLoggerDeathListener {
                     .by_member(killer_uuid)
                     .map(|faction| faction.id.clone())
                 {
-                    if let Some(faction) = guard.factions.get_mut(&faction_id) {
-                        faction.increment_points(
-                            config.factions.points_per_kill as i32,
-                            config.factions.allow_negative_points,
-                        );
-                    }
+                    crate::handlers::leaderboard::faction_increment_points(
+                        &mut guard,
+                        &faction_id,
+                        config.factions.points_per_kill as i32,
+                    );
                 }
             }
 
@@ -1036,21 +1043,47 @@ fn is_skeleton_loot(item_name: &str) -> bool {
 }
 
 /// The original entity's `expToDrop` was 0, so the `get_experience_reward`
-/// hand-out of the host's death flow is swallowed too.
-pub struct CombatLoggerExpListener;
+/// hand-out of the host's death flow is removed too.
+///
+/// The orbs are spawned by the host right after the death event returns, and
+/// `EntitySpawnEvent` cannot be used to cancel them (registering it deadlocks
+/// the host when the plugin spawns entities — see `crate::hologram`), so a
+/// delayed sweep clears them instead. Two sweeps cover a heavily loaded tick:
+/// one right after the death, one after the orbs have been pulled around.
+fn schedule_orb_sweep(server: &Server, world: &str, position: (f64, f64, f64)) {
+    let first_world = world.to_string();
+    server.schedule_delayed_task(1, move |server| {
+        sweep_vanilla_orbs(&server, &first_world, position);
+    });
 
-impl EventHandler<EntitySpawnEvent> for CombatLoggerExpListener {
-    fn handle(
-        &self,
-        _server: Server,
-        mut event: EventData<EntitySpawnEvent>,
-    ) -> EventData<EntitySpawnEvent> {
-        if core::entity_type_name(&event.entity_type) == Some("experience_orb")
-            && is_vanilla_logger_drop(Some(&event.target_world.get_name()), event.position)
-        {
-            event.cancelled = true;
+    let second_world = world.to_string();
+    server.schedule_delayed_task(3, move |server| {
+        sweep_vanilla_orbs(&server, &second_world, position);
+    });
+}
+
+/// Removes the experience orbs near a dead logger's drop position.
+///
+/// The radius matches [`is_vanilla_logger_drop`]; the orbs keep their spawn
+/// position for the first ticks (player attraction is slow), so the sweep only
+/// catches the death's own reward.
+fn sweep_vanilla_orbs(server: &Server, world_name: &str, position: (f64, f64, f64)) {
+    let Some(world) = server.get_world_by_name(world_name) else {
+        return;
+    };
+
+    for entity in world.get_entities() {
+        if entity.get_type() != EntityType::ExperienceOrb {
+            continue;
         }
-        event
+
+        let orb = entity.get_position();
+        let dx = orb.0 - position.0;
+        let dy = orb.1 - position.1;
+        let dz = orb.2 - position.2;
+        if dx * dx + dy * dy + dz * dz <= 2.25 {
+            entity.remove();
+        }
     }
 }
 

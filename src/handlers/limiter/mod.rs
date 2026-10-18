@@ -4,7 +4,8 @@
 //!
 //! * [`EnchantTableListener`] / [`AnvilClickListener`] — `EnchantLimiterHandler`.
 //! * [`PotionConsumeListener`] / [`BrewListener`] — `PotionLimiterHandler`.
-//! * [`EntitySpawnLimiterListener`] — `EntityLimiterHandler`.
+//! * [`enforce_disabled_entities`] — the disabled-entity half of
+//!   `EntityLimiterHandler`.
 //!
 //! `limiters.yml` values are parsed once and cached; [`reload`] drops the cache
 //! and is called by `/lazarus reload` (the original kept the startup values
@@ -38,13 +39,16 @@
 //! * Splash potions are denied in `PlayerItemConsumeEvent`, before the throw
 //!   exists (the host has no splash event with an item): identical outcome for
 //!   players, but potions thrown by dispensers/witches are not limited.
+//! * Disabling an entity is enforced by a one-second sweep that removes the
+//!   disabled entities from the world (the original cancelled their
+//!   `EntitySpawnEvent`, and its `VehicleCreateEvent` companion removed the
+//!   vehicle the same way). The event cannot be used here: registering
+//!   `EntitySpawnEvent` deadlocks the host when the plugin spawns entities
+//!   (see `crate::hologram`), and natural mob spawns do not reach the plugin
+//!   anyway. The one-second flash is the deviation this buys.
 //! * `MOBS_SPAWN_ONLY_FROM_SPAWNERS` and `MOB_LIMIT_PER_CHUNK` are not
 //!   enforceable through the plugin API: natural mob spawns fire no events
 //!   (no `CreatureSpawnEvent`, no spawn reason, no chunk entity query).
-//! * Disabling an entity cancels its `EntitySpawnEvent`; the original's
-//!   `VehicleCreateEvent` companion is not needed because the host ignores
-//!   that event's cancellation and vehicles do reach `EntitySpawnEvent`.
-//!   Natural mob spawns bypass both events on this host (host limitation).
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -54,13 +58,13 @@ use pumpkin_plugin_api::common::{BlockPos, Hand};
 use pumpkin_plugin_api::data_components::DataComponent;
 use pumpkin_plugin_api::enchantments_wit::Enchantment;
 use pumpkin_plugin_api::events::{
-    BrewEvent, EnchantItemEvent, EntitySpawnEvent, EventData, EventHandler, InventoryClickEvent,
+    BrewEvent, EnchantItemEvent, EventData, EventHandler, InventoryClickEvent,
     PlayerItemConsumeEvent,
 };
 use pumpkin_plugin_api::scheduler::SchedulerExt;
 use pumpkin_plugin_api::text::TextComponent;
 use pumpkin_plugin_api::wit::pumpkin::plugin::status_effect::StatusEffectType;
-use pumpkin_plugin_api::{ItemStack, Player, Screen, Server, World};
+use pumpkin_plugin_api::{EntityType, ItemStack, Player, Screen, Server, World};
 
 use crate::utils::potion_components;
 use crate::state::state;
@@ -922,36 +926,39 @@ fn modern_effect(name: &str) -> Option<StatusEffectType> {
 // Entity limiter
 // ---------------------------------------------------------------------------
 
-/// `EntityLimiterHandler#onEntitySpawn`: disabled entities never spawn.
+/// `EntityLimiterHandler#onEntitySpawn` + `#onVehicleCreate`: removes the
+/// entities listed as disabled in `limiters.yml` from every world. Called by
+/// the one-second tick.
 ///
-/// The host sends the numeric registry id, resolved through
-/// [`core::entity_type_name`]. `CreatureSpawnEvent` is never fired by the
-/// host, so the spawn-reason/chunk-limit checks of the original are not
-/// reachable (see the module docs).
-pub struct EntitySpawnLimiterListener;
+/// The host sends the numeric registry id through `EntitySpawnEvent`; the
+/// world entity list carries the typed [`EntityType`] instead, resolved
+/// through [`core::entity_type_key`]. Players are never touched (the original
+/// could list `player` harmlessly; the sweep must not). `CreatureSpawnEvent`
+/// is never fired by the host, so the spawn-reason/chunk-limit checks of the
+/// original are not reachable (see the module docs).
+pub fn enforce_disabled_entities(server: &Server) {
+    let disabled = with_limits(|limits| limits.entities.clone());
+    if disabled.is_empty() {
+        return;
+    }
 
-impl EventHandler<EntitySpawnEvent> for EntitySpawnLimiterListener {
-    fn handle(
-        &self,
-        _server: Server,
-        mut event: EventData<EntitySpawnEvent>,
-    ) -> EventData<EntitySpawnEvent> {
-        if entity_disabled(&event.entity_type) {
-            event.cancelled = true;
+    for world in server.get_all_worlds() {
+        for entity in world.get_entities() {
+            let entity_type = entity.get_type();
+            if entity_type == EntityType::Player {
+                continue;
+            }
+            let name = core::entity_type_key(&entity_type);
+            if entity_disabled(&disabled, &name) {
+                entity.remove();
+            }
         }
-        event
     }
 }
 
-fn entity_disabled(raw_type: &str) -> bool {
-    let Some(name) = core::entity_type_name(raw_type) else {
-        return false;
-    };
-
-    with_limits(|limits| {
-        limits.entities.iter().any(|disabled| {
-            // The 1.8 `EntityType.BOAT` had no per-wood subtypes.
-            name == disabled.as_str() || (disabled == "boat" && name.ends_with("_boat"))
-        })
+fn entity_disabled(disabled: &[String], name: &str) -> bool {
+    disabled.iter().any(|candidate| {
+        // The 1.8 `EntityType.BOAT` had no per-wood subtypes.
+        name == candidate.as_str() || (candidate == "boat" && name.ends_with("_boat"))
     })
 }
