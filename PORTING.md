@@ -121,7 +121,14 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   never reached, so `commands::present_string_arg` maps `Some("")` back to
   "missing" (numeric args already failed to parse and were unaffected).
 * **Claims are still rectangles**, but a `chunk -> faction` index is maintained so
-  `territory_at(world, x, z)` is O(1) instead of scanning every claim.
+  `territory_at(world, x, z)` is O(1) instead of scanning every claim. The
+  territory-entry check keeps the last *block position* per player (the original
+  reads `event.getFrom()`), so a claim that is not chunk-aligned announces once
+  per crossing instead of re-announcing on every move inside its edge chunks.
+* **The sidebar refreshes at the original's 100 ms cadence**
+  (`ScoreboardUpdaterImpl`'s fixed-rate loop, ported as a 2-tick task) and every
+  row is diffed against the last one sent (`PlayerScoreboard_1_8#update`'s entry
+  cache), so unchanged rows cost no packets.
 * **Single-chunk claiming** is replaced by the original **selection wand**: `/f claim`
   gives a golden-hoe wand; left/right click set positions, sneak + left-click buys.
   Selection pillars and claim maps are rendered entirely client-side (`glass.rs`).

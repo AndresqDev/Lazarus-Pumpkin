@@ -3,7 +3,8 @@
 //!
 //! Consolidates the various Lazarus `Tasks` / `Timer` / `GlassUpdater` /
 //! `TabUpdater` scheduler loops into a single 1-second tick (glass walls are
-//! refreshed twice per second via a second task) scheduled through Pumpkin.
+//! refreshed twice per second and the sidebar at the original's 100 ms cadence
+//! via separate tasks) scheduled through Pumpkin.
 
 use pumpkin_plugin_api::scheduler::SchedulerExt;
 use pumpkin_plugin_api::{Context, Player, Server};
@@ -24,6 +25,14 @@ const JOIN_TELEPORT_DELAY_TICKS: u32 = 20;
 /// Starts the repeating tasks (called from `on_load`).
 pub fn start(context: &Context) {
     context.schedule_repeating_task(20, 20, |server| tick(&server));
+    // Sidebar scoreboard: the original refreshes it from a 100 ms fixed-rate
+    // loop (`ScoreboardUpdaterImpl`); the render diffs rows, so untouched
+    // sidebars cost no packets.
+    context.schedule_repeating_task(2, 2, |server| {
+        for player in server.get_all_players() {
+            scoreboard::update(&player, &server);
+        }
+    });
     // Re-send fake blocks that were broken/placed over (next tick, after the
     // server's own block update has been applied). The same per-tick pass
     // fires the deferred join teleports.
@@ -159,7 +168,6 @@ fn tick(server: &Server) {
     crate::handlers::limiter::enforce_disabled_entities(server);
 
     for player in server.get_all_players() {
-        scoreboard::update(&player, server);
         tab::update(&player, server);
     }
 

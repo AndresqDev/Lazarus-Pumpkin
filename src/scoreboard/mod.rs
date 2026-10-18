@@ -21,6 +21,14 @@ const SLOTS: usize = 15;
 
 /// Creates the sidebar objective and its line teams for a player.
 pub fn setup(player: &Player) {
+    // Invalidate the render diff: the teams below are re-created with empty
+    // prefixes, so the next update has to send every row again.
+    state()
+        .write()
+        .unwrap()
+        .scoreboard_cache
+        .remove(&utils::core::uuid_of(player));
+
     let title = {
         let guard = state().read().unwrap();
         guard.sidebar.title.clone()
@@ -45,15 +53,24 @@ pub fn setup(player: &Player) {
     }
 }
 
-/// Rebuilds and renders the sidebar for a player (called once per second).
+/// Rebuilds and renders the sidebar for a player. Runs every 2 ticks — the
+/// original `ScoreboardUpdaterImpl` loops at a 100 ms fixed rate — and sends
+/// only the rows that changed, like `PlayerScoreboard_1_8#update`'s entry
+/// cache.
 pub fn update(player: &Player, server: &Server) {
+    // The sidebar is a Java-only surface.
+    if player.as_java().is_none() {
+        return;
+    }
+
+    let uuid = crate::utils::core::uuid_of(player);
+
     let lines = {
         let guard = state().read().unwrap();
         if !guard.sidebar.enabled {
             return;
         }
 
-        let uuid = crate::utils::core::uuid_of(player);
         let Some(user) = guard.userdata.get(&uuid) else {
             return;
         };
@@ -64,20 +81,42 @@ pub fn update(player: &Player, server: &Server) {
         build_lines(&guard, player, server, &uuid)
     };
 
-    render(player, &lines);
+    let previous = {
+        let guard = state().read().unwrap();
+        guard.scoreboard_cache.get(&uuid).cloned()
+    };
+    if previous.as_deref() == Some(lines.as_slice()) {
+        return;
+    }
+
+    render(player, previous.as_deref(), &lines);
+
+    state()
+        .write()
+        .unwrap()
+        .scoreboard_cache
+        .insert(uuid, lines);
 }
 
-fn render(player: &Player, lines: &[String]) {
+fn render(player: &Player, previous: Option<&[String]>, lines: &[String]) {
     let Some(java) = player.as_java() else {
         return;
     };
     let board = java.get_scoreboard();
 
     for slot in 0..SLOTS {
+        let old = previous.and_then(|p| p.get(slot));
+        let new = lines.get(slot);
+        // Untouched rows cost no packets (`PlayerScoreboard_1_8#update`
+        // compares against its `entryCache` the same way).
+        if old == new {
+            continue;
+        }
+
         let team = team_name(slot);
         let entry = entry_name(slot);
 
-        match lines.get(slot) {
+        match new {
             Some(line) => {
                 board.update_team(&team, team_settings(line));
                 board.add_player_to_team(&team, &entry);
@@ -95,6 +134,12 @@ fn render(player: &Player, lines: &[String]) {
 
 /// Removes the sidebar from a player (called on quit / when disabled).
 pub fn teardown(player: &Player) {
+    state()
+        .write()
+        .unwrap()
+        .scoreboard_cache
+        .remove(&utils::core::uuid_of(player));
+
     let Some(java) = player.as_java() else {
         return;
     };

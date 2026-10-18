@@ -287,13 +287,13 @@ fn check_movement(
             _ => {}
         }
 
-        // `ClaimManager#getFactionAt(from/to)`. The cached chunk (kept in sync by
-        // moves and teleports) is the origin so teleports announce correctly; the
-        // event origin is the fallback for the first move after a join.
+        // `ClaimManager#getFactionAt(from/to)`. The cached *block position* (kept
+        // in sync by moves and teleports) is the origin so teleports announce
+        // correctly; the event origin is the fallback for the first move after a
+        // join. (Deriving it from the cached chunk's corner re-announces on
+        // every move inside a block-precise, non-chunk-aligned claim.)
         let from_territory = match guard.chunk_cache.get(uuid) {
-            Some(cached) => {
-                core::territory_at_guard(&guard, &cached.world, cached.cx * 16, cached.cz * 16)
-            }
+            Some(cached) => core::territory_at_guard(&guard, &cached.world, cached.x, cached.z),
             None => core::territory_at_guard(&guard, world, fx.floor() as i32, fz.floor() as i32),
         };
         let to_territory =
@@ -337,11 +337,14 @@ fn check_movement(
             announce = Some((leaving, entering));
         }
 
-        // Remember the latest position for the next check (and teleports).
-        let (cx, cz) = utils::chunk_key(tx.floor() as i32, tz.floor() as i32);
+        // Remember the latest block position for the next check (and teleports).
         guard.chunk_cache.insert(
             uuid.to_string(),
-            ChunkState { world: world.to_string(), cx, cz, territory: to_territory },
+            ChunkState {
+                world: world.to_string(),
+                x: tx.floor() as i32,
+                z: tz.floor() as i32,
+            },
         );
 
         (home_message, stuck_message, logout_message, announce)

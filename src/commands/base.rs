@@ -168,8 +168,9 @@ pub(crate) fn toggle(player: &Player, toggle: Toggle) {
     };
 
     // The original's updater cleared the board every cycle and re-rendered only
-    // when the setting was on; the port renders once per second, so the change
-    // is applied to the live board right away.
+    // when the setting was on; the port re-renders on its 100 ms loop, so the
+    // change is applied to the live board right away (setup/teardown also drop
+    // the render diff).
     if matches!(toggle, Toggle::Scoreboard) {
         if value {
             scoreboard::setup(player);

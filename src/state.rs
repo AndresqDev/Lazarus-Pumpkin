@@ -154,10 +154,13 @@ pub struct AppState {
     pub rank_revives: Vec<crate::handlers::rank::RankReviveEntry>,
     /// `ONLINE_RANK_ANNOUNCER` entries, parsed once at startup.
     pub rank_announcements: Vec<crate::handlers::rank::RankAnnouncementEntry>,
-    /// Transient: last chunk each player occupied, for territory-entry messages.
+    /// Transient: last block position each player occupied, for territory-entry
+    /// messages.
     pub chunk_cache: std::collections::BTreeMap<String, ChunkState>,
     /// Transient: last tab lines sent per viewer (for the packet-based tab list).
     pub tab_cache: std::collections::BTreeMap<String, Vec<String>>,
+    /// Transient: last sidebar rows sent per viewer (render diff).
+    pub scoreboard_cache: std::collections::BTreeMap<String, Vec<String>>,
     /// Transient: world name -> (spawn x, spawn z), used to centre the warzone.
     pub spawn_centers: std::collections::BTreeMap<String, (i32, i32)>,
     /// Transient: protected players to eject on the next tick (they respawned
@@ -248,14 +251,16 @@ pub struct PendingLoggerRemoval {
     pub expires: i64,
 }
 
-/// Tracks a player's last known chunk + the territory there (identity, so the
-/// claim announcements compare factions like the original).
+/// Tracks the block position a player last stood on, for the territory-entry
+/// messages. The original reads `event.getFrom()`; caching the last processed
+/// position keeps the announcements correct when the host reports a stale
+/// origin right after teleports. Block-precise because claims are rectangles,
+/// not whole chunks.
 #[derive(Debug, Clone, Default)]
 pub struct ChunkState {
     pub world: String,
-    pub cx: i32,
-    pub cz: i32,
-    pub territory: crate::utils::core::Territory,
+    pub x: i32,
+    pub z: i32,
 }
 
 static STATE: OnceLock<RwLock<AppState>> = OnceLock::new();
@@ -345,6 +350,7 @@ pub fn init(data_folder: String) -> Result<(), String> {
             rank_announcements,
             chunk_cache: std::collections::BTreeMap::new(),
             tab_cache: std::collections::BTreeMap::new(),
+            scoreboard_cache: std::collections::BTreeMap::new(),
             spawn_centers: std::collections::BTreeMap::new(),
             protection_ejects: std::collections::BTreeSet::new(),
             respawn_fixes: std::collections::BTreeSet::new(),
