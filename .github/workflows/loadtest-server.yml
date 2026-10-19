@@ -292,7 +292,9 @@ jobs:
           echo '--- config final ---'
           grep -vE '^\s*#|^\s*$' velocity.toml | head -50
 
-          nohup java -Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -XX:+ParallelRefProcEnabled \
+          nohup java -Xms1g -Xmx1g -XX:+UseG1GC -XX:G1HeapRegionSize=4M \
+            -XX:+UnlockExperimentalVMOptions -XX:+ParallelRefProcEnabled \
+            -XX:+AlwaysPreTouch -XX:MaxInlineLevel=15 \
             -jar velocity.jar > velocity.log 2>&1 &
           VELOCITY_PID=$!
           echo "VELOCITY_PID=$VELOCITY_PID" >> "$GITHUB_ENV"
