@@ -1,0 +1,110 @@
+name: Loadtest
+
+# Prueba de carga distribuida con Mineflayer.
+# Se dispara a mano (workflow_dispatch) y reparte los bots entre 4 runners.
+# Los bots NO usan RCON: la métrica del server se recolecta del lado del VPS.
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: 'IP/host del server de prueba'
+        required: true
+        default: '129.213.99.222'
+      port:
+        description: 'Puerto'
+        required: true
+        default: '25565'
+      total:
+        description: 'Total de bots (se reparte entre 4 shards)'
+        required: true
+        default: '100'
+      warmup:
+        description: 'Segundos de warmup (conexión + pathfinding)'
+        required: true
+        default: '45'
+      duration:
+        description: 'Segundos de ventana de medición'
+        required: true
+        default: '90'
+      prefix:
+        description: 'Prefijo de nombres de los bots'
+        required: true
+        default: 'Perf'
+      version:
+        description: 'Versión de cliente Minecraft'
+        required: true
+        default: '1.8.9'
+
+concurrency:
+  group: loadtest
+  cancel-in-progress: false
+
+jobs:
+  shard:
+    name: bots shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      HOST: ${{ github.event.inputs.host }}
+      PORT: ${{ github.event.inputs.port }}
+      TOTAL: ${{ github.event.inputs.total }}
+      WARMUP: ${{ github.event.inputs.warmup }}
+      DURATION: ${{ github.event.inputs.duration }}
+      PREFIX: ${{ github.event.inputs.prefix }}
+      VERSION: ${{ github.event.inputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: loadtest/package-lock.json
+
+      - name: Instalar dependencias
+        working-directory: loadtest
+        run: npm ci --no-audit --no-fund
+
+      - name: Calcular reparto del shard
+        id: calc
+        shell: bash
+        run: |
+          PER=$(( (TOTAL + 3) / 4 ))
+          START=$(( ${{ matrix.shard }} * PER + 1 ))
+          echo "per=$PER" >> "$GITHUB_OUTPUT"
+          echo "start=$START" >> "$GITHUB_OUTPUT"
+          echo "shard ${{ matrix.shard }}: $PER bots desde ${PREFIX}${START}"
+
+      - name: Generar carga
+        working-directory: loadtest
+        shell: bash
+        run: |
+          node shard.js \
+            --host "$HOST" \
+            --port "$PORT" \
+            --count "${{ steps.calc.outputs.per }}" \
+            --startIndex "${{ steps.calc.outputs.start }}" \
+            --shard "${{ matrix.shard }}" \
+            --workers 4 \
+            --warmup "$WARMUP" \
+            --duration "$DURATION" \
+            --prefix "$PREFIX" \
+            --version "$VERSION" \
+            2>&1 | tee "shard-${{ matrix.shard }}.log"
+
+      - name: Subir log del shard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-shard-${{ matrix.shard }}
+          path: loadtest/shard-${{ matrix.shard }}.log
+          retention-days: 7
+          if-no-files-found: warn
