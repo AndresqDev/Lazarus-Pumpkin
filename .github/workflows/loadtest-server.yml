@@ -88,28 +88,45 @@ jobs:
 
       - name: Iniciar Pumpkin + ViaProxy
         run: |
-          set -euo pipefail
+          set -uo pipefail
           cd server
+
+          TS_IP=$(tailscale ip -4 | head -1)
+          echo "TAILSCALE_IP=${TS_IP}"
 
           nohup ./pumpkin > pumpkin.log 2>&1 &
           PUMPKIN_PID=$!
           echo "PUMPKIN_PID=$PUMPKIN_PID" >> "$GITHUB_ENV"
-          for _ in $(seq 1 90); do
-            if (exec 3<>/dev/tcp/127.0.0.1/25566) 2>/dev/null; then break; fi
+
+          ready=0
+          for _ in $(seq 1 120); do
+            if ! kill -0 "$PUMPKIN_PID" 2>/dev/null; then break; fi
+            if python3 ../loadtest/server/rcon.py tps lazarus-test 127.0.0.1 25575 >/dev/null 2>&1; then ready=1; break; fi
             sleep 2
           done
-          grep -q "Started server" pumpkin.log || { echo "Pumpkin no arranco"; tail -60 pumpkin.log; exit 1; }
-          echo "--- plugins cargados ---"
-          grep -iE "lazarus|plugin" pumpkin.log | head -10 || true
+          if [ "$ready" != "1" ]; then
+            echo "ERROR: Pumpkin no respondio por RCON"; tail -80 pumpkin.log; exit 1
+          fi
+          for _ in $(seq 1 30); do
+            grep -q "Started server" pumpkin.log && break
+            sleep 2
+          done
+          echo "--- Pumpkin listo ---"
+          grep -iE "Started server|lazarus|kitmap|plugin" pumpkin.log | tail -12 || true
 
           nohup java -jar "${VIAPROXY_JAR}" config viaproxy.yml > viaproxy.log 2>&1 &
           VIAPROXY_PID=$!
           echo "VIAPROXY_PID=$VIAPROXY_PID" >> "$GITHUB_ENV"
+          vready=0
           for _ in $(seq 1 90); do
-            if (exec 3<>/dev/tcp/127.0.0.1/25565) 2>/dev/null; then break; fi
+            if ! kill -0 "$VIAPROXY_PID" 2>/dev/null; then break; fi
+            if (exec 3<>/dev/tcp/127.0.0.1/25565) 2>/dev/null; then vready=1; break; fi
             sleep 2
           done
-          grep -q "ViaProxy started successfully" viaproxy.log || { echo "ViaProxy no arranco"; tail -60 viaproxy.log; exit 1; }
+          if [ "$vready" != "1" ]; then
+            echo "ERROR: ViaProxy no abrio 25565"; tail -80 viaproxy.log; exit 1
+          fi
+          echo "--- ViaProxy listo ---"
 
           echo "--- rcon ---"
           python3 ../loadtest/server/rcon.py list lazarus-test 127.0.0.1 25575 || true
@@ -119,7 +136,6 @@ jobs:
             nohup python3 ../loadtest/server/sampler.py --out sampler.csv --interval 5 > sampler.log 2>&1 &
           echo "SAMPLER_PID=$!" >> "$GITHUB_ENV"
 
-          TS_IP=$(tailscale ip -4 | head -1)
           {
             echo "## Loadtest server listo"
             echo ""
