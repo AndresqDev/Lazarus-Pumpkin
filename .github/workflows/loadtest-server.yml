@@ -98,18 +98,11 @@ jobs:
           chmod +x server/pumpkin
           cp loadtest/server/pumpkin.toml server/pumpkin.toml
           sed -i "s|^motd = .*|motd = \"${MOTD}\"|" server/pumpkin.toml
-          # Config del plugin SOLO para loadtest: sin deathban. NO fijamos
-          # WORLD_SPAWN: su teleport de first-join bloquea el tick con los
-          # clientes 1.8.9 (ViaRewind) y congela el mundo. El spawn seguro se
-          # fija en el host por RCON (setworldspawn) antes de los bots.
-          mkdir -p server/plugins/data/lazarus
-          cp original-configs/config.yml server/plugins/data/lazarus/config.yml
-          cp original-configs/utilities.yml server/plugins/data/lazarus/utilities.yml
-          sed -i '/^DEATHBAN:/,/^DEFAULT_LIVES:/ s/^  ENABLED: true/  ENABLED: false/' \
-            server/plugins/data/lazarus/config.yml
-          echo '--- plugin loadtest config ---'
-          grep -A2 '^DEATHBAN:' server/plugins/data/lazarus/config.yml
-          grep '^WORLD_SPAWN' server/plugins/data/lazarus/utilities.yml
+          # Dejar que el plugin cree su config default. Inyectar una config
+          # con DEATHBAN.ENABLED=false congela el tick en los joins (bug
+          # reproducido en B3/B4/B5/B6). El deathban queda ON; el join ya
+          # resuelve un spawn seguro (y=79) y el monitor aplica resistencia
+          # antes de move/fight para que no haya muertes.
           # Con Velocity, la compresion la hace solo el proxy (FAQ oficial):
           # el backend no debe comprimir para no obligar al proxy a descomprimir/recomprimir.
           if [ "${PROXY_KIND:-velocity}" != "viaproxy" ]; then
