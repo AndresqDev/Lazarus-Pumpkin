@@ -319,7 +319,7 @@ jobs:
             echo "WARN: ViaVersion no aparece en el log de Velocity"
           fi
 
-          VELOCITY_PID=$VELOCITY_PID \
+          VELOCITY_PID=$VELOCITY_PID VIAPROXY_PID=$VELOCITY_PID \
             nohup python3 ../loadtest/server/sampler.py --no-rcon --out velocity.csv --interval 5 > sampler.log 2>&1 &
           echo "SAMPLER_PID=$!" >> "$GITHUB_ENV"
 
