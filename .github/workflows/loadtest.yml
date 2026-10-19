@@ -43,6 +43,10 @@ on:
         description: 'Unirse al tailnet antes de conectar (host = IP Tailscale)'
         required: true
         default: 'false'
+      joinSpacing:
+        description: 'ms entre joins de cada worker (mas alto = menos thundering herd)'
+        required: true
+        default: '1500'
 
 concurrency:
   group: loadtest
@@ -66,6 +70,7 @@ jobs:
       PREFIX: ${{ github.event.inputs.prefix }}
       VERSION: ${{ github.event.inputs.version }}
       PHASES: ${{ github.event.inputs.phases }}
+      JOIN_SPACING: ${{ github.event.inputs.joinSpacing }}
 
     steps:
       - name: Checkout
@@ -123,6 +128,7 @@ jobs:
             --startIndex "${{ steps.calc.outputs.start }}" \
             --shard "${{ matrix.shard }}" \
             --workers 4 \
+            --joinSpacing "${JOIN_SPACING:-1500}" \
             $EXTRA \
             --prefix "$PREFIX" \
             --version "$VERSION" \
