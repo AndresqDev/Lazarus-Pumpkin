@@ -92,6 +92,20 @@ jobs:
           chmod +x server/pumpkin
           cp loadtest/server/pumpkin.toml server/pumpkin.toml
           sed -i "s|^motd = .*|motd = \"${MOTD}\"|" server/pumpkin.toml
+          # Config del plugin SOLO para loadtest: sin deathban y con WORLD_SPAWN
+          # fijo. El host resuelve el spawn a y=200 cuando los chunks aun no
+          # estan cargados; eso hacia que los bots cayeran y el deathban los
+          # expulsara en bucle. El spawn real del mundo es (103, ~79, -317).
+          mkdir -p server/plugins/data/lazarus
+          cp original-configs/config.yml server/plugins/data/lazarus/config.yml
+          cp original-configs/utilities.yml server/plugins/data/lazarus/utilities.yml
+          sed -i '/^DEATHBAN:/,/^DEFAULT_LIVES:/ s/^  ENABLED: true/  ENABLED: false/' \
+            server/plugins/data/lazarus/config.yml
+          sed -i 's#^WORLD_SPAWN: .*#WORLD_SPAWN: "world|103.5|79|-316.5|0|0"#' \
+            server/plugins/data/lazarus/utilities.yml
+          echo '--- plugin loadtest config ---'
+          grep -A2 '^DEATHBAN:' server/plugins/data/lazarus/config.yml
+          grep '^WORLD_SPAWN' server/plugins/data/lazarus/utilities.yml
           # Con Velocity, la compresion la hace solo el proxy (FAQ oficial):
           # el backend no debe comprimir para no obligar al proxy a descomprimir/recomprimir.
           if [ "${PROXY_KIND:-velocity}" != "viaproxy" ]; then
@@ -140,6 +154,9 @@ jobs:
           echo "--- rcon ---"
           python3 ../loadtest/server/rcon.py list lazarus-test 127.0.0.1 25575 || true
           python3 ../loadtest/server/rcon.py tps lazarus-test 127.0.0.1 25575 || true
+          # Spawn del host seguro (ademas del WORLD_SPAWN del plugin).
+          python3 ../loadtest/server/rcon.py "setworldspawn 103 78 -317" \
+            lazarus-test 127.0.0.1 25575 || true
 
           PUMPKIN_PID=$PUMPKIN_PID \
             nohup python3 ../loadtest/server/sampler.py --out sampler.csv --interval 5 > sampler.log 2>&1 &
@@ -193,6 +210,8 @@ jobs:
             server/sampler.csv
             server/sampler.log
             server/pumpkin.toml
+            server/plugins/data/lazarus/config.yml
+            server/plugins/data/lazarus/utilities.yml
           if-no-files-found: warn
           retention-days: 7
 
