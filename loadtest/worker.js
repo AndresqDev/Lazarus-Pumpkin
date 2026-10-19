@@ -9,13 +9,13 @@ const { GoalXZ } = goals;
 
 const cfg = JSON.parse(process.argv[2]);
 const bots = [];
-const stats = { deaths: 0, attacks: 0, errors: 0, kicks: 0, reached: 0, stuck: 0 };
+const stats = { deaths: 0, attacks: 0, errors: 0, kicks: 0, reached: 0, stuck: 0, reconnects: 0, disconnects: 0 };
 const startedAt = Date.now();
 let shuttingDown = false;
 
 const log = (...args) => console.log(`[w${cfg.worker}]`, ...args);
 
-function createBot(index) {
+function createBot(index, attempt = 0) {
   const username = `${cfg.prefix}${String(index).padStart(2, '0')}`;
   const bot = mineflayer.createBot({
     host: cfg.host,
@@ -106,7 +106,19 @@ function createBot(index) {
     log('kicked', username, JSON.stringify(reason).slice(0, 140));
   });
   bot.on('end', (reason) => {
-    if (!shuttingDown) log('end', username, reason);
+    clearInterval(st.timer);
+    const pos = bots.indexOf(bot);
+    if (pos >= 0) bots.splice(pos, 1);
+    if (shuttingDown) return;
+    stats.disconnects++;
+    const maxReconnects = cfg.maxReconnects || 10;
+    if (attempt < maxReconnects) {
+      stats.reconnects++;
+      log('reconnect', username, `intento ${attempt + 1}/${maxReconnects}`, 'motivo', reason);
+      setTimeout(() => { if (!shuttingDown) createBot(index, attempt + 1); }, 2500 + Math.random() * 2500);
+    } else {
+      log('end', username, reason);
+    }
   });
 
   st.timer = setInterval(() => {
@@ -133,6 +145,7 @@ function createBot(index) {
     for (const e of Object.values(bot.entities)) {
       if (!e || e === bot.entity) continue;
       if (!e.username || !e.username.startsWith(cfg.prefix)) continue;
+      if (e.isValid === false) continue;
       if (e.health !== undefined && e.health <= 0) continue;
       const d = e.position.distanceTo(pos);
       if (d < bestDist) {
@@ -200,8 +213,9 @@ function createBot(index) {
 }
 
 // Conectar con una separacion pequena para no saturar ViaProxy de golpe.
+const spacing = cfg.joinSpacing || 900;
 for (let i = 0; i < cfg.count; i++) {
-  setTimeout(() => createBot(cfg.start + i), i * 700);
+  setTimeout(() => createBot(cfg.start + i, 0), i * spacing);
 }
 
 setInterval(() => {
@@ -222,6 +236,8 @@ setInterval(() => {
     attacks: stats.attacks,
     errors: stats.errors,
     kicks: stats.kicks,
+    reconnects: stats.reconnects,
+    disconnects: stats.disconnects,
     reached: stats.reached,
     stuck: stats.stuck,
     stuckNames,

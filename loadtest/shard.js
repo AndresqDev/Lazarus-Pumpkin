@@ -35,6 +35,8 @@ const cfg = {
   warmup: parseInt(a.warmup || '45', 10),
   prefix: a.prefix || 'Perf',
   version: a.version || '1.8.9',
+  maxReconnects: parseInt(a.maxReconnects || '10', 10),
+  joinSpacing: parseInt(a.joinSpacing || '900', 10),
   shard: parseInt(a.shard || '0', 10),
   startIndex: parseInt(
     a.startIndex || String(parseInt(a.shard || '0', 10) * parseInt(a.count || '25', 10) + 1),
@@ -69,6 +71,8 @@ function spawnWorker(i) {
         version: cfg.version,
         prefix: cfg.prefix,
         arena: { x: cfg.arenaX, z: cfg.arenaZ },
+        maxReconnects: cfg.maxReconnects,
+        joinSpacing: cfg.joinSpacing,
       }),
     ],
     { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] }
@@ -90,7 +94,8 @@ const tick = setInterval(() => {
   log(
     `t=${elapsed}s fase=${phase} vivos=${sum('alive')}/${cfg.count} ` +
       `muertes=${sum('deaths')} ataques=${sum('attacks')} err=${sum('errors')} ` +
-      `kicks=${sum('kicks')} sinruta=${sum('stuck')} arena=${sum('reached')}`
+      `kicks=${sum('kicks')} recon=${sum('reconnects')} desc=${sum('disconnects')} ` +
+      `sinruta=${sum('stuck')} arena=${sum('reached')}`
   );
 }, 10000);
 
@@ -118,6 +123,8 @@ function stopAll() {
       attacks: sum('attacks'),
       errors: sum('errors'),
       kicks: sum('kicks'),
+      reconnects: sum('reconnects'),
+      disconnects: sum('disconnects'),
       reached: sum('reached'),
       stuck: sum('stuck'),
     };
