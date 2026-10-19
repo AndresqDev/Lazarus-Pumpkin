@@ -83,7 +83,6 @@ jobs:
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
           hostname: lazarus-ci-bots-${{ matrix.shard }}
-          args: --ephemeral
 
       - name: Verificar conectividad con el server
         shell: bash

@@ -67,7 +67,6 @@ jobs:
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
           hostname: lazarus-ci-server
-          args: --ephemeral
 
       - name: Preparar server
         run: |
