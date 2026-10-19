@@ -92,17 +92,15 @@ jobs:
           chmod +x server/pumpkin
           cp loadtest/server/pumpkin.toml server/pumpkin.toml
           sed -i "s|^motd = .*|motd = \"${MOTD}\"|" server/pumpkin.toml
-          # Config del plugin SOLO para loadtest: sin deathban y con WORLD_SPAWN
-          # fijo. El host resuelve el spawn a y=200 cuando los chunks aun no
-          # estan cargados; eso hacia que los bots cayeran y el deathban los
-          # expulsara en bucle. El spawn real del mundo es (103, ~79, -317).
+          # Config del plugin SOLO para loadtest: sin deathban. NO fijamos
+          # WORLD_SPAWN: su teleport de first-join bloquea el tick con los
+          # clientes 1.8.9 (ViaRewind) y congela el mundo. El spawn seguro se
+          # fija en el host por RCON (setworldspawn) antes de los bots.
           mkdir -p server/plugins/data/lazarus
           cp original-configs/config.yml server/plugins/data/lazarus/config.yml
           cp original-configs/utilities.yml server/plugins/data/lazarus/utilities.yml
           sed -i '/^DEATHBAN:/,/^DEFAULT_LIVES:/ s/^  ENABLED: true/  ENABLED: false/' \
             server/plugins/data/lazarus/config.yml
-          sed -i 's#^WORLD_SPAWN: .*#WORLD_SPAWN: "world|103.5|79|-316.5|0|0"#' \
-            server/plugins/data/lazarus/utilities.yml
           echo '--- plugin loadtest config ---'
           grep -A2 '^DEATHBAN:' server/plugins/data/lazarus/config.yml
           grep '^WORLD_SPAWN' server/plugins/data/lazarus/utilities.yml
