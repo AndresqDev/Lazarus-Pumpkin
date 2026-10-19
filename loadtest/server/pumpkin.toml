@@ -63,7 +63,7 @@ address = "0.0.0.0:25565"
 
 [networking.rcon]
 enabled = true
-address = "127.0.0.1:25575"
+address = "0.0.0.0:25575"
 password = "lazarus-test"
 max_connections = 10
 

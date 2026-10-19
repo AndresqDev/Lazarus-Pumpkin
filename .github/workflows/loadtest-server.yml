@@ -67,6 +67,7 @@ jobs:
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
           hostname: lazarus-ci-server
+          args: --ssh
 
       - name: Preparar server
         run: |
