@@ -79,15 +79,38 @@ function createBot(index, attempt = 0) {
     st.lastGoal = 0;
     bot.clearControlStates();
     stopPath();
-    setTimeout(() => setArenaGoal(), 1000);
+    // No caminar durante idle: antes el goal se fijaba igual y los bots se
+    // iban 300+ bloques con chunks sin cargar (caidas -> deathban).
+    const ph = currentPhase();
+    if (!ph || ph.mode !== 'idle') setTimeout(() => setArenaGoal(), 1000);
+  };
+
+  // Evita caer al vacio mientras el spawn aun no tiene chunks cargados:
+  // mantiene la fisica apagada hasta que blockAt() devuelve un bloque.
+  const holdPhysicsUntilLoaded = () => {
+    try { bot.physicsEnabled = false; } catch (_) {}
+    const t0 = Date.now();
+    const tick = () => {
+      if (shuttingDown || !bot.entity) return;
+      let loaded = false;
+      try { loaded = Boolean(bot.blockAt(bot.entity.position)); } catch (_) {}
+      if (loaded || Date.now() - t0 > 30000) {
+        try { bot.physicsEnabled = true; } catch (_) {}
+        return;
+      }
+      setTimeout(tick, 500);
+    };
+    setTimeout(tick, 500);
   };
 
   bot.once('spawn', () => {
     log('spawn', username, bot.entity.position.toString());
+    holdPhysicsUntilLoaded();
     afterRespawn();
   });
   bot.on('respawn', () => {
     log('respawn', username);
+    holdPhysicsUntilLoaded();
     afterRespawn();
   });
   bot.on('death', () => {
