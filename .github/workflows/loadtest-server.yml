@@ -80,7 +80,7 @@ jobs:
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          hostname: lazarus-ci-server
+          hostname: lazarus-ci-server-${{ github.run_id }}
 
       - name: Preparar server
         run: |
@@ -215,7 +215,7 @@ jobs:
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          hostname: lazarus-ci-proxy
+          hostname: lazarus-ci-proxy-${{ github.run_id }}
 
       - name: Descargar Velocity 3.5.1
         run: |
@@ -252,7 +252,7 @@ jobs:
 
           SRV_IP=""
           for _ in $(seq 1 120); do
-            for ip in $(tailscale status | grep 'lazarus-ci-server' | grep -v offline | awk '{print $1}'); do
+            for ip in $(tailscale status | grep "lazarus-ci-server-${{ github.run_id }}" | grep -v offline | awk '{print $1}'); do
               if (exec 3<>/dev/tcp/$ip/25566) 2>/dev/null; then SRV_IP=$ip; break; fi
             done
             [ -n "$SRV_IP" ] && break
@@ -397,7 +397,7 @@ jobs:
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          hostname: lazarus-ci-proxy
+          hostname: lazarus-ci-proxy-${{ github.run_id }}
           args: --ssh
 
       - name: Descargar ViaProxy
@@ -422,7 +422,7 @@ jobs:
 
           SRV_IP=""
           for _ in $(seq 1 120); do
-            for ip in $(tailscale status | grep 'lazarus-ci-server' | grep -v offline | awk '{print $1}'); do
+            for ip in $(tailscale status | grep "lazarus-ci-server-${{ github.run_id }}" | grep -v offline | awk '{print $1}'); do
               if (exec 3<>/dev/tcp/$ip/25566) 2>/dev/null; then SRV_IP=$ip; break; fi
             done
             [ -n "$SRV_IP" ] && break
