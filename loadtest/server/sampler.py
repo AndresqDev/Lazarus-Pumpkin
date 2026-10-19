@@ -151,6 +151,8 @@ def main():
     ap.add_argument("--port", type=int, default=25575)
     ap.add_argument("--pass", dest="password", default="lazarus-test")
     ap.add_argument("--interval", type=float, default=5.0)
+    ap.add_argument("--no-rcon", action="store_true",
+                    help="No consultar RCON (runner del proxy, sin RCON local)")
     args = ap.parse_args()
 
     pumpkin_pid = int(os.environ.get("PUMPKIN_PID") or 0) or None
@@ -182,13 +184,15 @@ def main():
     while True:
         ts = int(time.time())
         elapsed = int(ts - START)
-        raw_tps = rcon("tps", args.host, args.port, args.password)
         tps = mspt = None
-        if raw_tps:
-            m = re.search(r"TPS:\s*([\d.]+)\s*MSPT:\s*([\d.]+)", raw_tps)
-            if m:
-                tps, mspt = float(m.group(1)), float(m.group(2))
-        players = parse_online(rcon("list", args.host, args.port, args.password))
+        players = None
+        if not args.no_rcon:
+            raw_tps = rcon("tps", args.host, args.port, args.password)
+            if raw_tps:
+                m = re.search(r"TPS:\s*([\d.]+)\s*MSPT:\s*([\d.]+)", raw_tps)
+                if m:
+                    tps, mspt = float(m.group(1)), float(m.group(2))
+            players = parse_online(rcon("list", args.host, args.port, args.password))
         p_cpu, p_rss = proc_sample(pumpkin_pid)
         v_cpu, v_rss = proc_sample(viaproxy_pid)
         row = [

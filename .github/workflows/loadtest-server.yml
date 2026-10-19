@@ -1,51 +1,47 @@
-name: Loadtest Server
+name: Loadtest Server (split Pumpkin/ViaProxy)
 
-# Levanta Pumpkin + ViaProxy en un runner x86_64 de GitHub y los publica en el
-# tailnet. El plugin WASM se compila desde este repo (commit actual), con la
-# misma config tuneada del VPS: view 10, sim 4, compresión level 1, Peaceful.
+# Levanta Pumpkin y ViaProxy en DOS runners x86_64 distintos, unidos por Tailscale.
+# - job `server`: compila el WASM, corre Pumpkin (25566 en el tailnet) + sampler.
+# - job `proxy`:  corre ViaProxy (25565 en el tailnet) apuntando a Pumpkin + sampler.
+#
+# Motivo del split: ViaProxy (traduccion 1.8.9 -> 26.3) consume 2.5-3.3 cores y en
+# un solo runner de 4 vCPU se comia el CPU de Pumpkin (MSPT > 1.2 s con ~95 bots).
+# Asi cada proceso tiene su propio host de 4 vCPU.
 #
 # Flujo:
-#   1. Se dispara este workflow a mano (minutes = ventana de vida).
-#   2. Lee el log del paso "Iniciar" y busca la línea `JOIN_READY tcp://IP:25565`.
-#   3. Se entra con el cliente (1.8.9) para ver el server en vivo.
-#   4. Recién ahí se dispara el workflow "Loadtest" (bots) con host = esa IP.
-#
-# Los artifacts (logs, sampler.csv con TPS/MSPT/CPU) quedan al final del run.
+#   1. workflow_dispatch (minutes = ventana de vida).
+#   2. Buscar `JOIN_READY tcp://IP:25565` (IP del runner de ViaProxy).
+#   3. Entrar con cliente 1.8.9 y luego disparar Loadtest con esa IP.
 
 on:
   workflow_dispatch:
     inputs:
       minutes:
-        description: 'Minutos que el server queda arriba'
+        description: 'Minutos que la pila queda arriba'
         required: true
         default: '45'
       motd:
         description: 'MOTD'
         required: true
         default: 'Lazarus CI loadtest'
-      pin:
-        description: 'Pinnear CPU (auto|true|false): pumpkin a cores 1..N-1, viaproxy al core 0'
-        required: false
-        default: 'auto'
 
 concurrency:
   group: loadtest-server
   cancel-in-progress: true
 
+env:
+  MINUTES: ${{ github.event.inputs.minutes }}
+  MOTD: ${{ github.event.inputs.motd }}
+  PUMPKIN_TAG: '0.2.0+26.3-26.51'
+  PUMPKIN_SHA256: '68c4416ca9fbfb3f2aeb6a8ce1de0e3fb02c5a85a53c8ba59a27941d7e43d8cd'
+  VIAPROXY_JAR: 'ViaProxy-3.4.14.jar'
+  VIAPROXY_URL: 'https://github.com/ViaVersion/ViaProxy/releases/download/v3.4.14/ViaProxy-3.4.14.jar'
+
 jobs:
   server:
+    name: pumpkin
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    env:
-      MINUTES: ${{ github.event.inputs.minutes }}
-      MOTD: ${{ github.event.inputs.motd }}
-      PIN: ${{ github.event.inputs.pin }}
-      PUMPKIN_TAG: '0.2.0+26.3-26.51'
-      PUMPKIN_SHA256: '68c4416ca9fbfb3f2aeb6a8ce1de0e3fb02c5a85a53c8ba59a27941d7e43d8cd'
-      VIAPROXY_JAR: 'ViaProxy-3.4.14.jar'
-      VIAPROXY_URL: 'https://github.com/ViaVersion/ViaProxy/releases/download/v3.4.14/ViaProxy-3.4.14.jar'
-      NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,18 +57,11 @@ jobs:
           cargo build --release
           ls -lh target/wasm32-wasip2/release/lazarus_pumpkin.wasm
 
-      - name: Java 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
       - name: Unirse al tailnet
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
           hostname: lazarus-ci-server
-          args: --ssh
 
       - name: Preparar server
         run: |
@@ -88,32 +77,21 @@ jobs:
           if [ -f loadtest/server/native_tab-x86_64.so ]; then
             cp loadtest/server/native_tab-x86_64.so server/plugins/native_tab.so
           fi
-          curl -fsSL -o "server/${VIAPROXY_JAR}" "${VIAPROXY_URL}"
-          cp loadtest/server/viaproxy.yml server/viaproxy.yml
           ls -la server server/plugins
-          echo "--- CPU del runner ---"
+          echo "--- CPU del runner (pumpkin) ---"
           nproc
           lscpu | grep -E 'Model name|^CPU\(s\)|MHz|Hypervisor' || true
           free -m | head -2
 
-      - name: Iniciar Pumpkin + ViaProxy
+      - name: Iniciar Pumpkin
         run: |
           set -uo pipefail
           cd server
 
           TS_IP=$(tailscale ip -4 | head -1)
-          echo "TAILSCALE_IP=${TS_IP}"
+          echo "SERVER_IP=${TS_IP}"
 
-          NPROC=$(nproc)
-          PUMPKIN_CMD="./pumpkin"
-          VIAPROXY_CMD="java -jar ${VIAPROXY_JAR} config viaproxy.yml"
-          if [ "${PIN}" = "true" ] || { [ "${PIN}" = "auto" ] && [ "$NPROC" -ge 4 ]; }; then
-            PUMPKIN_CMD="taskset -c 1-$((NPROC-1)) ./pumpkin"
-            VIAPROXY_CMD="taskset -c 0 nice -n 5 java -jar ${VIAPROXY_JAR} config viaproxy.yml"
-          fi
-          echo "PIN=${PIN} nproc=${NPROC} pumpkin_cmd=${PUMPKIN_CMD} viaproxy_cmd=${VIAPROXY_CMD}"
-
-          nohup $PUMPKIN_CMD > pumpkin.log 2>&1 &
+          nohup ./pumpkin > pumpkin.log 2>&1 &
           PUMPKIN_PID=$!
           echo "PUMPKIN_PID=$PUMPKIN_PID" >> "$GITHUB_ENV"
 
@@ -133,63 +111,26 @@ jobs:
           echo "--- Pumpkin listo ---"
           grep -iE "Started server|lazarus|kitmap|plugin" pumpkin.log | tail -12 || true
 
-          nohup $VIAPROXY_CMD > viaproxy.log 2>&1 &
-          VIAPROXY_PID=$!
-          echo "VIAPROXY_PID=$VIAPROXY_PID" >> "$GITHUB_ENV"
-          vready=0
-          for _ in $(seq 1 90); do
-            if ! kill -0 "$VIAPROXY_PID" 2>/dev/null; then break; fi
-            if (exec 3<>/dev/tcp/127.0.0.1/25565) 2>/dev/null; then vready=1; break; fi
-            sleep 2
-          done
-          if [ "$vready" != "1" ]; then
-            echo "ERROR: ViaProxy no abrio 25565"; tail -80 viaproxy.log; exit 1
-          fi
-          echo "--- ViaProxy listo ---"
-
           echo "--- rcon ---"
           python3 ../loadtest/server/rcon.py list lazarus-test 127.0.0.1 25575 || true
           python3 ../loadtest/server/rcon.py tps lazarus-test 127.0.0.1 25575 || true
 
-          PUMPKIN_PID=$PUMPKIN_PID VIAPROXY_PID=$VIAPROXY_PID \
+          PUMPKIN_PID=$PUMPKIN_PID \
             nohup python3 ../loadtest/server/sampler.py --out sampler.csv --interval 5 > sampler.log 2>&1 &
           echo "SAMPLER_PID=$!" >> "$GITHUB_ENV"
 
           {
-            echo "## Loadtest server listo"
+            echo "## Pumpkin listo (split)"
             echo ""
             echo "| | |"
             echo "|---|---|"
-            echo "| Join (Tailscale) | \`${TS_IP}:25565\` |"
-            echo "| Cliente | 1.8.9 (ViaProxy acepta 1.7.2+) |"
-            echo "| RCON local | 127.0.0.1:25575 |"
+            echo "| Backend (tailnet) | \`${TS_IP}:25566\` |"
+            echo "| RCON (tailnet) | \`${TS_IP}:25575\` |"
             echo "| Ventana | ${MINUTES} min |"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "JOIN_READY tcp://${TS_IP}:25565"
+          echo "SERVER_READY tcp://${TS_IP}:25566"
 
-      - name: Túnel ngrok (opcional)
-        if: ${{ env.NGROK_AUTHTOKEN != '' }}
-        run: |
-          set -uo pipefail
-          if ! command -v ngrok >/dev/null; then
-            curl -fsSL -o /tmp/ngrok.tgz https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
-            sudo tar -xzf /tmp/ngrok.tgz -C /usr/local/bin ngrok
-          fi
-          ngrok config add-authtoken "$NGROK_AUTHTOKEN" >/dev/null
-          nohup ngrok tcp 25565 --log stdout > server/ngrok.log 2>&1 &
-          echo "NGROK_PID=$!" >> "$GITHUB_ENV"
-          for _ in $(seq 1 20); do
-            ADDR=$(curl -fsS http://127.0.0.1:4040/api/tunnels 2>/dev/null \
-              | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['tunnels'][0]['public_url'] if d.get('tunnels') else '')" 2>/dev/null || true)
-            if [ -n "$ADDR" ]; then
-              echo "NGROK_READY $ADDR"
-              echo "- ngrok: \`$ADDR\`" >> "$GITHUB_STEP_SUMMARY"
-              break
-            fi
-            sleep 2
-          done
-
-      - name: Mantener server arriba
+      - name: Mantener Pumpkin arriba
         run: |
           set -uo pipefail
           END=$(( $(date +%s) + MINUTES * 60 ))
@@ -208,12 +149,11 @@ jobs:
         if: always()
         run: |
           set +e
-          for p in "${NGROK_PID:-}" "${SAMPLER_PID:-}" "${VIAPROXY_PID:-}" "${PUMPKIN_PID:-}"; do
+          for p in "${SAMPLER_PID:-}" "${PUMPKIN_PID:-}"; do
             [ -n "$p" ] && kill "$p" 2>/dev/null
           done
           sleep 8
           echo '--- pumpkin.log (cola) ---'; tail -40 server/pumpkin.log 2>/dev/null
-          echo '--- viaproxy.log (cola) ---'; tail -20 server/viaproxy.log 2>/dev/null
           echo '--- sampler.log (cola) ---'; tail -10 server/sampler.log 2>/dev/null
 
       - name: Subir artifacts
@@ -224,10 +164,159 @@ jobs:
           path: |
             server/pumpkin.log
             server/logs/latest.log
-            server/viaproxy.log
             server/sampler.csv
             server/sampler.log
-            server/ngrok.log
             server/pumpkin.toml
+          if-no-files-found: warn
+          retention-days: 7
+
+  proxy:
+    name: viaproxy
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Unirse al tailnet
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          hostname: lazarus-ci-proxy
+          args: --ssh
+
+      - name: Descargar ViaProxy
+        run: |
+          set -euo pipefail
+          mkdir -p proxy
+          curl -fsSL -o "proxy/${VIAPROXY_JAR}" "${VIAPROXY_URL}"
+          cp loadtest/server/viaproxy.yml proxy/viaproxy.yml
+          ls -la proxy "proxy/${VIAPROXY_JAR}"
+          echo "--- CPU del runner (viaproxy) ---"
+          nproc
+          lscpu | grep -E 'Model name|^CPU\(s\)|MHz|Hypervisor' || true
+          free -m | head -2
+
+      - name: Esperar Pumpkin y arrancar ViaProxy
+        run: |
+          set -uo pipefail
+          cd proxy
+
+          TS_IP=$(tailscale ip -4 | head -1)
+          echo "PROXY_IP=${TS_IP}"
+
+          SRV_IP=""
+          for _ in $(seq 1 120); do
+            for ip in $(tailscale status | grep 'lazarus-ci-server' | grep -v offline | awk '{print $1}'); do
+              if (exec 3<>/dev/tcp/$ip/25566) 2>/dev/null; then SRV_IP=$ip; break; fi
+            done
+            [ -n "$SRV_IP" ] && break
+            sleep 5
+          done
+          if [ -z "$SRV_IP" ]; then
+            echo "ERROR: no encontre Pumpkin en el tailnet"; tailscale status; exit 1
+          fi
+          echo "backend=${SRV_IP}:25566"
+          sed -i "s|^target-address: .*|target-address: ${SRV_IP}:25566|" viaproxy.yml
+
+          nohup java -Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=20 \
+            -jar "${VIAPROXY_JAR}" config viaproxy.yml > viaproxy.log 2>&1 &
+          VIAPROXY_PID=$!
+          echo "VIAPROXY_PID=$VIAPROXY_PID" >> "$GITHUB_ENV"
+
+          vready=0
+          for _ in $(seq 1 90); do
+            if ! kill -0 "$VIAPROXY_PID" 2>/dev/null; then break; fi
+            if (exec 3<>/dev/tcp/127.0.0.1/25565) 2>/dev/null; then vready=1; break; fi
+            sleep 2
+          done
+          if [ "$vready" != "1" ]; then
+            echo "ERROR: ViaProxy no abrio 25565"; tail -80 viaproxy.log; exit 1
+          fi
+          echo "--- ViaProxy listo ---"
+
+          VIAPROXY_PID=$VIAPROXY_PID \
+            nohup python3 ../loadtest/server/sampler.py --no-rcon --out viaproxy.csv --interval 5 > sampler.log 2>&1 &
+          echo "SAMPLER_PID=$!" >> "$GITHUB_ENV"
+
+          {
+            echo "## ViaProxy listo (split)"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Join (Tailscale) | \`${TS_IP}:25565\` |"
+            echo "| Cliente | 1.8.9 (ViaProxy acepta 1.7.2+) |"
+            echo "| Backend | \`${SRV_IP}:25566\` |"
+            echo "| Ventana | ${MINUTES} min |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "JOIN_READY tcp://${TS_IP}:25565"
+
+      - name: Túnel ngrok (opcional)
+        if: ${{ env.NGROK_AUTHTOKEN != '' }}
+        run: |
+          set -uo pipefail
+          if ! command -v ngrok >/dev/null; then
+            curl -fsSL -o /tmp/ngrok.tgz https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
+            sudo tar -xzf /tmp/ngrok.tgz -C /usr/local/bin ngrok
+          fi
+          ngrok config add-authtoken "$NGROK_AUTHTOKEN" >/dev/null
+          nohup ngrok tcp 25565 --log stdout > proxy/ngrok.log 2>&1 &
+          echo "NGROK_PID=$!" >> "$GITHUB_ENV"
+          for _ in $(seq 1 20); do
+            ADDR=$(curl -fsS http://127.0.0.1:4040/api/tunnels 2>/dev/null \
+              | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['tunnels'][0]['public_url'] if d.get('tunnels') else '')" 2>/dev/null || true)
+            if [ -n "$ADDR" ]; then
+              echo "NGROK_READY $ADDR"
+              echo "- ngrok: \`$ADDR\`" >> "$GITHUB_STEP_SUMMARY"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Mantener ViaProxy arriba
+        run: |
+          set -uo pipefail
+          END=$(( $(date +%s) + MINUTES * 60 ))
+          while [ "$(date +%s)" -lt "$END" ]; do
+            if ! kill -0 "$VIAPROXY_PID" 2>/dev/null; then
+              echo "ERROR: ViaProxy murio"
+              tail -80 proxy/viaproxy.log
+              exit 1
+            fi
+            LAST=$(tail -1 proxy/sampler.log 2>/dev/null || true)
+            echo "[$(date -u +%H:%M:%S)] ${LAST:-sin muestras}"
+            sleep 30
+          done
+
+      - name: Bajar todo
+        if: always()
+        run: |
+          set +e
+          for p in "${NGROK_PID:-}" "${SAMPLER_PID:-}" "${VIAPROXY_PID:-}"; do
+            [ -n "$p" ] && kill "$p" 2>/dev/null
+          done
+          sleep 8
+          echo '--- viaproxy.log (cola) ---'; tail -30 proxy/viaproxy.log 2>/dev/null
+          echo '--- sampler.log (cola) ---'; tail -10 proxy/sampler.log 2>/dev/null
+
+      - name: Subir artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-proxy
+          path: |
+            proxy/viaproxy.log
+            proxy/viaproxy.csv
+            proxy/sampler.log
+            proxy/viaproxy.yml
+            proxy/ngrok.log
           if-no-files-found: warn
           retention-days: 7

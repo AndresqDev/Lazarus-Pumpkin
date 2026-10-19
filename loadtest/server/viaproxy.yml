@@ -42,7 +42,7 @@ backend-haproxy: false
 frontend-haproxy: false
 
 # Enables sending signed chat messages on >= 1.19 servers.
-chat-signing: true
+chat-signing: false
 
 # The threshold for packet compression. Packets larger than this size will be compressed. (-1 to disable)
 compression-threshold: 256
@@ -52,11 +52,11 @@ allow-beta-pinging: false
 
 # Enabling this will prevent getting disconnected from the server when a packet translation error occurs and instead only print the error in the console.
 # This may cause issues depending on the type of packet which failed to translate.
-ignore-protocol-translation-errors: false
+ignore-protocol-translation-errors: true
 
 # Enabling this will suppress client protocol errors to prevent lag when ViaProxy is getting spammed with invalid packets.
 # This may cause issues with debugging client connection issues because no error messages will be printed.
-suppress-client-protocol-errors: false
+suppress-client-protocol-errors: true
 
 # Allow <= 1.6.4 clients to connect through ViaProxy to the target server. (No protocol translation or packet handling)
 allow-legacy-client-passthrough: false
@@ -105,7 +105,7 @@ fake-accept-resource-packs: false
 skip-config-state-packet-queue: false
 
 # Disable this if you want to hide IP addresses in the console and log files.
-log-ips: true
+log-ips: false
 
 # Enable this if you want to see client status requests in the console and log files.
 log-client-status-requests: false
