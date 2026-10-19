@@ -60,6 +60,12 @@ const STATE_FILE: &str = "plugins/data/lazarus/tab_state.json";
 /// 1.8 clients, so this is the only way to keep them out of the tab there.
 const REAL_TEAM: &str = "lzreal";
 
+/// `TabManager.VALUE` — the shared head used by every artificial slot.
+/// Kept here (not in the WASM state) so `tab_state.json` does not repeat the
+/// ~1 KB skin blob 80 times per player.
+const DEFAULT_SKIN_VALUE: &str = "eyJ0aW1lc3RhbXAiOjE0MTEyNjg3OTI3NjUsInByb2ZpbGVJZCI6IjNmYmVjN2RkMGE1ZjQwYmY5ZDExODg1YTU0NTA3MTEyIiwicHJvZmlsZU5hbWUiOiJsYXN0X3VzZXJuYW1lIiwidGV4dHVyZXMiOnsiU0tJTiI6eyJ1cmwiOiJodHRwOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzg0N2I1Mjc5OTg0NjUxNTRhZDZjMjM4YTFlM2MyZGQzZTMyOTY1MzUyZTNhNjRmMzZlMTZhOTQwNWFiOCJ9fX0=";
+const DEFAULT_SKIN_SIGNATURE: &str = "u8sG8tlbmiekrfAdQjy4nXIcCfNdnUZzXSx9BE1X5K27NiUvE1dDNIeBBSPdZzQG1kHGijuokuHPdNi/KXHZkQM7OJ4aCu5JiUoOY28uz3wZhW4D+KG3dH4ei5ww2KwvjcqVL7LFKfr/ONU5Hvi7MIIty1eKpoGDYpWj3WjnbN4ye5Zo88I2ZEkP1wBw2eDDN4P3YEDYTumQndcbXFPuRRTntoGdZq3N5EBKfDZxlw4L3pgkcSLU5rWkd5UH4ZUOHAP/VaJ04mpFLsFXzzdU4xNZ5fthCwxwVBNLtHRWO26k/qcVBzvEXtKGFJmxfLGCzXScET/OjUBak/JEkkRG2m+kpmBMgFRNtjyZgQ1w08U6HHnLTiAiio3JswPlW5v56pGWRHQT5XWSkfnrXDalxtSmPnB5LmacpIImKgL8V9wLnWvBzI7SHjlyQbbgd+kUOkLlu7+717ySDEJwsFJekfuR6N/rpcYgNZYrxDwe4w57uDPlwNL6cJPfNUHV7WEbIU1pMgxsxaXe8WSvV87qLsR7H06xocl2C0JFfe2jZR4Zh3k9xzEnfCeFKBgGb4lrOWBu1eDWYgtKV67M2Y+B3W5pjuAjwAxn0waODtEn/3jKPbc/sxbPvljUCw65X+ok0UUN1eOwXV5l2EGzn05t3Yhwq19/GxARg63ISGE8CKw=";
+
 #[derive(Clone, Deserialize, PartialEq)]
 struct Skin {
     value: String,
@@ -405,14 +411,16 @@ fn send_remove_to(server: &Arc<Server>, viewer: Uuid, slots: &[u8]) {
 }
 
 fn properties(spec: &SlotSpec) -> Vec<Property> {
-    spec.skin
-        .iter()
-        .map(|skin| Property {
-            name: "textures".into(),
-            value: skin.value.clone().into(),
-            signature: skin.signature.clone().map(Into::into),
-        })
-        .collect()
+    let fallback = Skin {
+        value: DEFAULT_SKIN_VALUE.to_string(),
+        signature: Some(DEFAULT_SKIN_SIGNATURE.to_string()),
+    };
+    let skin = spec.skin.as_ref().unwrap_or(&fallback);
+    vec![Property {
+        name: "textures".into(),
+        value: skin.value.clone().into(),
+        signature: skin.signature.clone().map(Into::into),
+    }]
 }
 
 fn hide_real_players(server: &Arc<Server>, team_signature: &mut Option<Vec<String>>) {
@@ -430,26 +438,27 @@ fn hide_real_players(server: &Arc<Server>, team_signature: &mut Option<Vec<Strin
     if team_signature.as_ref() != Some(&names) {
         *team_signature = Some(names.clone());
         send_real_team(server, &names);
-    }
 
-    // Modern clients (1.19.3+) honour the listed flag; ViaVersion drops it for
-    // older protocols, where the team ordering above hides the entries.
-    let actions: Vec<Vec<PlayerAction>> = real
-        .iter()
-        .map(|_| vec![PlayerAction::UpdateListed(false)])
-        .collect();
-    let players: Vec<Player> = real
-        .iter()
-        .enumerate()
-        .map(|(i, player)| Player {
-            uuid: player.gameprofile.id,
-            actions: &actions[i],
-        })
-        .collect();
-    server.broadcast_packet_all(&CPlayerInfoUpdate::new(
-        PlayerInfoFlags::UPDATE_LISTED.bits(),
-        &players,
-    ));
+        // Modern clients (1.19.3+) honour the listed flag; ViaVersion drops it
+        // for older protocols, where the team ordering above hides the entries.
+        // Only send this when the player set changes, not on every 500 ms pass.
+        let actions: Vec<Vec<PlayerAction>> = real
+            .iter()
+            .map(|_| vec![PlayerAction::UpdateListed(false)])
+            .collect();
+        let players: Vec<Player> = real
+            .iter()
+            .enumerate()
+            .map(|(i, player)| Player {
+                uuid: player.gameprofile.id,
+                actions: &actions[i],
+            })
+            .collect();
+        server.broadcast_packet_all(&CPlayerInfoUpdate::new(
+            PlayerInfoFlags::UPDATE_LISTED.bits(),
+            &players,
+        ));
+    }
 }
 
 /// (Re)creates the client-side team that holds every real player.

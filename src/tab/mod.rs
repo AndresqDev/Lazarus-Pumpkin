@@ -21,28 +21,17 @@ use pumpkin_plugin_api::{Player, Server};
 
 use crate::factions::{Faction, FactionMember};
 use crate::state::{state, AppState};
-use crate::tab::api::{Skin, SlotSpec, TabState};
+use crate::tab::api::{SlotSpec, TabState};
 
 const COLUMN_HEIGHT: usize = 20;
 const SLOTS: usize = 80;
 
 const FACES: [&str; 8] = ["S", "SW", "W", "NW", "N", "NE", "E", "SE"];
 
-/// `TabManager.VALUE` — the custom head applied to every artificial entry.
-const TAB_SKIN_VALUE: &str = "eyJ0aW1lc3RhbXAiOjE0MTEyNjg3OTI3NjUsInByb2ZpbGVJZCI6IjNmYmVjN2RkMGE1ZjQwYmY5ZDExODg1YTU0NTA3MTEyIiwicHJvZmlsZU5hbWUiOiJsYXN0X3VzZXJuYW1lIiwidGV4dHVyZXMiOnsiU0tJTiI6eyJ1cmwiOiJodHRwOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzg0N2I1Mjc5OTg0NjUxNTRhZDZjMjM4YTFlM2MyZGQzZTMyOTY1MzUyZTNhNjRmMzZlMTZhOTQwNWFiOCJ9fX0=";
-const TAB_SKIN_SIGNATURE: &str = "u8sG8tlbmiekrfAdQjy4nXIcCfNdnUZzXSx9BE1X5K27NiUvE1dDNIeBBSPdZzQG1kHGijuokuHPdNi/KXHZkQM7OJ4aCu5JiUoOY28uz3wZhW4D+KG3dH4ei5ww2KwvjcqVL7LFKfr/ONU5Hvi7MIIty1eKpoGDYpWj3WjnbN4ye5Zo88I2ZEkP1wBw2eDDN4P3YEDYTumQndcbXFPuRRTntoGdZq3N5EBKfDZxlw4L3pgkcSLU5rWkd5UH4ZUOHAP/VaJ04mpFLsFXzzdU4xNZ5fthCwxwVBNLtHRWO26k/qcVBzvEXtKGFJmxfLGCzXScET/OjUBak/JEkkRG2m+kpmBMgFRNtjyZgQ1w08U6HHnLTiAiio3JswPlW5v56pGWRHQT5XWSkfnrXDalxtSmPnB5LmacpIImKgL8V9wLnWvBzI7SHjlyQbbgd+kUOkLlu7+717ySDEJwsFJekfuR6N/rpcYgNZYrxDwe4w57uDPlwNL6cJPfNUHV7WEbIU1pMgxsxaXe8WSvV87qLsR7H06xocl2C0JFfe2jZR4Zh3k9xzEnfCeFKBgGb4lrOWBu1eDWYgtKV67M2Y+B3W5pjuAjwAxn0waODtEn/3jKPbc/sxbPvljUCw65X+ok0UUN1eOwXV5l2EGzn05t3Yhwq19/GxARg63ISGE8CKw=";
-
 static STATE: Mutex<Option<TabState>> = Mutex::new(None);
 static DIRTY: AtomicBool = AtomicBool::new(false);
 
-fn default_skin() -> Skin {
-    Skin {
-        value: TAB_SKIN_VALUE.to_string(),
-        signature: Some(TAB_SKIN_SIGNATURE.to_string()),
-    }
-}
-
-/// Full rebuild for one player (called on join and every tick).
+/// Full rebuild for one player (called on join and once per second).
 pub fn setup(player: &Player, server: &Server) {
     // Header/footer (static, from `tab.yml`).
     {
@@ -76,24 +65,27 @@ fn rebuild(player: &Player, server: &Server) {
         lines
     };
 
-    let mut state = STATE.lock().unwrap();
-    let tab = state.get_or_insert_with(TabState::default);
-    let viewer = tab.viewers.entry(uuid).or_default();
-    viewer.clear();
-
-    let skin = default_skin();
+    let mut new_viewer = std::collections::BTreeMap::new();
     for (slot, line) in lines.iter().enumerate() {
-        viewer.insert(
+        new_viewer.insert(
             slot.to_string(),
             SlotSpec {
                 text: line.clone(),
                 name: None,
                 order: Some((SLOTS as i32 - 1) - slot as i32),
-                skin: Some(skin.clone()),
+                // The native companion applies the shared Lazarus skin; keeping
+                // it out of every slot shrinks tab_state.json enormously.
+                skin: None,
             },
         );
     }
 
+    let mut state = STATE.lock().unwrap();
+    let tab = state.get_or_insert_with(TabState::default);
+    if tab.viewers.get(&uuid) == Some(&new_viewer) {
+        return;
+    }
+    tab.viewers.insert(uuid, new_viewer);
     DIRTY.store(true, Ordering::Relaxed);
 }
 
@@ -128,6 +120,22 @@ fn state_folder() -> String {
 // Column lines (TabUpdaterImpl.loadInitialSet / loadUpdates)
 // ---------------------------------------------------------------------------
 
+/// Per-player values shared by all 80 tab lines. Building these once avoids
+/// 80 userdata/territory/online queries per player per update.
+struct ResolveCtx {
+    kills: String,
+    deaths: String,
+    lives: String,
+    balance: String,
+    loc_x: i32,
+    loc_z: i32,
+    yaw: f32,
+    territory: String,
+    online: usize,
+    max_players: String,
+    name: String,
+}
+
 /// Builds the 80 configured lines (4 columns of 20), resolving placeholders.
 fn compute_lines(guard: &AppState, player: &Player, server: &Server) -> Vec<String> {
     let tab = &guard.raw.tab;
@@ -139,29 +147,14 @@ fn compute_lines(guard: &AppState, player: &Player, server: &Server) -> Vec<Stri
         flat.extend(lines);
     }
 
-    let mut out: Vec<String> = flat
-        .iter()
-        .map(|line| resolve(line, guard, player, server))
-        .collect();
+    let ctx = resolve_ctx(guard, player, server);
+    let mut out: Vec<String> = flat.iter().map(|line| resolve(line, &ctx)).collect();
     out.resize(SLOTS, String::new());
     out
 }
 
-/// Mirrors `TabUpdaterImpl.getFunction` / the `<location>` special case.
-fn resolve(line: &str, guard: &AppState, player: &Player, server: &Server) -> String {
+fn resolve_ctx(guard: &AppState, player: &Player, server: &Server) -> ResolveCtx {
     let uuid = crate::utils::core::uuid_of(player);
-
-    if line.contains("<location>") {
-        let location = crate::utils::core::location(player);
-        let direction = FACES[((location.yaw / 45.0).round() as i32 & 0x7) as usize];
-        return format!(
-            "{}({}, {}) [{}]",
-            line.replace("<location>", ""),
-            location.block_x(),
-            location.block_z(),
-            direction
-        );
-    }
 
     let (kills, deaths, lives, balance) = guard
         .userdata
@@ -176,8 +169,8 @@ fn resolve(line: &str, guard: &AppState, player: &Player, server: &Server) -> St
         })
         .unwrap_or_else(|| ("0".into(), "0".into(), "0".into(), "0".into()));
 
+    let location = crate::utils::core::location(player);
     let territory = {
-        let location = crate::utils::core::location(player);
         let territory = crate::utils::core::territory_at_guard(
             guard,
             &location.world,
@@ -188,23 +181,46 @@ fn resolve(line: &str, guard: &AppState, player: &Player, server: &Server) -> St
         crate::utils::core::territory_display_guard(guard, &territory, viewer.as_deref())
     };
 
-    let online = if guard.raw.config.bool("LUNAR_CLIENT_API_ENABLED") {
-        server.get_all_players().len()
-    } else {
-        server.get_all_players().len()
-    };
+    let online = server.get_all_players().len();
+    let max_players = server.get_max_players().to_string();
+    let name = crate::utils::core::name_of(player);
+
+    ResolveCtx {
+        kills,
+        deaths,
+        lives,
+        balance,
+        loc_x: location.block_x(),
+        loc_z: location.block_z(),
+        yaw: location.yaw,
+        territory,
+        online,
+        max_players,
+        name,
+    }
+}
+
+/// Mirrors `TabUpdaterImpl.getFunction` / the `<location>` special case.
+fn resolve(line: &str, ctx: &ResolveCtx) -> String {
+    if line.contains("<location>") {
+        let direction = FACES[((ctx.yaw / 45.0).round() as i32 & 0x7) as usize];
+        return format!(
+            "{}({}, {}) [{}]",
+            line.replace("<location>", ""),
+            ctx.loc_x,
+            ctx.loc_z,
+            direction
+        );
+    }
 
     let mut out = line
-        .replace("<kills>", &kills)
-        .replace("<deaths>", &deaths)
-        .replace("<lives>", &lives)
-        .replace("<balance>", &balance)
-        .replace("<faction>", &territory)
-        .replace(
-            "<online>",
-            &format!("{online}/{}", server.get_max_players()),
-        );
-    out = out.replace("<player>", &crate::utils::core::name_of(player));
+        .replace("<kills>", &ctx.kills)
+        .replace("<deaths>", &ctx.deaths)
+        .replace("<lives>", &ctx.lives)
+        .replace("<balance>", &ctx.balance)
+        .replace("<faction>", &ctx.territory)
+        .replace("<online>", &format!("{}/{}", ctx.online, ctx.max_players));
+    out = out.replace("<player>", &ctx.name);
     out
 }
 
