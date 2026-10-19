@@ -80,6 +80,9 @@ jobs:
           cp loadtest/server/pumpkin.toml server/pumpkin.toml
           sed -i "s|^motd = .*|motd = \"${MOTD}\"|" server/pumpkin.toml
           cp target/wasm32-wasip2/release/lazarus_pumpkin.wasm server/plugins/lazarus_pumpkin.wasm
+          if [ -f loadtest/server/native_tab-x86_64.so ]; then
+            cp loadtest/server/native_tab-x86_64.so server/plugins/native_tab.so
+          fi
           curl -fsSL -o "server/${VIAPROXY_JAR}" "${VIAPROXY_URL}"
           cp loadtest/server/viaproxy.yml server/viaproxy.yml
           ls -la server server/plugins
