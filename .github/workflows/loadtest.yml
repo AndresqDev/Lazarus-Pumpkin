@@ -35,6 +35,10 @@ on:
         description: 'Versión de cliente Minecraft'
         required: true
         default: '1.8.9'
+      use_tailscale:
+        description: 'Unirse al tailnet antes de conectar (host = IP Tailscale)'
+        required: true
+        default: 'false'
 
 concurrency:
   group: loadtest
@@ -72,6 +76,25 @@ jobs:
       - name: Instalar dependencias
         working-directory: loadtest
         run: npm ci --no-audit --no-fund
+
+      - name: Unirse al tailnet
+        if: ${{ github.event.inputs.use_tailscale == 'true' }}
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          hostname: lazarus-ci-bots-${{ matrix.shard }}
+          args: --ephemeral
+
+      - name: Verificar conectividad con el server
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, socket
+          host = os.environ["HOST"]
+          port = int(os.environ["PORT"])
+          socket.create_connection((host, port), timeout=10).close()
+          print(f"OK {host}:{port}")
+          PY
 
       - name: Calcular reparto del shard
         id: calc

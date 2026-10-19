@@ -1,0 +1,196 @@
+name: Loadtest Server
+
+# Levanta Pumpkin + ViaProxy en un runner x86_64 de GitHub y los publica en el
+# tailnet. El plugin WASM se compila desde este repo (commit actual), con la
+# misma config tuneada del VPS: view 10, sim 4, compresión level 1, Peaceful.
+#
+# Flujo:
+#   1. Se dispara este workflow a mano (minutes = ventana de vida).
+#   2. Lee el log del paso "Iniciar" y busca la línea `JOIN_READY tcp://IP:25565`.
+#   3. Se entra con el cliente (1.8.9) para ver el server en vivo.
+#   4. Recién ahí se dispara el workflow "Loadtest" (bots) con host = esa IP.
+#
+# Los artifacts (logs, sampler.csv con TPS/MSPT/CPU) quedan al final del run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: 'Minutos que el server queda arriba'
+        required: true
+        default: '45'
+      motd:
+        description: 'MOTD'
+        required: true
+        default: 'Lazarus CI loadtest'
+
+concurrency:
+  group: loadtest-server
+  cancel-in-progress: true
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      MINUTES: ${{ github.event.inputs.minutes }}
+      MOTD: ${{ github.event.inputs.motd }}
+      PUMPKIN_TAG: '0.2.0+26.3-26.51'
+      PUMPKIN_SHA256: '68c4416ca9fbfb3f2aeb6a8ce1de0e3fb02c5a85a53c8ba59a27941d7e43d8cd'
+      VIAPROXY_JAR: 'ViaProxy-3.4.14.jar'
+      VIAPROXY_URL: 'https://github.com/ViaVersion/ViaProxy/releases/download/v3.4.14/ViaProxy-3.4.14.jar'
+      NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain Rust (wasm32-wasip2)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+
+      - name: Compilar plugin WASM
+        run: |
+          set -euo pipefail
+          cargo build --release
+          ls -lh target/wasm32-wasip2/release/lazarus_pumpkin.wasm
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Unirse al tailnet
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          hostname: lazarus-ci-server
+          args: --ephemeral
+
+      - name: Preparar server
+        run: |
+          set -euo pipefail
+          mkdir -p server/plugins
+          curl -fsSL -o server/pumpkin \
+            "https://github.com/Pumpkin-MC/Pumpkin/releases/download/${PUMPKIN_TAG//+/%2B}/pumpkin-X64-Linux"
+          echo "${PUMPKIN_SHA256}  server/pumpkin" | sha256sum -c -
+          chmod +x server/pumpkin
+          cp loadtest/server/pumpkin.toml server/pumpkin.toml
+          sed -i "s|^motd = .*|motd = \"${MOTD}\"|" server/pumpkin.toml
+          cp target/wasm32-wasip2/release/lazarus_pumpkin.wasm server/plugins/lazarus_pumpkin.wasm
+          curl -fsSL -o "server/${VIAPROXY_JAR}" "${VIAPROXY_URL}"
+          cp loadtest/server/viaproxy.yml server/viaproxy.yml
+          ls -la server server/plugins
+
+      - name: Iniciar Pumpkin + ViaProxy
+        run: |
+          set -euo pipefail
+          cd server
+
+          nohup ./pumpkin > pumpkin.log 2>&1 &
+          PUMPKIN_PID=$!
+          echo "PUMPKIN_PID=$PUMPKIN_PID" >> "$GITHUB_ENV"
+          for _ in $(seq 1 90); do
+            if (exec 3<>/dev/tcp/127.0.0.1/25566) 2>/dev/null; then break; fi
+            sleep 2
+          done
+          grep -q "Started server" pumpkin.log || { echo "Pumpkin no arranco"; tail -60 pumpkin.log; exit 1; }
+          echo "--- plugins cargados ---"
+          grep -iE "lazarus|plugin" pumpkin.log | head -10 || true
+
+          nohup java -jar "${VIAPROXY_JAR}" config viaproxy.yml > viaproxy.log 2>&1 &
+          VIAPROXY_PID=$!
+          echo "VIAPROXY_PID=$VIAPROXY_PID" >> "$GITHUB_ENV"
+          for _ in $(seq 1 90); do
+            if (exec 3<>/dev/tcp/127.0.0.1/25565) 2>/dev/null; then break; fi
+            sleep 2
+          done
+          grep -q "ViaProxy started successfully" viaproxy.log || { echo "ViaProxy no arranco"; tail -60 viaproxy.log; exit 1; }
+
+          echo "--- rcon ---"
+          python3 ../loadtest/server/rcon.py list lazarus-test 127.0.0.1 25575 || true
+          python3 ../loadtest/server/rcon.py tps lazarus-test 127.0.0.1 25575 || true
+
+          PUMPKIN_PID=$PUMPKIN_PID VIAPROXY_PID=$VIAPROXY_PID \
+            nohup python3 ../loadtest/server/sampler.py --out sampler.csv --interval 5 > sampler.log 2>&1 &
+          echo "SAMPLER_PID=$!" >> "$GITHUB_ENV"
+
+          TS_IP=$(tailscale ip -4 | head -1)
+          {
+            echo "## Loadtest server listo"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Join (Tailscale) | \`${TS_IP}:25565\` |"
+            echo "| Cliente | 1.8.9 (ViaProxy acepta 1.7.2+) |"
+            echo "| RCON local | 127.0.0.1:25575 |"
+            echo "| Ventana | ${MINUTES} min |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "JOIN_READY tcp://${TS_IP}:25565"
+
+      - name: Túnel ngrok (opcional)
+        if: ${{ env.NGROK_AUTHTOKEN != '' }}
+        run: |
+          set -uo pipefail
+          if ! command -v ngrok >/dev/null; then
+            curl -fsSL -o /tmp/ngrok.tgz https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
+            sudo tar -xzf /tmp/ngrok.tgz -C /usr/local/bin ngrok
+          fi
+          ngrok config add-authtoken "$NGROK_AUTHTOKEN" >/dev/null
+          nohup ngrok tcp 25565 --log stdout > server/ngrok.log 2>&1 &
+          echo "NGROK_PID=$!" >> "$GITHUB_ENV"
+          for _ in $(seq 1 20); do
+            ADDR=$(curl -fsS http://127.0.0.1:4040/api/tunnels 2>/dev/null \
+              | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['tunnels'][0]['public_url'] if d.get('tunnels') else '')" 2>/dev/null || true)
+            if [ -n "$ADDR" ]; then
+              echo "NGROK_READY $ADDR"
+              echo "- ngrok: \`$ADDR\`" >> "$GITHUB_STEP_SUMMARY"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Mantener server arriba
+        run: |
+          set -uo pipefail
+          END=$(( $(date +%s) + MINUTES * 60 ))
+          while [ "$(date +%s)" -lt "$END" ]; do
+            if ! kill -0 "$PUMPKIN_PID" 2>/dev/null; then
+              echo "ERROR: Pumpkin murio"
+              tail -80 server/pumpkin.log
+              exit 1
+            fi
+            LAST=$(tail -1 server/sampler.log 2>/dev/null || true)
+            echo "[$(date -u +%H:%M:%S)] ${LAST:-sin muestras}"
+            sleep 30
+          done
+
+      - name: Bajar todo
+        if: always()
+        run: |
+          set +e
+          for p in "${NGROK_PID:-}" "${SAMPLER_PID:-}" "${VIAPROXY_PID:-}" "${PUMPKIN_PID:-}"; do
+            [ -n "$p" ] && kill "$p" 2>/dev/null
+          done
+          sleep 8
+          echo '--- pumpkin.log (cola) ---'; tail -40 server/pumpkin.log 2>/dev/null
+          echo '--- viaproxy.log (cola) ---'; tail -20 server/viaproxy.log 2>/dev/null
+          echo '--- sampler.log (cola) ---'; tail -10 server/sampler.log 2>/dev/null
+
+      - name: Subir artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-server
+          path: |
+            server/pumpkin.log
+            server/logs/latest.log
+            server/viaproxy.log
+            server/sampler.csv
+            server/sampler.log
+            server/ngrok.log
+            server/pumpkin.toml
+          if-no-files-found: warn
+          retention-days: 7
