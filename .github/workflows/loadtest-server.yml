@@ -1,12 +1,17 @@
-name: Loadtest Server (split Pumpkin/ViaProxy)
+name: Loadtest Server (split Pumpkin/proxy)
 
-# Levanta Pumpkin y ViaProxy en DOS runners x86_64 distintos, unidos por Tailscale.
+# Levanta Pumpkin y el proxy en DOS runners x86_64 distintos, unidos por Tailscale.
 # - job `server`: compila el WASM, corre Pumpkin (25566 en el tailnet) + sampler.
-# - job `proxy`:  corre ViaProxy (25565 en el tailnet) apuntando a Pumpkin + sampler.
+# - job `proxy-velocity` (default): Velocity 3.5.1 + ViaVersion/ViaBackwards/ViaRewind
+#   escuchando en 25565 y apuntando a Pumpkin + sampler.
+# - job `proxy-viaproxy`: variante A/B con ViaProxy 3.4.14.
 #
-# Motivo del split: ViaProxy (traduccion 1.8.9 -> 26.3) consume 2.5-3.3 cores y en
-# un solo runner de 4 vCPU se comia el CPU de Pumpkin (MSPT > 1.2 s con ~95 bots).
-# Asi cada proceso tiene su propio host de 4 vCPU.
+# Motivo del split: la traduccion 1.8.9 -> 26.3 consume 2.5-3.3 cores y en un solo
+# runner de 4 vCPU se comia el CPU de Pumpkin (MSPT > 1.2 s con ~95 bots). Asi cada
+# proceso tiene su propio host de 4 vCPU.
+#
+# Por que Velocity 3.5.1 y no 4.x: 4.0 exige Java 25 y el ecosistema de plugins
+# todavia va por detras; 3.5.1 es el canal RECOMMENDED de PaperMC y corre en Java 21.
 #
 # Flujo:
 #   1. workflow_dispatch (minutes = ventana de vida).
@@ -24,6 +29,14 @@ on:
         description: 'MOTD'
         required: true
         default: 'Lazarus CI loadtest'
+      proxy:
+        description: 'Proxy a usar'
+        required: true
+        default: velocity
+        type: choice
+        options:
+          - velocity
+          - viaproxy
 
 concurrency:
   group: loadtest-server
@@ -36,6 +49,11 @@ env:
   PUMPKIN_SHA256: '68c4416ca9fbfb3f2aeb6a8ce1de0e3fb02c5a85a53c8ba59a27941d7e43d8cd'
   VIAPROXY_JAR: 'ViaProxy-3.4.14.jar'
   VIAPROXY_URL: 'https://github.com/ViaVersion/ViaProxy/releases/download/v3.4.14/ViaProxy-3.4.14.jar'
+  VELOCITY_URL: 'https://fill-data.papermc.io/v1/objects/b4e3164df5377346854dc6cb9e6a78022b1946ff69e89676313f5f6f1c6f0fb3/velocity-3.5.1-615.jar'
+  VELOCITY_SHA256: 'b4e3164df5377346854dc6cb9e6a78022b1946ff69e89676313f5f6f1c6f0fb3'
+  VIAVERSION_URL: 'https://github.com/ViaVersion/ViaVersion/releases/download/5.12.1/ViaVersion-5.12.1.jar'
+  VIABACKWARDS_URL: 'https://github.com/ViaVersion/ViaBackwards/releases/download/5.12.1/ViaBackwards-5.12.1.jar'
+  VIAREWIND_URL: 'https://github.com/ViaVersion/ViaRewind/releases/download/4.2.0/ViaRewind-4.2.0.jar'
 
 jobs:
   server:
@@ -170,8 +188,184 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  proxy:
+  proxy-velocity:
+    name: velocity
+    if: ${{ github.event.inputs.proxy != 'viaproxy' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Unirse al tailnet
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          hostname: lazarus-ci-proxy
+
+      - name: Descargar Velocity 3.5.1
+        run: |
+          set -euo pipefail
+          mkdir -p proxy
+          curl -fsSL -o proxy/velocity.jar "${VELOCITY_URL}"
+          echo "${VELOCITY_SHA256}  proxy/velocity.jar" | sha256sum -c -
+          ls -lh proxy/velocity.jar
+          echo "--- CPU del runner (velocity) ---"
+          nproc
+          lscpu | grep -E 'Model name|^CPU\(s\)|MHz|Hypervisor' || true
+          free -m | head -2
+
+      - name: Generar velocity.toml por defecto
+        run: |
+          set -uo pipefail
+          cd proxy
+          timeout 20 java -jar velocity.jar > first-run.log 2>&1 || true
+          if [ ! -f velocity.toml ]; then
+            echo "ERROR: Velocity no genero velocity.toml"
+            tail -80 first-run.log
+            exit 1
+          fi
+          echo '--- velocity.toml generado ---'
+          grep -vE '^\s*#|^\s*$' velocity.toml | head -45
+
+      - name: Esperar Pumpkin y arrancar Velocity
+        run: |
+          set -uo pipefail
+          cd proxy
+
+          TS_IP=$(tailscale ip -4 | head -1)
+          echo "PROXY_IP=${TS_IP}"
+
+          SRV_IP=""
+          for _ in $(seq 1 120); do
+            for ip in $(tailscale status | grep 'lazarus-ci-server' | grep -v offline | awk '{print $1}'); do
+              if (exec 3<>/dev/tcp/$ip/25566) 2>/dev/null; then SRV_IP=$ip; break; fi
+            done
+            [ -n "$SRV_IP" ] && break
+            sleep 5
+          done
+          if [ -z "$SRV_IP" ]; then
+            echo "ERROR: no encontre Pumpkin en el tailnet"; tailscale status; exit 1
+          fi
+          echo "backend=${SRV_IP}:25566"
+
+          MOTD_ESC="${MOTD//\"/}"
+          sed -i 's|^online-mode = .*|online-mode = false|' velocity.toml
+          sed -i 's|^player-info-forwarding-mode = .*|player-info-forwarding-mode = "none"|' velocity.toml
+          sed -i "s|^motd = .*|motd = \"${MOTD_ESC}\"|" velocity.toml
+          sed -i "s|^lobby = .*|lobby = \"${SRV_IP}:25566\"|" velocity.toml
+          sed -i 's|^compression-threshold = .*|compression-threshold = 1024|' velocity.toml
+          sed -i 's|^compression-level = .*|compression-level = 1|' velocity.toml
+          if ! grep -q '^compression-level' velocity.toml; then
+            sed -i '/^compression-threshold/a compression-level = 1' velocity.toml
+          fi
+          sed -i 's|^login-ratelimit = .*|login-ratelimit = 0|' velocity.toml
+          sed -i 's|^tcp-fast-open = .*|tcp-fast-open = true|' velocity.toml
+          sed -i 's|^enable-player-address-logging = .*|enable-player-address-logging = false|' velocity.toml
+          sed -i 's|^log-player-connections = .*|log-player-connections = false|' velocity.toml
+
+          mkdir -p plugins
+          curl -fsSL -o plugins/ViaVersion.jar "${VIAVERSION_URL}"
+          curl -fsSL -o plugins/ViaBackwards.jar "${VIABACKWARDS_URL}"
+          curl -fsSL -o plugins/ViaRewind.jar "${VIAREWIND_URL}"
+          ls -lh plugins
+
+          echo '--- config final ---'
+          grep -vE '^\s*#|^\s*$' velocity.toml | head -50
+
+          nohup java -Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -XX:+ParallelRefProcEnabled \
+            -jar velocity.jar > velocity.log 2>&1 &
+          VELOCITY_PID=$!
+          echo "VELOCITY_PID=$VELOCITY_PID" >> "$GITHUB_ENV"
+
+          vready=0
+          for _ in $(seq 1 90); do
+            if ! kill -0 "$VELOCITY_PID" 2>/dev/null; then break; fi
+            if (exec 3<>/dev/tcp/127.0.0.1/25565) 2>/dev/null; then vready=1; break; fi
+            sleep 2
+          done
+          if [ "$vready" != "1" ]; then
+            echo "ERROR: Velocity no abrio 25565"
+            tail -120 velocity.log
+            exit 1
+          fi
+          for _ in $(seq 1 30); do
+            grep -q 'Done (' velocity.log && break
+            sleep 2
+          done
+          echo '--- Velocity listo ---'
+          grep -iE 'Loading plugins|Loaded plugin|Done \(|Listening|viaversion|viabackwards|viarewind|error' velocity.log | tail -30 || true
+
+          if ! grep -qi 'viaversion' velocity.log; then
+            echo "WARN: ViaVersion no aparece en el log de Velocity"
+          fi
+
+          VELOCITY_PID=$VELOCITY_PID \
+            nohup python3 ../loadtest/server/sampler.py --no-rcon --out velocity.csv --interval 5 > sampler.log 2>&1 &
+          echo "SAMPLER_PID=$!" >> "$GITHUB_ENV"
+
+          {
+            echo "## Velocity listo (split)"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Join (Tailscale) | \`${TS_IP}:25565\` |"
+            echo "| Proxy | Velocity 3.5.1 (offline, forwarding none) |"
+            echo "| Plugins | ViaVersion 5.12.1 + ViaBackwards 5.12.1 + ViaRewind 4.2.0 |"
+            echo "| Backend | \`${SRV_IP}:25566\` |"
+            echo "| Ventana | ${MINUTES} min |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "JOIN_READY tcp://${TS_IP}:25565"
+
+      - name: Mantener Velocity arriba
+        run: |
+          set -uo pipefail
+          END=$(( $(date +%s) + MINUTES * 60 ))
+          while [ "$(date +%s)" -lt "$END" ]; do
+            if ! kill -0 "$VELOCITY_PID" 2>/dev/null; then
+              echo "ERROR: Velocity murio"
+              tail -80 proxy/velocity.log
+              exit 1
+            fi
+            LAST=$(tail -1 proxy/sampler.log 2>/dev/null || true)
+            echo "[$(date -u +%H:%M:%S)] ${LAST:-sin muestras}"
+            sleep 30
+          done
+
+      - name: Bajar todo
+        if: always()
+        run: |
+          set +e
+          for p in "${SAMPLER_PID:-}" "${VELOCITY_PID:-}"; do
+            [ -n "$p" ] && kill "$p" 2>/dev/null
+          done
+          sleep 8
+          echo '--- velocity.log (cola) ---'; tail -40 proxy/velocity.log 2>/dev/null
+          echo '--- sampler.log (cola) ---'; tail -10 proxy/sampler.log 2>/dev/null
+
+      - name: Subir artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-proxy
+          path: |
+            proxy/velocity.log
+            proxy/velocity.csv
+            proxy/velocity.toml
+            proxy/first-run.log
+            proxy/sampler.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  proxy-viaproxy:
     name: viaproxy
+    if: ${{ github.event.inputs.proxy == 'viaproxy' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -311,7 +505,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: loadtest-proxy
+          name: loadtest-proxy-viaproxy
           path: |
             proxy/viaproxy.log
             proxy/viaproxy.csv
