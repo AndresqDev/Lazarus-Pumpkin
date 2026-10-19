@@ -8,10 +8,23 @@ const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
 const { GoalXZ } = goals;
 
 const cfg = JSON.parse(process.argv[2]);
+const PHASES = Array.isArray(cfg.phases) && cfg.phases.length ? cfg.phases : null;
 const bots = [];
 const stats = { deaths: 0, attacks: 0, errors: 0, kicks: 0, reached: 0, stuck: 0, reconnects: 0, disconnects: 0 };
 const startedAt = Date.now();
 let shuttingDown = false;
+
+// Fase actual segun el reloj compartido (cfg.t0). null = sin fases o test terminado.
+function currentPhase() {
+  if (!PHASES) return null;
+  const elapsed = (Date.now() - (cfg.t0 || startedAt)) / 1000;
+  let acc = 0;
+  for (const p of PHASES) {
+    acc += p.secs;
+    if (elapsed < acc) return p;
+  }
+  return null;
+}
 
 const log = (...args) => console.log(`[w${cfg.worker}]`, ...args);
 
@@ -35,12 +48,12 @@ function createBot(index, attempt = 0) {
     try { bot.pathfinder.stop(); } catch (_) {}
   };
 
-  const setArenaGoal = () => {
+  const setArenaGoal = (cx = cfg.arena.x, cz = cfg.arena.z, minR = 4, addR = 20) => {
     if (shuttingDown || !bot.entity) return;
     const angle = Math.random() * Math.PI * 2;
-    const radius = 4 + Math.random() * 20;
-    const x = Math.round(cfg.arena.x + Math.cos(angle) * radius);
-    const z = Math.round(cfg.arena.z + Math.sin(angle) * radius);
+    const radius = minR + Math.random() * addR;
+    const x = Math.round(cx + Math.cos(angle) * radius);
+    const z = Math.round(cz + Math.sin(angle) * radius);
     try {
       const moves = new Movements(bot);
       moves.canDig = false;
@@ -63,6 +76,7 @@ function createBot(index, attempt = 0) {
   const afterRespawn = () => {
     st.mode = 'join';
     st.lastJump = 0;
+    st.lastGoal = 0;
     bot.clearControlStates();
     stopPath();
     setTimeout(() => setArenaGoal(), 1000);
@@ -124,6 +138,21 @@ function createBot(index, attempt = 0) {
   st.timer = setInterval(() => {
     if (shuttingDown || !bot.entity || bot.health === undefined) return;
     if (bot.health <= 0) return;
+
+    const ph = currentPhase();
+    if (PHASES && ph !== st.phase) {
+      st.phase = ph;
+      stopPath();
+      bot.clearControlStates();
+      st.lastGoal = 0;
+      st.mode = ph && ph.mode === 'fight' ? 'arena' : 'travel';
+    }
+    if (ph && ph.mode === 'idle') return;
+    const arena = ph && ph.x !== undefined ? { x: ph.x, z: ph.z } : cfg.arena;
+    if (ph && ph.mode === 'move') {
+      if (Date.now() - st.lastGoal > 8000) setArenaGoal(arena.x, arena.z, 0, 3);
+      return;
+    }
 
     const pos = bot.entity.position;
     const radius = Math.hypot(pos.x, pos.z);
@@ -188,11 +217,11 @@ function createBot(index, attempt = 0) {
     }
 
     if (st.mode === 'stuck' || st.mode === 'arena') {
-      if (Date.now() - st.lastGoal > 8000) setArenaGoal();
+      if (Date.now() - st.lastGoal > 8000) setArenaGoal(arena.x, arena.z);
     } else if (st.mode === 'fallback') {
       // Ultimo recurso si el pathfinder no encuentra ruta: caminar recto.
-      const dx = cfg.arena.x - pos.x;
-      const dz = cfg.arena.z - pos.z;
+      const dx = arena.x - pos.x;
+      const dz = arena.z - pos.z;
       if (Math.hypot(dx, dz) < 4) {
         st.mode = 'arena';
         bot.clearControlStates();

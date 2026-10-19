@@ -25,6 +25,21 @@ function parseArgs(argv) {
   return out;
 }
 
+function parsePhases(s) {
+  if (!s) return null;
+  const out = s
+    .split(',')
+    .map((part) => {
+      const t = part.trim().split(':');
+      const p = { mode: t[0], secs: parseInt(t[1] || '60', 10) };
+      if (t[2] !== undefined) p.x = parseInt(t[2], 10);
+      if (t[3] !== undefined) p.z = parseInt(t[3], 10);
+      return p;
+    })
+    .filter((p) => p.mode && p.secs > 0);
+  return out.length ? out : null;
+}
+
 const a = parseArgs(process.argv.slice(2));
 const cfg = {
   host: a.host || '127.0.0.1',
@@ -37,6 +52,8 @@ const cfg = {
   version: a.version || '1.8.9',
   maxReconnects: parseInt(a.maxReconnects || '10', 10),
   joinSpacing: parseInt(a.joinSpacing || '900', 10),
+  phases: parsePhases(a.phases),
+  t0: Date.now(),
   shard: parseInt(a.shard || '0', 10),
   startIndex: parseInt(
     a.startIndex || String(parseInt(a.shard || '0', 10) * parseInt(a.count || '25', 10) + 1),
@@ -73,6 +90,8 @@ function spawnWorker(i) {
         arena: { x: cfg.arenaX, z: cfg.arenaZ },
         maxReconnects: cfg.maxReconnects,
         joinSpacing: cfg.joinSpacing,
+        phases: cfg.phases,
+        t0: cfg.t0,
       }),
     ],
     { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] }
@@ -88,9 +107,19 @@ for (let i = 0; i < cfg.workers; i++) spawnWorker(i);
 
 const sum = (k) => lastStats.filter(Boolean).reduce((x, y) => x + (y[k] || 0), 0);
 
+function phaseLabel(elapsed) {
+  if (!cfg.phases) return elapsed < cfg.warmup ? 'warmup' : 'medicion';
+  let acc = 0;
+  for (const p of cfg.phases) {
+    acc += p.secs;
+    if (elapsed < acc) return p.mode;
+  }
+  return 'fin';
+}
+
 const tick = setInterval(() => {
   const elapsed = Math.round((Date.now() - startedAt) / 1000);
-  const phase = elapsed < cfg.warmup ? 'warmup' : 'medicion';
+  const phase = phaseLabel(elapsed);
   log(
     `t=${elapsed}s fase=${phase} vivos=${sum('alive')}/${cfg.count} ` +
       `muertes=${sum('deaths')} ataques=${sum('attacks')} err=${sum('errors')} ` +
@@ -99,7 +128,9 @@ const tick = setInterval(() => {
   );
 }, 10000);
 
-const totalTest = cfg.warmup + cfg.duration;
+const totalTest = cfg.phases
+  ? cfg.phases.reduce((x, p) => x + p.secs, 0)
+  : cfg.warmup + cfg.duration;
 
 function stopAll() {
   clearInterval(tick);

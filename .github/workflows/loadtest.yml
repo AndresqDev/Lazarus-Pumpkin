@@ -31,6 +31,10 @@ on:
         description: 'Prefijo de nombres de los bots'
         required: true
         default: 'Perf'
+      phases:
+        description: 'Fases opcionales: idle:45,move:75:250:250,fight:150:100:100 (ignora warmup/duration)'
+        required: false
+        default: ''
       version:
         description: 'Versión de cliente Minecraft'
         required: true
@@ -61,6 +65,7 @@ jobs:
       DURATION: ${{ github.event.inputs.duration }}
       PREFIX: ${{ github.event.inputs.prefix }}
       VERSION: ${{ github.event.inputs.version }}
+      PHASES: ${{ github.event.inputs.phases }}
 
     steps:
       - name: Checkout
@@ -109,6 +114,8 @@ jobs:
         working-directory: loadtest
         shell: bash
         run: |
+          EXTRA="--warmup $WARMUP --duration $DURATION"
+          if [ -n "$PHASES" ]; then EXTRA="--phases $PHASES"; fi
           node shard.js \
             --host "$HOST" \
             --port "$PORT" \
@@ -116,8 +123,7 @@ jobs:
             --startIndex "${{ steps.calc.outputs.start }}" \
             --shard "${{ matrix.shard }}" \
             --workers 4 \
-            --warmup "$WARMUP" \
-            --duration "$DURATION" \
+            $EXTRA \
             --prefix "$PREFIX" \
             --version "$VERSION" \
             2>&1 | tee "shard-${{ matrix.shard }}.log"

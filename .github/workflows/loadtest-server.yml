@@ -23,6 +23,10 @@ on:
         description: 'MOTD'
         required: true
         default: 'Lazarus CI loadtest'
+      pin:
+        description: 'Pinnear CPU (auto|true|false): pumpkin a cores 1..N-1, viaproxy al core 0'
+        required: false
+        default: 'auto'
 
 concurrency:
   group: loadtest-server
@@ -35,6 +39,7 @@ jobs:
     env:
       MINUTES: ${{ github.event.inputs.minutes }}
       MOTD: ${{ github.event.inputs.motd }}
+      PIN: ${{ github.event.inputs.pin }}
       PUMPKIN_TAG: '0.2.0+26.3-26.51'
       PUMPKIN_SHA256: '68c4416ca9fbfb3f2aeb6a8ce1de0e3fb02c5a85a53c8ba59a27941d7e43d8cd'
       VIAPROXY_JAR: 'ViaProxy-3.4.14.jar'
@@ -86,6 +91,10 @@ jobs:
           curl -fsSL -o "server/${VIAPROXY_JAR}" "${VIAPROXY_URL}"
           cp loadtest/server/viaproxy.yml server/viaproxy.yml
           ls -la server server/plugins
+          echo "--- CPU del runner ---"
+          nproc
+          lscpu | grep -E 'Model name|^CPU\(s\)|MHz|Hypervisor' || true
+          free -m | head -2
 
       - name: Iniciar Pumpkin + ViaProxy
         run: |
@@ -95,7 +104,16 @@ jobs:
           TS_IP=$(tailscale ip -4 | head -1)
           echo "TAILSCALE_IP=${TS_IP}"
 
-          nohup ./pumpkin > pumpkin.log 2>&1 &
+          NPROC=$(nproc)
+          PUMPKIN_CMD="./pumpkin"
+          VIAPROXY_CMD="java -jar ${VIAPROXY_JAR} config viaproxy.yml"
+          if [ "${PIN}" = "true" ] || { [ "${PIN}" = "auto" ] && [ "$NPROC" -ge 4 ]; }; then
+            PUMPKIN_CMD="taskset -c 1-$((NPROC-1)) ./pumpkin"
+            VIAPROXY_CMD="taskset -c 0 nice -n 5 java -jar ${VIAPROXY_JAR} config viaproxy.yml"
+          fi
+          echo "PIN=${PIN} nproc=${NPROC} pumpkin_cmd=${PUMPKIN_CMD} viaproxy_cmd=${VIAPROXY_CMD}"
+
+          nohup $PUMPKIN_CMD > pumpkin.log 2>&1 &
           PUMPKIN_PID=$!
           echo "PUMPKIN_PID=$PUMPKIN_PID" >> "$GITHUB_ENV"
 
@@ -115,7 +133,7 @@ jobs:
           echo "--- Pumpkin listo ---"
           grep -iE "Started server|lazarus|kitmap|plugin" pumpkin.log | tail -12 || true
 
-          nohup java -jar "${VIAPROXY_JAR}" config viaproxy.yml > viaproxy.log 2>&1 &
+          nohup $VIAPROXY_CMD > viaproxy.log 2>&1 &
           VIAPROXY_PID=$!
           echo "VIAPROXY_PID=$VIAPROXY_PID" >> "$GITHUB_ENV"
           vready=0
