@@ -45,6 +45,7 @@ concurrency:
 env:
   MINUTES: ${{ github.event.inputs.minutes }}
   MOTD: ${{ github.event.inputs.motd }}
+  PROXY_KIND: ${{ github.event.inputs.proxy }}
   PUMPKIN_TAG: '0.2.0+26.3-26.51'
   PUMPKIN_SHA256: '68c4416ca9fbfb3f2aeb6a8ce1de0e3fb02c5a85a53c8ba59a27941d7e43d8cd'
   VIAPROXY_JAR: 'ViaProxy-3.4.14.jar'
@@ -91,6 +92,13 @@ jobs:
           chmod +x server/pumpkin
           cp loadtest/server/pumpkin.toml server/pumpkin.toml
           sed -i "s|^motd = .*|motd = \"${MOTD}\"|" server/pumpkin.toml
+          # Con Velocity, la compresion la hace solo el proxy (FAQ oficial):
+          # el backend no debe comprimir para no obligar al proxy a descomprimir/recomprimir.
+          if [ "${PROXY_KIND:-velocity}" != "viaproxy" ]; then
+            sed -i '/^\[networking\.java\.compression\]/,/^$/ s/^enabled = true/enabled = false/' server/pumpkin.toml
+          fi
+          echo '--- compression backend ---'
+          sed -n '/^\[networking\.java\.compression\]/,/^$/p' server/pumpkin.toml
           cp target/wasm32-wasip2/release/lazarus_pumpkin.wasm server/plugins/lazarus_pumpkin.wasm
           if [ -f loadtest/server/native_tab-x86_64.so ]; then
             cp loadtest/server/native_tab-x86_64.so server/plugins/native_tab.so
@@ -269,6 +277,11 @@ jobs:
           sed -i 's|^tcp-fast-open = .*|tcp-fast-open = true|' velocity.toml
           sed -i 's|^enable-player-address-logging = .*|enable-player-address-logging = false|' velocity.toml
           sed -i 's|^log-player-connections = .*|log-player-connections = false|' velocity.toml
+          if ! grep -q '^enable-reuse-port' velocity.toml; then
+            sed -i '/^\[advanced\]/a enable-reuse-port = true' velocity.toml
+          else
+            sed -i 's|^enable-reuse-port = .*|enable-reuse-port = true|' velocity.toml
+          fi
 
           mkdir -p plugins
           curl -fsSL -o plugins/ViaVersion.jar "${VIAVERSION_URL}"
