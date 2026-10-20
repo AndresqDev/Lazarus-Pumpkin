@@ -158,12 +158,9 @@ impl EventHandler<PlayerSpawnLocationEvent> for SpawnLocationListener {
         if event.cancelled {
             return event;
         }
-        let uuid = core::uuid_of(&event.player);
-        tracing::info!("LOADTEST_SPAWN_LOC enter uuid={uuid}");
         if let Some((_world, (x, y, z), _yaw, _pitch)) = core::configured_spawn(&server) {
             event.spawn_pos = (x, y, z);
         }
-        tracing::info!("LOADTEST_SPAWN_LOC done uuid={uuid} pos={:?}", event.spawn_pos);
 
         event
     }
@@ -472,7 +469,6 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
             event.cancelled = true;
             return event;
         }
-        tracing::info!("LOADTEST_DEATH enter uuid={uuid}");
 
         let name = core::name_of(&event.player);
         let world = core::world_name(&event.player);
@@ -652,28 +648,19 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
         // `DeathMessageHandler#onPlayerDeath` delivery: the victim, the killer
         // and every player with death messages enabled (the vanilla broadcast is
         // disabled at load, see `death::init`).
-        tracing::info!("LOADTEST_DEATH before send_message uuid={uuid}");
         crate::handlers::death::send_death_message(&server, &uuid, killer_uuid.as_deref(), &reason);
-        tracing::info!("LOADTEST_DEATH after send_message uuid={uuid}");
         event.death_message = utils::text(&reason);
 
         // Deathban (`DeathbanManager#onPlayerDeath`; the kick fires ~1s later,
         // like the original's `Tasks.syncLater`).
-        tracing::info!("LOADTEST_DEATH before deathban uuid={uuid}");
         crate::deathban::apply_on_death(&event.player, &reason);
-        tracing::info!("LOADTEST_DEATH after deathban uuid={uuid}");
 
         // Drop the claim wand (port of the death handling in SelectionManager).
-        tracing::info!("LOADTEST_DEATH before final state lock uuid={uuid}");
         {
             let mut guard = state().write().unwrap();
-            tracing::info!("LOADTEST_DEATH final state locked uuid={uuid}");
             guard.selection.cancel_local(&event.player);
-            tracing::info!("LOADTEST_DEATH final selection done uuid={uuid}");
             guard.glass.clear_type(&event.player, crate::glass::GlassType::ClaimSelection);
-            tracing::info!("LOADTEST_DEATH final glass done uuid={uuid}");
         }
-        tracing::info!("LOADTEST_DEATH done uuid={uuid}");
 
         event
     }
@@ -695,7 +682,6 @@ pub struct RespawnListener;
 impl EventHandler<PlayerRespawnEvent> for RespawnListener {
     fn handle(&self, server: Server, event: EventData<PlayerRespawnEvent>) -> EventData<PlayerRespawnEvent> {
         let uuid = core::uuid_of(&event.player);
-        tracing::info!("LOADTEST_RESPAWN_EVENT enter uuid={uuid}");
         let (x, _y, z) = event.position;
         let world = event.respawned_world.get_name();
         let block_x = x.floor() as i32;
@@ -706,7 +692,6 @@ impl EventHandler<PlayerRespawnEvent> for RespawnListener {
         // `SpawnLocationListener` (the host applies the position override
         // before the respawn packet).
         event.player.as_entity().set_fire_ticks(0);
-        tracing::info!("LOADTEST_RESPAWN_EVENT after fire_ticks uuid={uuid}");
 
         // A stored respawn point in another dimension (legacy bed/anchor NBT)
         // makes the host resolve that dimension *before* the spawn override is
@@ -718,7 +703,6 @@ impl EventHandler<PlayerRespawnEvent> for RespawnListener {
         {
             state().write().unwrap().respawn_fixes.insert(uuid.clone());
         }
-        tracing::info!("LOADTEST_RESPAWN_EVENT after configured_spawn uuid={uuid}");
 
         let (protect_seconds, kitmap_skips_pvp) = {
             let guard = state().read().unwrap();
@@ -727,13 +711,11 @@ impl EventHandler<PlayerRespawnEvent> for RespawnListener {
                 guard.config.kitmap.enabled && !guard.config.kitmap.pvp_timer_enabled,
             )
         };
-        tracing::info!("LOADTEST_RESPAWN_EVENT after config uuid={uuid}");
 
         // `PvpProtHandler#onPlayerRespawn` returns early in kitmap mode without
         // the PvP timer: neither cancels nor (re)activates protection.
         if kitmap_skips_pvp {
             state().write().unwrap().chunk_cache.remove(&uuid);
-            tracing::info!("LOADTEST_RESPAWN_EVENT done kitmap uuid={uuid}");
             return event;
         }
 
@@ -769,7 +751,6 @@ impl EventHandler<PlayerRespawnEvent> for RespawnListener {
             guard.chunk_cache.remove(&uuid);
         }
 
-        tracing::info!("LOADTEST_RESPAWN_EVENT done uuid={uuid}");
         event
     }
 }
@@ -783,7 +764,6 @@ pub struct TeleportListener;
 impl EventHandler<PlayerTeleportEvent> for TeleportListener {
     fn handle(&self, server: Server, mut event: EventData<PlayerTeleportEvent>) -> EventData<PlayerTeleportEvent> {
         let uuid = core::uuid_of(&event.player);
-        tracing::info!("LOADTEST_TELEPORT enter uuid={uuid} to={:?}", event.to_position);
         let (x, _y, z) = event.to_position;
         let block_x = x.floor() as i32;
         let block_z = z.floor() as i32;
@@ -809,7 +789,6 @@ impl EventHandler<PlayerTeleportEvent> for TeleportListener {
             };
             (in_safezone, deny, protected)
         };
-        tracing::info!("LOADTEST_TELEPORT after state uuid={uuid} deny={deny} protected={protected}");
 
         if deny {
             event.cancelled = true;
@@ -821,7 +800,6 @@ impl EventHandler<PlayerTeleportEvent> for TeleportListener {
                 )
             };
             core::send(&event.player, &format!("{prefix}{message}"));
-            tracing::info!("LOADTEST_TELEPORT done denied uuid={uuid}");
             return event;
         }
 
@@ -834,18 +812,14 @@ impl EventHandler<PlayerTeleportEvent> for TeleportListener {
             }
         }
 
-        tracing::info!("LOADTEST_TELEPORT after timers uuid={uuid}");
-
         // SOTW: update visibility for the destination (no-op when the timer is
         // not running or hiding is disabled).
         crate::handlers::timer::sotw::update_player_visibility(&server, &event.player, in_safezone);
-        tracing::info!("LOADTEST_TELEPORT after sotw uuid={uuid}");
 
         // `PlayerEventListener#onPlayerTeleport` also runs `checkMovement`, so
         // teleports announce claim changes immediately (and cancel warmups).
         check_movement(&event.player, &uuid, event.from_position, event.to_position, &world);
 
-        tracing::info!("LOADTEST_TELEPORT done uuid={uuid}");
         event
     }
 }

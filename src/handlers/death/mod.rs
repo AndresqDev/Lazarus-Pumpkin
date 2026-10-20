@@ -450,13 +450,11 @@ pub fn send_death_message(
     killer_uuid: Option<&str>,
     message: &str,
 ) {
-    tracing::info!("LOADTEST_MSG get_all_players start victim={victim_uuid}");
     let online: Vec<(String, Player)> = server
         .get_all_players()
         .into_iter()
         .map(|player| (core::uuid_of(&player), player))
         .collect();
-    tracing::info!("LOADTEST_MSG get_all_players done victim={victim_uuid} n={}", online.len());
 
     let targets: Vec<Player> = {
         let guard = state().read().unwrap();
@@ -475,11 +473,9 @@ pub fn send_death_message(
             .collect()
     };
 
-    tracing::info!("LOADTEST_MSG send start victim={victim_uuid} targets={}", targets.len());
     for player in &targets {
         core::send(player, message);
     }
-    tracing::info!("LOADTEST_MSG send done victim={victim_uuid}");
 }
 
 /// `PlayerFaction#onDeath` plus the silent warmup cancels, both guarded by the
