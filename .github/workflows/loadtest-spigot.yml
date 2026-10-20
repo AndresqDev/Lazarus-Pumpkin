@@ -1,0 +1,430 @@
+name: Loadtest PaperSpigot 1.8.8 (virgin)
+
+# Baseline limpio: PaperSpigot 1.8.8 oficial, sin plugins, mundo HCF o plano.
+# - job `paper`: baja el jar oficial de PaperMC, arranca el server, aplica
+#   server.properties minimos y recolecta TPS/CPU/RSS por RCON.
+# - jobs `bots`: 4 shards Mineflayer 1.8.9. Cada shard corre la rampa completa
+#   (por defecto 100, 200 y 300 bots) para no tener que disparar 3 workflows.
+#
+# No se ejecuta nada en la maquina local: todo corre en runners efimeros de
+# GitHub. El jar 1.7.10 de Descargas/HCF se inspecciono pero NO se ejecuta; para
+# el baseline 1.8 se usa el build oficial de PaperMC (mismo protocolo 1.8.8 que
+# los bots 1.8.9).
+#
+# Mundo: por defecto se baja un asset de un release DRAFT
+# (`spigot-baseline-world-v1`) con el world del HCF premade, sin playerdata.
+# Para un test totalmente plano, dejar `world_asset` vacio.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: 'Minutos que el server queda arriba (debe cubrir la rampa)'
+        required: true
+        default: '35'
+      ramp:
+        description: 'Etapas de bots separadas por coma (ej. 100,200,300)'
+        required: true
+        default: '100,200,300'
+      phases:
+        description: 'Fases por etapa (idle:seg,move:seg,fight:seg)'
+        required: true
+        default: 'idle:45,move:75,fight:60'
+      joinSpacing:
+        description: 'ms entre joins dentro de cada worker'
+        required: true
+        default: '1000'
+      workers:
+        description: 'Workers por shard'
+        required: true
+        default: '4'
+      world_asset:
+        description: 'Asset .tar.gz del release draft (vacio = mundo plano)'
+        required: false
+        default: 'spigot-world.tar.gz'
+      set_spawn:
+        description: 'Fijar setworldspawn al arrancar'
+        required: true
+        default: 'true'
+      spawn:
+        description: 'Coordenadas de spawn para el mundo HCF'
+        required: false
+        default: '228 65 56'
+      arena:
+        description: 'Coordenadas x z del arena (debe estar a >70 del spawn)'
+        required: false
+        default: '328 56'
+      compression:
+        description: 'network-compression-threshold (-1 = sin compresion)'
+        required: true
+        default: '-1'
+
+concurrency:
+  group: loadtest-spigot
+  cancel-in-progress: false
+
+env:
+  PAPER_VERSION: '1.8.8'
+  PAPER_BUILD: '445'
+  PAPER_URL: 'https://fill-data.papermc.io/v1/objects/7ff6d2cec671ef0d95b3723b5c92890118fb882d73b7f8fa0a2cd31d97c55f86/paper-1.8.8-445.jar'
+  PAPER_SHA256: '7ff6d2cec671ef0d95b3723b5c92890118fb882d73b7f8fa0a2cd31d97c55f86'
+  WORLD_RELEASE_TAG: 'spigot-baseline-world-v1'
+  WORLD_ASSET: ${{ github.event.inputs.world_asset }}
+  MINUTES: ${{ github.event.inputs.minutes }}
+  SET_SPAWN: ${{ github.event.inputs.set_spawn }}
+  SPAWN: ${{ github.event.inputs.spawn }}
+  ARENA: ${{ github.event.inputs.arena }}
+  COMPRESSION: ${{ github.event.inputs.compression }}
+  RCON_PASSWORD: 'lazarus-test'
+  RCON_PORT: '25575'
+  SERVER_PORT: '25565'
+  SERVER_HOST: 'lazarus-ci-spigot-${{ github.run_id }}'
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  paper:
+    name: paper-1.8.8
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 8 (Paper 1.8.8)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: Unirse al tailnet
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          hostname: ${{ env.SERVER_HOST }}
+
+      - name: Bajar Paper 1.8.8 oficial
+        run: |
+          set -euo pipefail
+          mkdir -p server
+          curl -fsSL -o server/paper.jar "${PAPER_URL}"
+          echo "${PAPER_SHA256}  server/paper.jar" | sha256sum -c -
+          ls -lh server/paper.jar
+          java -version
+          echo "--- CPU del runner (paper) ---"
+          nproc
+          lscpu | grep -E 'Model name|^CPU\(s\)|MHz|Hypervisor' || true
+          free -m | head -2
+
+      - name: Preparar mundo y server.properties
+        run: |
+          set -euo pipefail
+          cd server
+          LEVEL_TYPE=DEFAULT
+          EFFECTIVE_SPAWN="${SPAWN:-228 65 56}"
+          if [ -z "${WORLD_ASSET:-}" ]; then
+            LEVEL_TYPE=FLAT
+            EFFECTIVE_SPAWN="0 4 0"
+            echo "Mundo plano: no se bajo asset"
+          else
+            mkdir -p /tmp/spigot-assets
+            gh release download "${WORLD_RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --pattern "${WORLD_ASSET}" \
+              --dir /tmp/spigot-assets --clobber
+            tar -xzf "/tmp/spigot-assets/${WORLD_ASSET}" -C .
+            test -f world/level.dat
+            echo "Mundo HCF extraido:"
+            du -sh world
+          fi
+          echo "eula=true" > eula.txt
+          cat > server.properties <<EOF
+          online-mode=false
+          server-port=${SERVER_PORT}
+          server-ip=0.0.0.0
+          max-players=1000
+          view-distance=10
+          spawn-protection=0
+          difficulty=0
+          gamemode=0
+          force-gamemode=false
+          pvp=true
+          allow-flight=true
+          allow-nether=false
+          enable-command-block=false
+          enable-query=false
+          enable-rcon=true
+          rcon.port=${RCON_PORT}
+          rcon.password=${RCON_PASSWORD}
+          broadcast-rcon-to-ops=false
+          level-name=world
+          level-type=${LEVEL_TYPE}
+          generate-structures=false
+          spawn-monsters=false
+          spawn-animals=false
+          spawn-npcs=false
+          player-idle-timeout=0
+          network-compression-threshold=${COMPRESSION:--1}
+          motd=Lazarus PaperSpigot 1.8.8 virgin
+          snooper-enabled=false
+          op-permission-level=4
+          EOF
+          echo "SPAWN_COORDS=${EFFECTIVE_SPAWN}" >> "$GITHUB_ENV"
+          echo "--- server.properties ---"
+          grep -vE '^\s*#|^\s*$' server.properties
+
+      - name: Arrancar Paper 1.8.8
+        run: |
+          set -uo pipefail
+          cd server
+          TS_IP=$(tailscale ip -4 | head -1)
+          echo "SERVER_IP=${TS_IP}"
+
+          nohup java -Xms4G -Xmx4G -XX:+UseG1GC -XX:+ParallelRefProcEnabled \
+            -XX:MaxGCPauseMillis=50 -Dfile.encoding=UTF-8 \
+            -jar paper.jar nogui > paper.log 2>&1 &
+          PAPER_PID=$!
+          echo "PAPER_PID=${PAPER_PID}" >> "$GITHUB_ENV"
+          echo "PAPER_PID=${PAPER_PID}"
+
+          ready=0
+          for _ in $(seq 1 180); do
+            if ! kill -0 "$PAPER_PID" 2>/dev/null; then break; fi
+            if grep -q 'Done (' paper.log 2>/dev/null; then ready=1; break; fi
+            sleep 2
+          done
+          if [ "$ready" != "1" ]; then
+            echo "ERROR: Paper no llego a Done"
+            tail -120 paper.log
+            exit 1
+          fi
+          for _ in $(seq 1 60); do
+            if python3 ../loadtest/server/rcon.py tps "${RCON_PASSWORD}" 127.0.0.1 "${RCON_PORT}" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+
+          echo "--- Paper listo ---"
+          grep -iE 'Done \(|Paper|version|server started' paper.log | tail -15 || true
+          echo "--- rcon list ---"
+          python3 ../loadtest/server/rcon.py list "${RCON_PASSWORD}" 127.0.0.1 "${RCON_PORT}" || true
+          echo "--- rcon tps ---"
+          python3 ../loadtest/server/rcon.py tps "${RCON_PASSWORD}" 127.0.0.1 "${RCON_PORT}" || true
+
+          if [ "${SET_SPAWN:-true}" = "true" ]; then
+            python3 ../loadtest/server/rcon.py "setworldspawn ${SPAWN_COORDS}" \
+              "${RCON_PASSWORD}" 127.0.0.1 "${RCON_PORT}" || true
+          fi
+          for cmd in \
+            "gamerule doMobSpawning false" \
+            "gamerule doDaylightCycle false" \
+            "gamerule doWeatherCycle false" \
+            "gamerule randomTickSpeed 0" \
+            "gamerule naturalRegeneration true" \
+            "gamerule announceAdvancements false" \
+            "gamerule logAdminCommands false" \
+            "time set 6000" \
+            "weather clear"; do
+            python3 ../loadtest/server/rcon.py "$cmd" \
+              "${RCON_PASSWORD}" 127.0.0.1 "${RCON_PORT}" >/dev/null 2>&1 || true
+          done
+          python3 ../loadtest/server/rcon.py "gamerule doMobSpawning false" \
+            "${RCON_PASSWORD}" 127.0.0.1 "${RCON_PORT}" >/dev/null 2>&1 || true
+
+          PAPER_PID=$PAPER_PID \
+            nohup python3 ../loadtest/server/spigot_sampler.py \
+              --out sampler.csv --interval 5 > sampler.log 2>&1 &
+          echo "SAMPLER_PID=$!" >> "$GITHUB_ENV"
+
+          {
+            echo "## Paper 1.8.8 listo"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Join (Tailscale) | \`${TS_IP}:${SERVER_PORT}\` |"
+            echo "| RCON | \`${TS_IP}:${RCON_PORT}\` |"
+            echo "| Mundo | ${WORLD_ASSET:-plano} |"
+            echo "| Spawn | ${SPAWN_COORDS} |"
+            echo "| Compresion | ${COMPRESSION:--1} |"
+            echo "| Ventana | ${MINUTES} min |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "PAPER_READY tcp://${TS_IP}:${SERVER_PORT}"
+
+      - name: Mantener Paper arriba
+        run: |
+          set -uo pipefail
+          END=$(( $(date +%s) + ${MINUTES:-35} * 60 ))
+          while [ "$(date +%s)" -lt "$END" ]; do
+            if ! kill -0 "${PAPER_PID}" 2>/dev/null; then
+              echo "ERROR: Paper murio"
+              tail -100 server/paper.log
+              exit 1
+            fi
+            LAST=$(tail -1 server/sampler.log 2>/dev/null || true)
+            echo "[$(date -u +%H:%M:%S)] ${LAST:-sin muestras}"
+            sleep 30
+          done
+
+      - name: Bajar Paper
+        if: always()
+        run: |
+          set +e
+          if [ -n "${PAPER_PID:-}" ] && kill -0 "${PAPER_PID}" 2>/dev/null; then
+            python3 loadtest/server/rcon.py stop "${RCON_PASSWORD}" 127.0.0.1 "${RCON_PORT}" || true
+            for _ in $(seq 1 30); do
+              kill -0 "${PAPER_PID}" 2>/dev/null || break
+              sleep 1
+            done
+            kill "${PAPER_PID}" 2>/dev/null || true
+          fi
+          [ -n "${SAMPLER_PID:-}" ] && kill "${SAMPLER_PID}" 2>/dev/null || true
+          sleep 5
+          echo '--- paper.log (cola) ---'; tail -60 server/paper.log 2>/dev/null
+          echo '--- sampler.log (cola) ---'; tail -15 server/sampler.log 2>/dev/null
+
+      - name: Subir artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-spigot-server
+          path: |
+            server/paper.log
+            server/logs/latest.log
+            server/sampler.csv
+            server/sampler.log
+            server/server.properties
+            server/spigot.yml
+            server/bukkit.yml
+            server/paper.yml
+            server/world/level.dat
+          if-no-files-found: warn
+          retention-days: 7
+
+  bots:
+    name: bots shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      PORT: '25565'
+      RCON_PASSWORD: 'lazarus-test'
+      RCON_PORT: '25575'
+      RAMP: ${{ github.event.inputs.ramp }}
+      PHASES: ${{ github.event.inputs.phases }}
+      JOIN_SPACING: ${{ github.event.inputs.joinSpacing }}
+      WORKERS: ${{ github.event.inputs.workers }}
+      PREFIX_BASE: 'Perf'
+      VERSION: '1.8.9'
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: loadtest/package-lock.json
+
+      - name: Instalar dependencias
+        working-directory: loadtest
+        run: npm ci --no-audit --no-fund
+
+      - name: Unirse al tailnet
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          hostname: lazarus-ci-spigot-bots-${{ github.run_id }}-${{ matrix.shard }}
+
+      - name: Esperar a Paper y RCON
+        shell: bash
+        run: |
+          set -uo pipefail
+          SERVER_IP=""
+          for _ in $(seq 1 120); do
+            SERVER_IP=$(tailscale status | awk -v h="${SERVER_HOST}" '$2 == h {print $1; exit}')
+            if [ -n "$SERVER_IP" ] && timeout 2 bash -c "</dev/tcp/${SERVER_IP}/${SERVER_PORT}" 2>/dev/null; then
+              break
+            fi
+            SERVER_IP=""
+            sleep 5
+          done
+          if [ -z "$SERVER_IP" ]; then
+            echo "ERROR: no encontre ${SERVER_HOST} en el tailnet"
+            tailscale status
+            exit 1
+          fi
+          echo "SERVER_IP=${SERVER_IP}"
+          echo "HOST=${SERVER_IP}" >> "$GITHUB_ENV"
+          rcon_ready=0
+          for _ in $(seq 1 90); do
+            if python3 loadtest/server/rcon.py tps "${RCON_PASSWORD}" "$SERVER_IP" "${RCON_PORT}" >/dev/null 2>&1; then
+              rcon_ready=1
+              break
+            fi
+            sleep 3
+          done
+          if [ "$rcon_ready" != "1" ]; then
+            echo "ERROR: RCON no respondio"
+            exit 1
+          fi
+          echo "RCON listo en ${SERVER_IP}:${RCON_PORT}"
+
+      - name: Rampa de bots
+        working-directory: loadtest
+        shell: bash
+        run: |
+          set -uo pipefail
+          SHARD="${SHARD:-0}"
+          ARENA_X=$(echo "${ARENA:-328 56}" | awk '{print $1}')
+          ARENA_Z=$(echo "${ARENA:-328 56}" | awk '{print $2}')
+          IFS=',' read -ra STAGES <<< "${RAMP}"
+          for RAW_TOTAL in "${STAGES[@]}"; do
+            TOTAL=$(echo "$RAW_TOTAL" | xargs)
+            [ -z "$TOTAL" ] && continue
+            PER=$(( (TOTAL + 3) / 4 ))
+            START=$(( SHARD * PER + 1 ))
+            PREFIX="${PREFIX_BASE}${TOTAL}"
+            echo "STAGE_START total=${TOTAL} shard=${SHARD} count=${PER} start=${START} prefix=${PREFIX} at=$(date -u +%FT%TZ)"
+            python3 server/rcon.py "say STAGE ${TOTAL} start shard ${SHARD}" \
+              "${RCON_PASSWORD}" "${HOST}" "${RCON_PORT}" >/dev/null 2>&1 || true
+            node shard.js \
+              --host "${HOST}" \
+              --port "${PORT}" \
+              --count "${PER}" \
+              --startIndex "${START}" \
+              --shard "${SHARD}" \
+              --workers "${WORKERS:-4}" \
+              --joinSpacing "${JOIN_SPACING:-1000}" \
+              --arenaX "${ARENA_X}" \
+              --arenaZ "${ARENA_Z}" \
+              --phases "${PHASES}" \
+              --prefix "${PREFIX}" \
+              --version "${VERSION}" \
+              2>&1 | tee "shard-${TOTAL}-${SHARD}.log"
+            rc=${PIPESTATUS[0]}
+            echo "STAGE_END total=${TOTAL} shard=${SHARD} rc=${rc} at=$(date -u +%FT%TZ)"
+            python3 server/rcon.py "say STAGE ${TOTAL} end shard ${SHARD}" \
+              "${RCON_PASSWORD}" "${HOST}" "${RCON_PORT}" >/dev/null 2>&1 || true
+            if [ "$rc" != "0" ]; then
+              echo "WARN: shard.js termino con rc=${rc}; sigo con la proxima etapa"
+            fi
+            sleep 20
+          done
+
+      - name: Subir logs de bots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-spigot-bots-${{ matrix.shard }}
+          path: loadtest/shard-*.log
+          if-no-files-found: warn
+          retention-days: 7
