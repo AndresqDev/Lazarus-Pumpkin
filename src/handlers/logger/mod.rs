@@ -24,19 +24,19 @@
 //!   computes its death drops (the death event fires first), so the vanilla
 //!   random equipment drops cannot duplicate the hand-out — the original
 //!   emptied `dropDeathLoot` for the same reason; the remaining vanilla loot
-//!   (bones/arrows) is cancelled through `ItemSpawnEvent` markers, replicating
-//!   the empty `dropDeathLoot` override. The experience orbs of that flow
-//!   (`expToDrop = 0` in the original) cannot be intercepted — the host
-//!   spawns them right after the death event and `EntitySpawnEvent` is off
-//!   limits (see `crate::hologram`) — so they are swept one and three ticks
-//!   after the death ([`sweep_vanilla_orbs`]).
-
-use std::sync::Mutex;
+//!   (bones/arrows) is swept one and three ticks after the death, together
+//!   with the experience orbs. Neither can be intercepted with
+//!   `ItemSpawnEvent`/`EntitySpawnEvent`: the host fires `ItemSpawnEvent`
+//!   while `handle_killed` holds the player's `main_inventory` write guard,
+//!   and a guest handler on another thread that reads the inventory (for
+//!   example `get_item_in_hand`) then deadlocks the tick; `EntitySpawnEvent`
+//!   is off limits for the re-entry reasons documented in `crate::hologram`.
+//!   See [`sweep_vanilla_drops`].
 
 use pumpkin_plugin_api::common::{BlockPos, Hand};
 use pumpkin_plugin_api::events::{
     EntityDamageByEntityEvent, EntityDamageEvent, EntityDeathEvent, EventData, EventHandler,
-    ItemSpawnEvent, PlayerLeaveEvent,
+    PlayerLeaveEvent,
 };
 use pumpkin_plugin_api::scheduler::SchedulerExt;
 use pumpkin_plugin_api::wit::pumpkin::plugin::status_effect::{
@@ -827,11 +827,12 @@ impl EventHandler<EntityDeathEvent> for CombatLoggerDeathListener {
                 living.clear_equipment();
             }
         }
-        mark_vanilla_drop(&record.world, death_position);
-        // The orbs themselves appear after this handler returns (the loot
-        // `ItemSpawnEvent` marker cannot catch them), so sweep them shortly
-        // after.
-        schedule_orb_sweep(&server, &record.world, death_position);
+        // The loot and the orbs themselves appear after this handler returns,
+        // so sweep them shortly after. Do not register an `ItemSpawnEvent`
+        // handler for this: the host fires it while holding the victim's
+        // inventory write guard, which deadlocks against a guest handler that
+        // reads an inventory on another thread.
+        schedule_vanilla_drop_sweep(&server, &record.world, death_position);
 
         freeze_effects(&mut record);
 
@@ -1017,126 +1018,55 @@ impl EventHandler<EntityDeathEvent> for CombatLoggerDeathListener {
 // Vanilla drop suppression
 // ---------------------------------------------------------------------------
 
-/// Live markers for the vanilla drops of a dead logger: `(world, x, y, z,
-/// expires_at_millis)`. The host computes `drop_loot`/`drop_equipment` and the
-/// experience orbs in the same call stack as `EntityDeathEvent`, right after
-/// the handlers return, so a marker only has to outlive the event call.
-static VANILLA_DROP_MARKERS: Mutex<Vec<(String, f64, f64, f64, i64)>> = Mutex::new(Vec::new());
-
-/// Grace period of a marker; the spawns it must catch happen immediately after
-/// the death event, this is pure scheduling margin.
-const VANILLA_DROP_MARKER_MILLIS: i64 = 500;
-
-fn mark_vanilla_drop(world: &str, position: (f64, f64, f64)) {
-    let now = utils::now_millis();
-    let mut markers = VANILLA_DROP_MARKERS.lock().unwrap();
-    markers.retain(|(_, _, _, _, expires)| *expires > now);
-    markers.push((
-        world.to_string(),
-        position.0,
-        position.1,
-        position.2,
-        now + VANILLA_DROP_MARKER_MILLIS,
-    ));
-}
-
-/// Whether a spawn at `position` belongs to a dead logger's vanilla drops.
-/// `ItemSpawnEvent` carries no world (the item entity does not exist yet), so
-/// the item check passes `None`; the float coordinates make a cross-world
-/// collision of a live marker impossible in practice.
-fn is_vanilla_logger_drop(world: Option<&str>, position: (f64, f64, f64)) -> bool {
-    let now = utils::now_millis();
-    let mut markers = VANILLA_DROP_MARKERS.lock().unwrap();
-    markers.retain(|(_, _, _, _, expires)| *expires > now);
-
-    markers.iter().any(|(marker_world, x, y, z, _)| {
-        if let Some(world) = world
-            && world != marker_world
-        {
-            return false;
-        }
-
-        let dx = position.0 - x;
-        let dy = position.1 - y;
-        let dz = position.2 - z;
-        // 1.5-block radius: `dropItemNaturally` jitters a stack around its
-        // block while the experience orbs spawn on the entity itself.
-        dx * dx + dy * dy + dz * dz <= 2.25
-    })
-}
-
 /// `EntityLiving#dropDeathLoot` was an empty override in the NMS logger, so
 /// the loot table of the underlying mob is swallowed (skeletons drop bones and
-/// arrows, villagers drop nothing).
-pub struct CombatLoggerLootListener;
-
-impl EventHandler<ItemSpawnEvent> for CombatLoggerLootListener {
-    fn handle(
-        &self,
-        _server: Server,
-        mut event: EventData<ItemSpawnEvent>,
-    ) -> EventData<ItemSpawnEvent> {
-        tracing::info!(
-            "LOADTEST_ITEM enter name={} pos={:?}",
-            event.item_name,
-            event.position
-        );
-        if is_skeleton_loot(&event.item_name) && is_vanilla_logger_drop(None, event.position) {
-            event.cancelled = true;
-        }
-        tracing::info!(
-            "LOADTEST_ITEM done name={} cancelled={}",
-            event.item_name,
-            event.cancelled
-        );
-        event
-    }
-}
-
-fn is_skeleton_loot(item_name: &str) -> bool {
-    let name = item_name.strip_prefix("minecraft:").unwrap_or(item_name);
-    matches!(name, "bone" | "arrow")
-}
-
-/// The original entity's `expToDrop` was 0, so the `get_experience_reward`
-/// hand-out of the host's death flow is removed too.
+/// arrows, villagers drop nothing). The original `expToDrop` was 0 too, so the
+/// `get_experience_reward` hand-out of the host's death flow is removed.
 ///
-/// The orbs are spawned by the host right after the death event returns, and
-/// `EntitySpawnEvent` cannot be used to cancel them (registering it deadlocks
-/// the host when the plugin spawns entities — see `crate::hologram`), so a
-/// delayed sweep clears them instead. Two sweeps cover a heavily loaded tick:
-/// one right after the death, one after the orbs have been pulled around.
-fn schedule_orb_sweep(server: &Server, world: &str, position: (f64, f64, f64)) {
+/// Both are spawned by the host right after the death event returns. Neither
+/// `ItemSpawnEvent` nor `EntitySpawnEvent` can be used to cancel them here:
+/// the former is fired by `handle_killed` while it holds the victim's
+/// `main_inventory` write guard (a guest handler that reads another inventory
+/// deadlocks the tick), and the latter re-enters the guest (see
+/// `crate::hologram`). A delayed sweep clears both instead. Two sweeps cover a
+/// heavily loaded tick: one right after the death, one after the orbs have
+/// been pulled around.
+fn schedule_vanilla_drop_sweep(server: &Server, world: &str, position: (f64, f64, f64)) {
     let first_world = world.to_string();
     server.schedule_delayed_task(1, move |server| {
-        sweep_vanilla_orbs(&server, &first_world, position);
+        sweep_vanilla_drops(&server, &first_world, position);
     });
 
     let second_world = world.to_string();
     server.schedule_delayed_task(3, move |server| {
-        sweep_vanilla_orbs(&server, &second_world, position);
+        sweep_vanilla_drops(&server, &second_world, position);
     });
 }
 
-/// Removes the experience orbs near a dead logger's drop position.
+/// Removes the vanilla loot and experience orbs near a dead logger's drop
+/// position.
 ///
-/// The radius matches [`is_vanilla_logger_drop`]; the orbs keep their spawn
-/// position for the first ticks (player attraction is slow), so the sweep only
-/// catches the death's own reward.
-fn sweep_vanilla_orbs(server: &Server, world_name: &str, position: (f64, f64, f64)) {
+/// The 1.5-block radius covers `dropItemNaturally`'s jitter around the death
+/// block. Items and orbs keep their spawn position for the first ticks (orb
+/// attraction is slow), so the sweep only catches the death's own drops and
+/// reward, not items a killer or bystander drops later.
+fn sweep_vanilla_drops(server: &Server, world_name: &str, position: (f64, f64, f64)) {
     let Some(world) = server.get_world_by_name(world_name) else {
         return;
     };
 
     for entity in world.get_entities() {
-        if entity.get_type() != EntityType::ExperienceOrb {
+        if !matches!(
+            entity.get_type(),
+            EntityType::ExperienceOrb | EntityType::Item
+        ) {
             continue;
         }
 
-        let orb = entity.get_position();
-        let dx = orb.0 - position.0;
-        let dy = orb.1 - position.1;
-        let dz = orb.2 - position.2;
+        let entity_pos = entity.get_position();
+        let dx = entity_pos.0 - position.0;
+        let dy = entity_pos.1 - position.1;
+        let dz = entity_pos.2 - position.2;
         if dx * dx + dy * dy + dz * dz <= 2.25 {
             entity.remove();
         }

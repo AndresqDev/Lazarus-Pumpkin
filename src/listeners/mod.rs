@@ -37,7 +37,7 @@ use crate::selection;
 /// pumps, measured). With no handler the host's `fire` returns before it can
 /// re-enter, so spawning stays a plain blocking pump. Features that the
 /// original based on spawn cancellation are ported as sweeps instead
-/// (`limiters::enforce_disabled_entities`, `combatlogger::sweep_vanilla_orbs`)
+/// (`limiters::enforce_disabled_entities`, `combatlogger::sweep_vanilla_drops`)
 /// and entity names in death messages are resolved by scanning the world
 /// entity lists (`handlers::death::entity_key_by_id`).
 pub fn register(context: &Context) -> Result<(), String> {
@@ -67,8 +67,10 @@ pub fn register(context: &Context) -> Result<(), String> {
     // Combat logger entity deaths (`VillagerCombatLogger_1_8#die`).
     context.register_event_handler(combatlogger::CombatLoggerDeathListener, EventPriority::Normal, true)?;
     // Vanilla drops of a dead logger (`dropDeathLoot` was empty on the
-    // original entity; its orbs are swept by `schedule_orb_sweep`).
-    context.register_event_handler(combatlogger::CombatLoggerLootListener, EventPriority::Normal, true)?;
+    // original entity) are removed by a delayed sweep in
+    // `CombatLoggerDeathListener`. Do not register an `ItemSpawnEvent`
+    // handler: the host fires it while holding the victim's inventory write
+    // guard and a guest handler that reads an inventory deadlocks the tick.
     context.register_event_handler(player::RespawnListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::SpawnLocationListener, EventPriority::Normal, true)?;
     context.register_event_handler(player::SpawnChangeListener, EventPriority::Normal, true)?;
