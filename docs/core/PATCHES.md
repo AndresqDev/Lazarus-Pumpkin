@@ -13,11 +13,11 @@ La asignación por oleadas, agentes y archivos permitidos está en
 
 | ID | Título | Patrón | Archivos principales | Ganancia esperada | Riesgo | Estado |
 |---|---|---|---|---|---|---|
-| HCF-CORE-001 | Perfil HCF, build ID y capacidades | Config + API aditiva | `pumpkin-config`, `server/mod.rs`, `main.rs`, `pumpkin.toml` | Habilita todo lo demás | Bajo | Propuesto |
-| HCF-CORE-002 | Métricas por sección y p99 | Instrumentación | `server/metrics.rs`, `ticker.rs`, `world/mod.rs`, `entity/player.rs` | Diagnóstico | Bajo | Propuesto |
+| HCF-CORE-001 | Perfil HCF, build ID y capacidades | Config + API aditiva | `pumpkin-config`, `server/mod.rs`, `main.rs`, `pumpkin.toml` | Habilita todo lo demás | Bajo | En diseño |
+| HCF-CORE-002 | Métricas por sección y p99 | Instrumentación | `server/hcf_metrics.rs`, `ticker.rs`, `world/mod.rs`, `entity/living.rs` | Diagnóstico | Bajo | En diseño |
 | HCF-CORE-003 | Estándar de parches y documentación | Documentación | `docs/core/*` | Mantenibilidad | Bajo | Propuesto |
 | HCF-CORE-004 | Build PGO/CPU/allocator | CI/build | `Cargo.toml`, `.github/workflows`, `docs/core/BUILD.md` | 10–25 % CPU | Bajo | Propuesto |
-| HCF-CORE-005 | Helpers de perfil y feature flags | Config | `server/hcf.rs`, `pumpkin-config/src/hcf.rs` | Base de dispatch | Bajo | Propuesto |
+| HCF-CORE-005 | Helpers de perfil y feature flags | Config | `server/hcf.rs`, `pumpkin-config/src/hcf.rs` | Base de dispatch | Bajo | En diseño |
 
 ## Fase 1 — Eliminar trabajo no usado
 
