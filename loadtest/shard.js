@@ -99,6 +99,9 @@ function spawnWorker(i) {
   child.on('message', (m) => {
     if (m && m.type === 'stats') lastStats[i] = m;
   });
+  // Un worker puede morir por un error de parseo del cliente; no debe tumbar
+  // todo el shard ni impedir que se ejecute la etapa siguiente.
+  child.on('error', (e) => log(`worker ${i} error: ${e && e.message}`));
   child.on('exit', (code) => log(`worker ${i} salio (code=${code})`));
   workers.push(child);
 }

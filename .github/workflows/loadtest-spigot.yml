@@ -193,8 +193,12 @@ jobs:
           mkfifo console.stdin
           nohup tail -f /dev/null > console.stdin 2>/dev/null &
           CONSOLE_PID=$!
+          # Netty de 1.8.8 usa direct buffers; con 200+ conexiones se agota
+          # el MaxDirectMemory (4 GiB) y el server tira OOM aunque sobre RAM.
+          # Forzamos buffers heap, que es lo que usan los flags de Aikar 1.8.
           nohup java -Xms4G -Xmx4G -XX:+UseG1GC -XX:+ParallelRefProcEnabled \
-            -XX:MaxGCPauseMillis=50 -Dfile.encoding=UTF-8 \
+            -XX:MaxGCPauseMillis=50 -Dio.netty.noPreferDirect=true \
+            -Dfile.encoding=UTF-8 \
             -jar paper.jar nogui < console.stdin > paper.log 2>&1 &
           PAPER_PID=$!
           echo "PAPER_PID=${PAPER_PID}" >> "$GITHUB_ENV"
