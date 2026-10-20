@@ -7,6 +7,9 @@ WebAssembly component against the [Pumpkin plugin API](https://docs.pumpkinmc.or
 > Pumpkin plugins are compiled to `.wasm` components — Java/Bukkit plugins cannot
 > run on Pumpkin. This repository is a **rewrite** of the Lazarus feature set, not
 > a recompilation. See [`PORTING.md`](./PORTING.md) for the full mapping.
+>
+> The core performance and compatibility plan lives in
+> [`docs/core/HCF_CORE_PLAN.md`](./docs/core/HCF_CORE_PLAN.md).
 
 ## Features (ported)
 
