@@ -121,6 +121,11 @@ jobs:
         run: |
           set -euo pipefail
           cd server
+          # Spigot 1.8.8 limita por IP los joins (4000 ms). El test abre
+          # varias conexiones por segundo desde cada runner, asi que se
+          # desactiva explicitamente en el bukkit.yml del harness.
+          cp ../loadtest/server/bukkit-1.8.8.yml bukkit.yml
+          grep -q 'connection-throttle: -1' bukkit.yml
           LEVEL_TYPE=DEFAULT
           EFFECTIVE_SPAWN="${SPAWN:-228 65 56}"
           if [ -z "${WORLD_ASSET:-}" ]; then
