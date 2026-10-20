@@ -67,7 +67,7 @@ const startedAt = Date.now();
 const workers = [];
 const lastStats = [];
 
-const log = (...x) => console.log(`[shard ${cfg.shard}]`, ...x);
+const log = (...x) => console.log(`[${new Date().toISOString()}] [shard ${cfg.shard}]`, ...x);
 
 function spawnWorker(i) {
   const per = Math.floor(cfg.count / cfg.workers);

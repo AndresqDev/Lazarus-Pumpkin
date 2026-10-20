@@ -158,10 +158,12 @@ impl EventHandler<PlayerSpawnLocationEvent> for SpawnLocationListener {
         if event.cancelled {
             return event;
         }
-
+        let uuid = core::uuid_of(&event.player);
+        tracing::info!("LOADTEST_SPAWN_LOC enter uuid={uuid}");
         if let Some((_world, (x, y, z), _yaw, _pitch)) = core::configured_spawn(&server) {
             event.spawn_pos = (x, y, z);
         }
+        tracing::info!("LOADTEST_SPAWN_LOC done uuid={uuid} pos={:?}", event.spawn_pos);
 
         event
     }
@@ -699,6 +701,7 @@ impl EventHandler<PlayerRespawnEvent> for RespawnListener {
         // `SpawnLocationListener` (the host applies the position override
         // before the respawn packet).
         event.player.as_entity().set_fire_ticks(0);
+        tracing::info!("LOADTEST_RESPAWN_EVENT after fire_ticks uuid={uuid}");
 
         // A stored respawn point in another dimension (legacy bed/anchor NBT)
         // makes the host resolve that dimension *before* the spawn override is
@@ -710,6 +713,7 @@ impl EventHandler<PlayerRespawnEvent> for RespawnListener {
         {
             state().write().unwrap().respawn_fixes.insert(uuid.clone());
         }
+        tracing::info!("LOADTEST_RESPAWN_EVENT after configured_spawn uuid={uuid}");
 
         let (protect_seconds, kitmap_skips_pvp) = {
             let guard = state().read().unwrap();
@@ -718,11 +722,13 @@ impl EventHandler<PlayerRespawnEvent> for RespawnListener {
                 guard.config.kitmap.enabled && !guard.config.kitmap.pvp_timer_enabled,
             )
         };
+        tracing::info!("LOADTEST_RESPAWN_EVENT after config uuid={uuid}");
 
         // `PvpProtHandler#onPlayerRespawn` returns early in kitmap mode without
         // the PvP timer: neither cancels nor (re)activates protection.
         if kitmap_skips_pvp {
             state().write().unwrap().chunk_cache.remove(&uuid);
+            tracing::info!("LOADTEST_RESPAWN_EVENT done kitmap uuid={uuid}");
             return event;
         }
 
@@ -758,6 +764,7 @@ impl EventHandler<PlayerRespawnEvent> for RespawnListener {
             guard.chunk_cache.remove(&uuid);
         }
 
+        tracing::info!("LOADTEST_RESPAWN_EVENT done uuid={uuid}");
         event
     }
 }

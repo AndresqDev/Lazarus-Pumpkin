@@ -26,7 +26,7 @@ function currentPhase() {
   return null;
 }
 
-const log = (...args) => console.log(`[w${cfg.worker}]`, ...args);
+const log = (...args) => console.log(`[${new Date().toISOString()}] [w${cfg.worker}]`, ...args);
 
 function createBot(index, attempt = 0) {
   const username = `${cfg.prefix}${String(index).padStart(2, '0')}`;
@@ -58,7 +58,7 @@ function createBot(index, attempt = 0) {
     return rawWrite(name, params);
   };
 
-  const st = { mode: 'join', lastAttack: 0, lastJump: 0, lastGoal: 0, failures: 0, timer: null, respawnTimer: null, respawnAttempts: 0, scatter: false, scatterAt: 0, scatterGoal: false, pktTotal: 0 };
+  const st = { mode: 'join', lastAttack: 0, lastJump: 0, lastGoal: 0, failures: 0, timer: null, respawnTimer: null, scatter: false, scatterAt: 0, scatterGoal: false, pktTotal: 0 };
   stRef = st;
   bot._perf = st;
 
@@ -135,7 +135,6 @@ function createBot(index, attempt = 0) {
     st.scatter = false;
     st.scatterGoal = false;
     st.scatterAt = Date.now() + 1000 + Math.random() * 3000;
-    st.respawnAttempts = 0;
     clearTimeout(st.respawnTimer);
     bot.clearControlStates();
     stopPath();
@@ -189,23 +188,19 @@ function createBot(index, attempt = 0) {
     bot.clearControlStates();
     stopPath();
 
-    // El cliente debe pedir el respawn. Reintenta unas pocas veces por si el
-    // primer client_command se pierde durante el burst de muerte; si el bot
-    // revive, afterRespawn() cancela el timer.
-    const requestRespawn = () => {
-      if (shuttingDown || bot.isAlive || st.respawnAttempts >= 3) return;
-      st.respawnAttempts++;
+    // Un solo client_command por muerte. Reintentar mientras el servidor
+    // todavia esta procesando el primero crea varios respawns concurrentes
+    // para el mismo jugador y acaba en kicks "Wrong teleport id".
+    clearTimeout(st.respawnTimer);
+    st.respawnTimer = setTimeout(() => {
+      if (shuttingDown || bot.isAlive) return;
       try {
         bot.respawn();
-        log('respawn_request', username, st.respawnAttempts);
+        log('respawn_request', username);
       } catch (e) {
         log('respawn_request_failed', username, e.message);
-        return;
       }
-      st.respawnTimer = setTimeout(requestRespawn, 1500);
-    };
-    clearTimeout(st.respawnTimer);
-    st.respawnTimer = setTimeout(requestRespawn, 100);
+    }, 250);
   });
   bot.on('goal_reached', () => {
     if (st.scatterGoal) {
