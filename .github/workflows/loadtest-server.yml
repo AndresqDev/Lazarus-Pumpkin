@@ -186,19 +186,19 @@ jobs:
           # Deathban con ban de 0 minutos: mantiene ENABLED=true (el disabled
           # congela el tick) pero deja que los bots reaparezcan tras morir en
           # PvP, para sostener 100 durante todo el test.
-          if [ -f server/plugins/data/lazarus/config.yml ]; then
+          if [ -f plugins/data/lazarus/config.yml ]; then
             echo "--- deathban config ---"
             grep -nE '^DEATHBAN:|^  ENABLED:|^  DEFAULT_BAN_TIME:' \
-              server/plugins/data/lazarus/config.yml | head -6 || true
+              plugins/data/lazarus/config.yml | head -6 || true
             changed=false
             if [ "${DEATHBAN_MINUTES:-180}" != "180" ]; then
               sed -i "s/^  DEFAULT_BAN_TIME: .*/  DEFAULT_BAN_TIME: ${DEATHBAN_MINUTES}/" \
-                server/plugins/data/lazarus/config.yml
+                plugins/data/lazarus/config.yml
               changed=true
             fi
             if [ "${PVP_PROTECTION_SECONDS:-3600}" != "3600" ]; then
               sed -i "/^PVP_PROTECTION:/,/^[A-Z]/ s/^  DURATION: .*/  DURATION: ${PVP_PROTECTION_SECONDS}/" \
-                server/plugins/data/lazarus/config.yml
+                plugins/data/lazarus/config.yml
               changed=true
             fi
             if [ "$changed" = "true" ]; then
