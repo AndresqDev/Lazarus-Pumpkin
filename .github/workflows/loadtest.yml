@@ -35,10 +35,6 @@ on:
         description: 'Fases opcionales: idle:45,move:75:250:250,fight:150:100:100 (ignora warmup/duration)'
         required: false
         default: ''
-      version:
-        description: 'Versión de cliente Minecraft'
-        required: true
-        default: '1.8.9'
       use_tailscale:
         description: 'Unirse al tailnet antes de conectar (host = IP Tailscale)'
         required: true
@@ -72,7 +68,9 @@ jobs:
       WARMUP: ${{ github.event.inputs.warmup }}
       DURATION: ${{ github.event.inputs.duration }}
       PREFIX: ${{ github.event.inputs.prefix }}
-      VERSION: ${{ github.event.inputs.version }}
+      # HCF se valida siempre con clientes 1.8.9; el input se quitó para no
+      # superar el límite de 10 inputs de workflow_dispatch.
+      VERSION: '1.8.9'
       PHASES: ${{ github.event.inputs.phases }}
       JOIN_SPACING: ${{ github.event.inputs.joinSpacing }}
       WORKERS: ${{ github.event.inputs.workers }}

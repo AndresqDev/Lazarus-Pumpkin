@@ -177,6 +177,6 @@ mod tests {
     #[test]
     fn translates_quoted_literals() {
         assert_eq!(translate_pattern("'at' HH"), "at %H");
-        assert_eq!(translate_pattern("100% d"), "100% %-d");
+        assert_eq!(translate_pattern("100% d"), "100%% %-d");
     }
 }
