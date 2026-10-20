@@ -36,12 +36,12 @@ La asignación por oleadas, agentes y archivos permitidos está en
 
 | ID | Título | Patrón | Archivos principales | Ganancia esperada | Riesgo | Estado |
 |---|---|---|---|---|---|---|
-| HCF-CORE-020 | Composición de `tick_chunks_hcf` | Homólogo por composición | `world/mod.rs` | Alta (a medir) | Medio | En diseño |
-| HCF-CORE-021 | `Player::tick` HCF | Homólogo + early-returns | `entity/player.rs` | Media/alta (a medir) | Medio | En diseño |
-| HCF-CORE-022 | Entity tracker HCF | Homólogo + caché/índice | `world/entity_tracker.rs` | Media/alta (a medir) | Medio | En diseño |
+| HCF-CORE-020 | Composición de `tick_chunks_hcf` | Homólogo por composición | `world/mod.rs` | Alta (a medir) | Medio | Implementado (C1 pendiente) |
+| HCF-CORE-021 | `Player::tick` HCF | Homólogo + early-returns | `entity/player.rs` | Media/alta (a medir) | Medio | Implementado 021a (C1 pendiente) |
+| HCF-CORE-022 | Entity tracker HCF | Homólogo + caché/índice | `world/entity_tracker.rs` | Media/alta (a medir) | Medio | Implementado 022a (C1 pendiente) |
 | HCF-CORE-023 | Colisiones restantes con spatial hash (después de 029) | Homólogo | `world/mod.rs` | Media/baja | Medio | Propuesto |
 | HCF-CORE-024 | Batch de paquetes + serializer player info/multi-block | API aditiva | `plugin/.../generated_packets.rs`, `net/java/mod.rs`, WIT v0.2 | Alta en plugin (a medir) | Medio/alto | En diseño |
-| HCF-CORE-025 | Scheduler con guarda y presupuesto | API aditiva interna | `server/scheduler.rs` | p99 / estabilidad | Bajo | En diseño |
+| HCF-CORE-025 | Scheduler con guarda y presupuesto | API aditiva interna | `server/scheduler.rs` | p99 / estabilidad | Bajo | Implementado (C1 pendiente) |
 | HCF-CORE-026 | Filtros de eventos y movimiento | API aditiva | `plugin/api/events`, `plugin/mod.rs`, `net/java` | Media (a medir) | Medio | En diseño |
 | HCF-CORE-027 | Política de tick por tipo de entidad | Config + early-return | `entity/mod.rs`, `world/mod.rs` | Media | Medio | Propuesto |
 | HCF-CORE-028 | Buffers reutilizados y menos allocs por tick | Interno | `world/mod.rs`, `entity_tracker.rs` | Media | Medio | Propuesto |

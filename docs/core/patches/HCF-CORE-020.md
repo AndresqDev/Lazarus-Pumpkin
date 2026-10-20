@@ -1,6 +1,6 @@
 # HCF-CORE-020 — Composición de `tick_chunks_hcf`
 
-- **Estado:** en diseño
+- **Estado:** implementado (C1 pendiente)
 - **Fase:** 2
 - **Upstreamable:** no (ruta HCF); la extracción de helpers es mecánica y revisable
 - **Riesgo:** medio
@@ -178,6 +178,21 @@ reducida). 020 no repite esos cambios: los compone.
 - [ ] Soak: 30 min; sin deadlocks ni crecimiento de memoria.
 - [ ] Loadtest: 100/200 bots; MSPT p99 y CPU.
 - [ ] Suite ejecutada y verde en T1.
+
+## Estado de implementación (2026-10-20)
+
+- Implementado en `hcf/core-020`, commit `419d823`, mergeado en
+  `hcf/foundation`.
+- `tick_chunks` conserva la ruta vanilla y despacha a `tick_chunks_hcf` cuando
+  `fast_chunks()` está activo. Se extrajeron helpers para block ticks, fluid
+  ticks, random ticks, spawning e inhabited time; `get_tick_data` se llama una
+  sola vez por ruta y `active_chunks` se lee una vez.
+- La ruta HCF omite random/spawning según perfil. Si `InhabitedTime` está
+  desactivada se usa el helper vanilla (+1/tick); si está activa se usa el
+  intervalo de 014. `chunk_tick_fast_path = false` mantiene la ruta vanilla.
+- La ficha asumía que 013/014 ya habían extraído helpers; se extrajeron en 020
+  sin cambiar la semántica de los guards inline.
+- C1/T1 pendientes; no se ejecutó compilación local.
 
 ## Rollback
 

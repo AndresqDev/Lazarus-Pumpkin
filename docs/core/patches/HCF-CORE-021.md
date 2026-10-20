@@ -1,6 +1,6 @@
 # HCF-CORE-021 — `Player::tick` HCF
 
-- **Estado:** en diseño
+- **Estado:** implementado 021a (C1 pendiente)
 - **Fase:** 2
 - **Upstreamable:** parcial (extracción de helpers sí; perfil HCF no)
 - **Riesgo:** medio
@@ -162,6 +162,25 @@ jugador y evita el resto del trabajo sin duplicar `Player::tick`.
 - [ ] Soak: 30 min, 100 bots, sin desync de pantalla ni chunks atascados.
 - [ ] Loadtest: 100/200 bots; MSPT p99 y sección `Players`.
 - [ ] Suite ejecutada y verde en T1.
+
+## Estado de implementación (2026-10-20)
+
+- Implementado 021a en `hcf/core-021`, commit `ace9cb8`, mergeado en
+  `hcf/foundation`.
+- Extraídos `tick_camera`, `tick_screen_handler`, `tick_statistics`,
+  `tick_warden_tracker`, `tick_mining`, `tick_advancements` y
+  `tick_idle_timeout`; el orden de `Player::tick` se conserva.
+- Guards por feature: stats, warden, advancements, maps y raids. El perfil se
+  cachea una vez por tick y los guards usan `disabled(...)`; `hcf.enabled=false`
+  restaura el comportamiento vanilla.
+- `tick_screen_handler` evita el lock interno y `send_content_updates` cuando
+  el handler actual es el `player_screen_handler` base.
+- `tick_mining` ya no resuelve el jugador por UUID; solo conserva el lookup en
+  la ruptura Bedrock, que necesita `Arc<Player>`.
+- El bloque `chunk_send` se dejó inline. El único cambio es saltar
+  `prepare_batch` cuando el fast path está activo y `pending_chunks` está vacío
+  tras drenar el listener; `commit_batch`/`mark_delivered` no cambian.
+- C1/T1 pendientes; no se ejecutó compilación local.
 
 ## Rollback
 

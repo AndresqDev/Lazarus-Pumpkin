@@ -1,6 +1,6 @@
 # HCF-CORE-022 — Entity tracker HCF
 
-- **Estado:** en diseño
+- **Estado:** implementado 022a (C1 pendiente)
 - **Fase:** 2
 - **Upstreamable:** parcial (cachés genéricas sí; índice HCF no)
 - **Riesgo:** medio
@@ -178,6 +178,21 @@ demuestra que la sección `Tracker` pesa; 022b solo si 022a no basta.
 - [ ] Soak: 30 min; `seen_by` no crece sin límite.
 - [ ] Loadtest: 100/200 bots; sección `Tracker`, p99, paquetes/s.
 - [ ] Suite ejecutada y verde en T1.
+
+## Estado de implementación (2026-10-20)
+
+- Implementado 022a en `hcf/core-022`, commit `2334c44`, mergeado en
+  `hcf/foundation`.
+- `update_all` despacha a `update_all_hcf` cuando `fast_tracker()` está activo;
+  reproduce las tres fases vanilla con contextos por jugador cacheados.
+- `PlayerTrackerContext` cachea view distance, watched section y epoch; el
+  snapshot de chunks listos se toma como máximo una vez por jugador y pase,
+  mediante `ChunkSender::ready_chunks_snapshot()` (API aditiva).
+- `get_effective_range` evita el `Vec`/clones cuando no hay pasajeros; si hay,
+  conserva el máximo. `update_player_position` y `update_player_chunks`
+  reutilizan contextos y no hacen lookup por UUID en el camino común.
+- No se implementó el índice espacial; 022b queda condicionado al A/B de 022a.
+- C1/T1 pendientes; no se ejecutó compilación local.
 
 ## Rollback
 

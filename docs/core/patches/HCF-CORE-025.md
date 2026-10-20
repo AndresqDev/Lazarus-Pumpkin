@@ -1,6 +1,6 @@
 # HCF-CORE-025 — Scheduler con guarda y presupuesto
 
-- **Estado:** en diseño
+- **Estado:** implementado (C1 pendiente)
 - **Fase:** 2
 - **Upstreamable:** parcial (guarda/métricas genéricas sí)
 - **Riesgo:** bajo/medio
@@ -103,6 +103,28 @@ hace panic, `Drop` lo limpia.
 - [ ] Soak: 30 min, sin tareas huérfanas ni `running` trabado.
 - [ ] Loadtest: 100/200 bots; p99 y overruns.
 - [ ] Suite ejecutada y verde en T1.
+
+## Estado de implementación (2026-10-20)
+
+- Implementado en `hcf/core-025`, commit `2e553ee`, mergeado en
+  `hcf/foundation`.
+- `ScheduledTask` tiene `running: Arc<AtomicBool>`; las tareas periódicas hacen
+  CAS antes de lanzarse y un `RunningGuard` limpia el flag al terminar, con
+  error o panic. Al saltar una ejecución se incrementa `skipped` y se
+  reprograma el siguiente periodo.
+- `scheduler_guard` es una clave nueva de `[hcf]` (default `true` en
+  `hcf-1.8`); `scheduler_guard()` devuelve false con HCF off.
+- `scheduler_budget_ms` limita el bucle de lanzamiento (default 5 ms; `0` = sin
+  límite). Las tareas no procesadas se reencolan y se reintentan en el
+  siguiente tick. El drenaje inicial y el procesamiento ya no mantienen el lock
+  de `cancelled`; `disabled_plugins` se carga una vez por tick.
+- Métricas `HCF_METRIC scheduler` cada 600 ticks: due, launched, skipped,
+  overrun, duración del tick, máximo y total de tiempo de guest.
+- `campfire.rs` ya no mantiene el mutex del slot durante
+  `CampfireStartEvent`; revalida antes de escribir el total.
+- Los contadores de `fire_blocking` se difieren a 026/002b para no compartir
+  `plugin/mod.rs`. No se tocó `ScheduledFunctionQueue`.
+- C1/T1 pendientes; no se ejecutó compilación local.
 
 ## Rollback
 
