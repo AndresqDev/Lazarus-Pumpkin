@@ -61,9 +61,9 @@ pub fn register(context: &Context) -> Result<(), String> {
     context.register_event_handler(death::DeathSignDeathListener, EventPriority::Normal, true)?;
 
     context.register_event_handler(player::DeathListener, EventPriority::Normal, true)?;
-    // Instant respawn (server addition): runs after the deathban bookkeeping so
-    // the queued kick can be detected.
-    context.register_event_handler(player::InstantRespawnListener, EventPriority::Normal, true)?;
+    // Respawn is requested by the client (`client_command`); the plugin must
+    // not call `player.respawn()` from a task because that re-enters the WASM
+    // guest and deadlocks the host tick.
     // Combat logger entity deaths (`VillagerCombatLogger_1_8#die`).
     context.register_event_handler(combatlogger::CombatLoggerDeathListener, EventPriority::Normal, true)?;
     // Vanilla drops of a dead logger (`dropDeathLoot` was empty on the

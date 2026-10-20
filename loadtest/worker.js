@@ -38,6 +38,10 @@ function createBot(index, attempt = 0) {
     auth: 'offline',
     checkTimeoutInterval: 60000,
     hideErrors: true,
+    // El plugin ya no fuerza el respawn (llamar a player.respawn() desde una
+    // tarea del plugin reentra el WASM y congela el tick). El bot pide el
+    // respawn con client_command actionId=0, como un cliente vanilla.
+    respawn: false,
   });
   bot.loadPlugin(pathfinder);
 
@@ -54,7 +58,7 @@ function createBot(index, attempt = 0) {
     return rawWrite(name, params);
   };
 
-  const st = { mode: 'join', lastAttack: 0, lastJump: 0, lastGoal: 0, failures: 0, timer: null, scatter: false, scatterAt: 0, scatterGoal: false, pktTotal: 0 };
+  const st = { mode: 'join', lastAttack: 0, lastJump: 0, lastGoal: 0, failures: 0, timer: null, respawnTimer: null, respawnAttempts: 0, scatter: false, scatterAt: 0, scatterGoal: false, pktTotal: 0 };
   stRef = st;
   bot._perf = st;
 
@@ -131,6 +135,8 @@ function createBot(index, attempt = 0) {
     st.scatter = false;
     st.scatterGoal = false;
     st.scatterAt = Date.now() + 1000 + Math.random() * 3000;
+    st.respawnAttempts = 0;
+    clearTimeout(st.respawnTimer);
     bot.clearControlStates();
     stopPath();
     // No caminar durante idle: antes el goal se fijaba igual y los bots se
@@ -182,6 +188,24 @@ function createBot(index, attempt = 0) {
     st.mode = 'dead';
     bot.clearControlStates();
     stopPath();
+
+    // El cliente debe pedir el respawn. Reintenta unas pocas veces por si el
+    // primer client_command se pierde durante el burst de muerte; si el bot
+    // revive, afterRespawn() cancela el timer.
+    const requestRespawn = () => {
+      if (shuttingDown || bot.isAlive || st.respawnAttempts >= 3) return;
+      st.respawnAttempts++;
+      try {
+        bot.respawn();
+        log('respawn_request', username, st.respawnAttempts);
+      } catch (e) {
+        log('respawn_request_failed', username, e.message);
+        return;
+      }
+      st.respawnTimer = setTimeout(requestRespawn, 1500);
+    };
+    clearTimeout(st.respawnTimer);
+    st.respawnTimer = setTimeout(requestRespawn, 100);
   });
   bot.on('goal_reached', () => {
     if (st.scatterGoal) {
@@ -227,6 +251,7 @@ function createBot(index, attempt = 0) {
   });
   bot.on('end', (reason) => {
     clearInterval(st.timer);
+    clearTimeout(st.respawnTimer);
     const pos = bots.indexOf(bot);
     if (pos >= 0) bots.splice(pos, 1);
     if (shuttingDown) return;

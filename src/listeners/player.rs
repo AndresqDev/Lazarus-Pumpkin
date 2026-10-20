@@ -463,9 +463,9 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
         // Rejoin kill of a combat-logger victim: `die()` already sent the death
         // message, credited the kill and applied the deathban when the logger
         // was killed. The offline `setHealth(0)` did not fire any death event,
-        // so the host must not broadcast a second (default) message either; the
-        // cancelled event still reaches `InstantRespawnListener`, which sends
-        // the player back to spawn.
+        // so the host must not broadcast a second (default) message either.
+        // The client requests its own respawn with `client_command`, as in
+        // vanilla; the plugin must not call `player.respawn()` (see below).
         if state().write().unwrap().logger_rejoin_kills.remove(&uuid) {
             event.cancelled = true;
             return event;
@@ -672,51 +672,13 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
     }
 }
 
-/// Auto-respawn (server-specific addition, not in the original): the 1.8 death
-/// screen button misbehaves through ViaProxy, so every death is followed by an
-/// automatic respawn. Deathbanned players are skipped — their kick is queued
-/// by `deathban::apply_on_death` and fires ~1s later.
-pub struct InstantRespawnListener;
-
-impl EventHandler<PlayerDeathEvent> for InstantRespawnListener {
-    fn handle(&self, server: Server, event: EventData<PlayerDeathEvent>) -> EventData<PlayerDeathEvent> {
-        let uuid = core::uuid_of(&event.player);
-
-        // Two ticks: long enough for `handle_killed` to run after the event and
-        // for the deathban handler to queue its kick (checked below), short
-        // enough to feel instant.
-        server.schedule_delayed_task(2, move |server| {
-            tracing::info!("LOADTEST_RESPAWN task uuid={uuid}");
-            if state()
-                .read()
-                .unwrap()
-                .pending_kicks
-                .iter()
-                .any(|kick| kick.uuid == uuid)
-            {
-                tracing::info!("LOADTEST_RESPAWN skip_pending_kick uuid={uuid}");
-                return;
-            }
-
-            let Some(player) = pumpkin_plugin_api::uuid::parse(&uuid)
-                .and_then(|id| server.get_player_by_uuid(id))
-            else {
-                tracing::info!("LOADTEST_RESPAWN skip_missing uuid={uuid}");
-                return;
-            };
-            // A deathban or another handler may have revived them already.
-            if player.get_health() > 0.0 {
-                tracing::info!("LOADTEST_RESPAWN skip_healthy uuid={uuid}");
-                return;
-            }
-            tracing::info!("LOADTEST_RESPAWN before respawn uuid={uuid}");
-            player.respawn();
-            tracing::info!("LOADTEST_RESPAWN after respawn uuid={uuid}");
-        });
-
-        event
-    }
-}
+// Auto-respawn is deliberately NOT implemented here. Calling
+// `player.respawn()` from a plugin task makes the host fire
+// `PlayerSpawnLocationEvent`/`PlayerRespawnEvent` while the WASM guest is
+// still executing the task; the component cannot be re-entered and the server
+// tick deadlocks (reproduced in B16/B17 at the first death). Vanilla clients
+// (and the load-test bots) request the respawn with `client_command` action 0,
+// which the host handles outside the plugin callback.
 
 /// Re-awards PvP protection on respawn and flags protected players that
 /// respawned inside a claim they may not enter (port of
@@ -726,6 +688,7 @@ pub struct RespawnListener;
 impl EventHandler<PlayerRespawnEvent> for RespawnListener {
     fn handle(&self, server: Server, event: EventData<PlayerRespawnEvent>) -> EventData<PlayerRespawnEvent> {
         let uuid = core::uuid_of(&event.player);
+        tracing::info!("LOADTEST_RESPAWN_EVENT enter uuid={uuid}");
         let (x, _y, z) = event.position;
         let world = event.respawned_world.get_name();
         let block_x = x.floor() as i32;

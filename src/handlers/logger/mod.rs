@@ -333,7 +333,7 @@ pub fn on_join(server: &Server, player: &Player) {
             // `die()` already sent the death message, credited the kill and
             // applied the deathban; the `DeathListener` cancels the host's
             // death event for this kill so no second message or stats are
-            // produced, and the instant-respawn listener sends them to spawn.
+            // produced. The client requests the respawn with `client_command`.
             state()
                 .write()
                 .unwrap()
