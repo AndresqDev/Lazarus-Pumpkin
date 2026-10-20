@@ -778,6 +778,7 @@ pub struct TeleportListener;
 impl EventHandler<PlayerTeleportEvent> for TeleportListener {
     fn handle(&self, server: Server, mut event: EventData<PlayerTeleportEvent>) -> EventData<PlayerTeleportEvent> {
         let uuid = core::uuid_of(&event.player);
+        tracing::info!("LOADTEST_TELEPORT enter uuid={uuid} to={:?}", event.to_position);
         let (x, _y, z) = event.to_position;
         let block_x = x.floor() as i32;
         let block_z = z.floor() as i32;
@@ -803,6 +804,7 @@ impl EventHandler<PlayerTeleportEvent> for TeleportListener {
             };
             (in_safezone, deny, protected)
         };
+        tracing::info!("LOADTEST_TELEPORT after state uuid={uuid} deny={deny} protected={protected}");
 
         if deny {
             event.cancelled = true;
@@ -814,6 +816,7 @@ impl EventHandler<PlayerTeleportEvent> for TeleportListener {
                 )
             };
             core::send(&event.player, &format!("{prefix}{message}"));
+            tracing::info!("LOADTEST_TELEPORT done denied uuid={uuid}");
             return event;
         }
 
@@ -826,14 +829,18 @@ impl EventHandler<PlayerTeleportEvent> for TeleportListener {
             }
         }
 
+        tracing::info!("LOADTEST_TELEPORT after timers uuid={uuid}");
+
         // SOTW: update visibility for the destination (no-op when the timer is
         // not running or hiding is disabled).
         crate::handlers::timer::sotw::update_player_visibility(&server, &event.player, in_safezone);
+        tracing::info!("LOADTEST_TELEPORT after sotw uuid={uuid}");
 
         // `PlayerEventListener#onPlayerTeleport` also runs `checkMovement`, so
         // teleports announce claim changes immediately (and cancel warmups).
         check_movement(&event.player, &uuid, event.from_position, event.to_position, &world);
 
+        tracing::info!("LOADTEST_TELEPORT done uuid={uuid}");
         event
     }
 }
