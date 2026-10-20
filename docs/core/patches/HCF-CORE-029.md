@@ -1,6 +1,6 @@
 # HCF-CORE-029 — Colisiones físicas jugador-jugador y jugador-mob off
 
-- **Estado:** en diseño
+- **Estado:** implementado (C1 pendiente)
 - **Fase:** 2 (se implementa antes que 023)
 - **Upstreamable:** no (gameplay HCF)
 - **Riesgo:** medio
@@ -33,6 +33,20 @@ Desactivar **solo el empuje físico** en `LivingEntity::push_entities`
 `HcfProfile` se añade a `World` como `Arc<HcfProfile>` inmutable para no hacer
 `Weak::upgrade` por entidad/tick. `World::load` lo obtiene de
 `server.upgrade()`; si no hay servidor (tests), usa un perfil vanilla.
+
+### Estado de implementación (2026-10-20)
+
+- Implementado en `hcf/core-029`, commit `7a1543e` (rebase sobre 010),
+  mergeado en `hcf/foundation`.
+- `World` guarda `Arc<HcfProfile>`; `World::load` lo toma del servidor y usa
+  `HcfConfig::default()` (HCF off) cuando no hay servidor, para tests.
+- El filtro de `push_entities` se calcula una vez por empujador
+  (`block_players`/`block_mobs`) y solo clasifica candidatos con
+  `get_player()`/`get_mob()` cuando hay algo que bloquear. Con HCF off o ambas
+  colisiones activas no hay llamadas virtuales extra.
+- Se conserva `pushable.is_empty()` antes de leer `MaxEntityCramming`; el filtro
+  va antes del cramming y del bucle `push`.
+- C1/T1 pendientes; no se ejecutó compilación local.
 
 ### Lo que NO se toca
 

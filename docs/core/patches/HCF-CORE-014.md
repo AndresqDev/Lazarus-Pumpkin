@@ -1,6 +1,6 @@
 # HCF-CORE-014 — Random ticks fuera e inhabited time a 1 Hz
 
-- **Estado:** en diseño
+- **Estado:** implementado (C1 pendiente)
 - **Fase:** 1
 - **Upstreamable:** parcial (el corte de random ticks en `Level` es genérico; el perfil HCF no)
 - **Riesgo:** medio (cambia la velocidad de local difficulty)
@@ -169,6 +169,19 @@ HCF no usa random ticks salvo farms concretas, y no necesita inhabited time a
 - [ ] Soak: 30 min; sin chunks atascados ni `inhabited_time` negativo/overflow.
 - [ ] Loadtest: 100/200 bots; MSPT p99 y tiempo de `get_tick_data`.
 - [ ] Suite ejecutada y verde en T1.
+
+## Estado de implementación (2026-10-20)
+
+- Implementado en `hcf/core-014`, commit `40e1049`, mergeado en
+  `hcf/foundation`.
+- `World::tick_chunks` pasa `random_tick_speed = 0` cuando `RandomTicks` está
+  off. `Level::get_tick_data` no recorre secciones con velocidad 0 y no reserva
+  capacidad para `random_ticks`; el bloque Rayon de random ticks solo se ejecuta
+  si la lista no está vacía.
+- `inhabited_time` se actualiza cada `20 / inhabited_time_hz` ticks y suma el
+  intervalo, preservando el conteo de ticks a largo plazo. Con HCF off el
+  intervalo es 1 y la ruta vanilla no cambia.
+- C1/T1 pendientes; no se ejecutó compilación local.
 
 ## Rollback
 

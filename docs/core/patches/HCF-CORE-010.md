@@ -1,6 +1,6 @@
 # HCF-CORE-010 — Solo dimensiones necesarias
 
-- **Estado:** en diseño
+- **Estado:** implementado (C1 pendiente)
 - **Fase:** 1
 - **Upstreamable:** parcial (config de dimensiones sí; perfil HCF no)
 - **Riesgo:** bajo
@@ -32,6 +32,17 @@ No se trata de borrar datos, solo de no cargar esas dimensiones.
 4. No tocar `World::create_world`: sigue iterando `server.dimensions`
    (`server/mod.rs:388`).
 5. Con `hcf.enabled = false`, la lista es exactamente la de hoy.
+
+### Estado de implementación (2026-10-20)
+
+- Implementado en `hcf/core-010`, commit `7f41404`, mergeado en
+  `hcf/foundation`.
+- `HcfProfile::only_overworld()` se deriva de `HcfFeature::Dimensions`; el
+  perfil `hcf-1.8` la activa por defecto y `only_overworld = false` la apaga.
+- `hcf_profile` se construye antes de la lista de dimensiones y se mueve una
+  sola vez al `Server`.
+- El warning se emite una vez si `allow_nether`/`allow_end` estaban activos.
+- C1/T1 pendientes; no se ejecutó compilación local.
 
 ### Comportamiento
 

@@ -1,6 +1,6 @@
 # HCF-CORE-013 — Spawning natural fuera
 
-- **Estado:** en diseño
+- **Estado:** implementado (C1 pendiente)
 - **Fase:** 1
 - **Upstreamable:** parcial (la extracción del helper sí; el perfil HCF no)
 - **Riesgo:** bajo
@@ -133,6 +133,18 @@ no los borra, no los despawna y no cambia su IA (eso queda para 015/027).
 - [ ] Soak: 30 min con 100 bots; sin errores de chunks ni entidades huérfanas.
 - [ ] Loadtest: 100/200 bots; comparar MSPT p99, entidades y lecturas de chunk.
 - [ ] Suite ejecutada y verde en T1.
+
+## Estado de implementación (2026-10-20)
+
+- Implementado en `hcf/core-013`, commit `4795223`, mergeado en
+  `hcf/foundation`.
+- Se optó por un guard inline alrededor del bloque completo de spawn list y
+  spawners, en vez de extraer un método. Evita `get_filtered_spawning_categories`,
+  la asignación de `spawn_list`, el `read_chunk_sync` y el dispatch Rayon cuando
+  `NaturalSpawning` está off.
+- Con HCF off el bloque se ejecuta exactamente igual; solo cambia la
+  indentación. El `HcfSection::NaturalSpawning` no se registra cuando se salta.
+- C1/T1 pendientes; no se ejecutó compilación local.
 
 ## Rollback
 

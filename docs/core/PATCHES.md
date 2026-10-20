@@ -23,11 +23,11 @@ La asignación por oleadas, agentes y archivos permitidos está en
 
 | ID | Título | Patrón | Archivos principales | Ganancia esperada | Riesgo | Estado |
 |---|---|---|---|---|---|---|
-| HCF-CORE-010 | Solo dimensiones necesarias | Config + early-return | `server/mod.rs` | Alta si no hay Nether/End | Bajo | En diseño |
+| HCF-CORE-010 | Solo dimensiones necesarias | Config + early-return | `server/mod.rs` | Alta si no hay Nether/End | Bajo | Implementado (C1 en curso) |
 | HCF-CORE-011 | Clima desactivable | Early-return | `world/mod.rs` (`tick_environment`) | Baja/media | Bajo | Propuesto |
 | HCF-CORE-012 | Raids desactivables | Early-return | `world/mod.rs` (`tick`) | Media | Bajo | Propuesto |
-| HCF-CORE-013 | Spawning natural fuera | Early-return | `world/mod.rs` (`tick_chunks`) | Alta (a medir) | Bajo | En diseño |
-| HCF-CORE-014 | Random ticks fuera + inhabited time 1 Hz | Early-return + time-slice | `world/mod.rs`, `pumpkin-world/src/level.rs` | Media/alta (a medir) | Medio | En diseño |
+| HCF-CORE-013 | Spawning natural fuera | Early-return | `world/mod.rs` (`tick_chunks`) | Alta (a medir) | Bajo | Implementado (C1 pendiente) |
+| HCF-CORE-014 | Random ticks fuera + inhabited time 1 Hz | Early-return + time-slice | `world/mod.rs`, `pumpkin-world/src/level.rs` | Media/alta (a medir) | Medio | Implementado (C1 pendiente) |
 | HCF-CORE-015 | Política de IA de mobs | Clasificación + whitelist | `entity/mod.rs` | Alta | Medio | Propuesto |
 | HCF-CORE-016 | Advancements/stats/recipe book/chat signing | Early-return + config | `entity/player.rs`, `server/mod.rs`, config | Media | Bajo/medio | Propuesto |
 | HCF-CORE-017 | View/sim distance, autosave y logging | Config + async save | `pumpkin.toml`, `world/mod.rs`, `pumpkin-world` | Alta | Bajo | Propuesto |
@@ -45,7 +45,7 @@ La asignación por oleadas, agentes y archivos permitidos está en
 | HCF-CORE-026 | Filtros de eventos y movimiento | API aditiva | `plugin/api/events`, `plugin/mod.rs`, `net/java` | Media (a medir) | Medio | En diseño |
 | HCF-CORE-027 | Política de tick por tipo de entidad | Config + early-return | `entity/mod.rs`, `world/mod.rs` | Media | Medio | Propuesto |
 | HCF-CORE-028 | Buffers reutilizados y menos allocs por tick | Interno | `world/mod.rs`, `entity_tracker.rs` | Media | Medio | Propuesto |
-| HCF-CORE-029 | Colisiones jugador-jugador y jugador-mob off | Early-return + config | `world/mod.rs`, `entity/mod.rs` | Alta con 100+ jugadores | Medio | En diseño |
+| HCF-CORE-029 | Colisiones jugador-jugador y jugador-mob off | Early-return + config | `world/mod.rs`, `entity/living.rs` | Alta con 100+ jugadores | Medio | Implementado (C1 en curso) |
 
 `HCF-CORE-029` se implementa antes que `HCF-CORE-023`. Si desactivar colisiones
 de jugador elimina la mayoría de pares, 023 se reduce o se descarta.
