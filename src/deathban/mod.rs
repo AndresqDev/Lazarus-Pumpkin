@@ -137,10 +137,13 @@ pub fn enforce_on_join(player: &Player) -> bool {
 pub fn apply_on_death(player: &Player, reason: &str) {
     // `DeathbanManager#deathbanPlayer` saved the inventory first thing, before
     // every early return (bypass permission included).
+    tracing::info!("LOADTEST_DEATHBAN save_inventory start");
     crate::handlers::restore::save_inventory_upon_death(player);
+    tracing::info!("LOADTEST_DEATHBAN save_inventory done");
 
     let uuid = crate::utils::core::uuid_of(player);
     let location = crate::utils::core::location(player);
+    tracing::info!("LOADTEST_DEATHBAN config start uuid={uuid}");
 
     // Host calls happen before taking the state lock (port convention).
     if player.has_permission("lazarus.deathban.bypass") {
@@ -173,6 +176,7 @@ pub fn apply_on_death(player: &Player, reason: &str) {
             break;
         }
     }
+    tracing::info!("LOADTEST_DEATHBAN config done uuid={uuid} millis={millis}");
     // The original only stores a ban when the resolved time is not zero.
     if millis == 0 {
         return;

@@ -470,6 +470,7 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
             event.cancelled = true;
             return event;
         }
+        tracing::info!("LOADTEST_DEATH enter uuid={uuid}");
 
         let name = core::name_of(&event.player);
         let world = core::world_name(&event.player);
@@ -649,12 +650,16 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
         // `DeathMessageHandler#onPlayerDeath` delivery: the victim, the killer
         // and every player with death messages enabled (the vanilla broadcast is
         // disabled at load, see `death::init`).
+        tracing::info!("LOADTEST_DEATH before send_message uuid={uuid}");
         crate::handlers::death::send_death_message(&server, &uuid, killer_uuid.as_deref(), &reason);
+        tracing::info!("LOADTEST_DEATH after send_message uuid={uuid}");
         event.death_message = utils::text(&reason);
 
         // Deathban (`DeathbanManager#onPlayerDeath`; the kick fires ~1s later,
         // like the original's `Tasks.syncLater`).
+        tracing::info!("LOADTEST_DEATH before deathban uuid={uuid}");
         crate::deathban::apply_on_death(&event.player, &reason);
+        tracing::info!("LOADTEST_DEATH after deathban uuid={uuid}");
 
         // Drop the claim wand (port of the death handling in SelectionManager).
         {
@@ -681,6 +686,7 @@ impl EventHandler<PlayerDeathEvent> for InstantRespawnListener {
         // for the deathban handler to queue its kick (checked below), short
         // enough to feel instant.
         server.schedule_delayed_task(2, move |server| {
+            tracing::info!("LOADTEST_RESPAWN task uuid={uuid}");
             if state()
                 .read()
                 .unwrap()
@@ -688,19 +694,24 @@ impl EventHandler<PlayerDeathEvent> for InstantRespawnListener {
                 .iter()
                 .any(|kick| kick.uuid == uuid)
             {
+                tracing::info!("LOADTEST_RESPAWN skip_pending_kick uuid={uuid}");
                 return;
             }
 
             let Some(player) = pumpkin_plugin_api::uuid::parse(&uuid)
                 .and_then(|id| server.get_player_by_uuid(id))
             else {
+                tracing::info!("LOADTEST_RESPAWN skip_missing uuid={uuid}");
                 return;
             };
             // A deathban or another handler may have revived them already.
             if player.get_health() > 0.0 {
+                tracing::info!("LOADTEST_RESPAWN skip_healthy uuid={uuid}");
                 return;
             }
+            tracing::info!("LOADTEST_RESPAWN before respawn uuid={uuid}");
             player.respawn();
+            tracing::info!("LOADTEST_RESPAWN after respawn uuid={uuid}");
         });
 
         event

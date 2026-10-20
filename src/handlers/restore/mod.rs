@@ -138,13 +138,16 @@ pub fn load_inventories(data_folder: &str) {
 
 /// `InventoryRestoreManager#saveInventoryUponDeath`.
 pub fn save_inventory_upon_death(player: &Player) {
+    tracing::info!("LOADTEST_RESTORE enabled check start");
     if !enabled() {
+        tracing::info!("LOADTEST_RESTORE disabled");
         return;
     }
-
+    tracing::info!("LOADTEST_RESTORE capture contents start");
     let contents: Vec<Option<ItemStack>> = (0..=35u8)
         .map(|slot| player.get_inventory_item(slot))
         .collect();
+    tracing::info!("LOADTEST_RESTORE capture contents done");
     let armor = {
         let inventory = player.get_inventory();
         vec![
@@ -154,8 +157,10 @@ pub fn save_inventory_upon_death(player: &Player) {
             inventory.get_helmet(),
         ]
     };
+    tracing::info!("LOADTEST_RESTORE capture armor done");
 
     save_captured(&core::uuid_of(player), &contents, &armor);
+    tracing::info!("LOADTEST_RESTORE save done");
 }
 
 /// [`save_inventory_upon_death`] for the combat-logger death (`record.contents`
