@@ -1,6 +1,6 @@
 # HCF-CORE-002 — Métricas por sección y p99
 
-- **Estado:** en diseño
+- **Estado:** implementado (C1 verde en espejo CI; T1 pendiente)
 - **Fase:** 0
 - **Upstreamable:** parcial (instrumentación genérica sí)
 - **Riesgo:** bajo
@@ -40,6 +40,27 @@ es a ciegas y el gate de 3 % no se puede evaluar.
    El log se emite solo si `hcf.enabled`; no se añade comando nuevo en 002.
 5. Exponer `HcfMetrics::snapshot()` para un futuro comando/CI. No se serializa
    a JSON todavía.
+
+### Estado de implementación (2026-10-20)
+
+- Implementado en `hcf/foundation` (`e8a3328`): 24 secciones, histograma de 128
+  buckets, guard RAII y log `HCF_METRIC` cada 600 ticks.
+- `HcfSnapshot.sections` usa `Vec<SectionSnapshot>` y el registro usa
+  `Box<[SectionMetrics]>`: el array fijo de 24 × 128 atómicos superaba el límite
+  de `clippy::large_stack_arrays`. La asignación ocurre una sola vez al arrancar;
+  no hay asignación por tick.
+- `PluginEvents` se mide en `PluginManager::fire`; el resto de secciones sigue la
+  tabla de puntos de instrumentación.
+- Los bloques instrumentados terminan en `};` para satisfacer
+  `clippy::semicolon_outside_block` sin cambiar el alcance del guard.
+- C1 se ejecutó en un espejo privado de GitHub Actions con Rust `1.96.0`,
+  `RUST_MIN_STACK=64 MiB` y clippy solo sobre `pumpkin`; el árbol del core no
+  incluye esos ajustes de CI. Run `39495116559`: formato, clippy debug/release y
+  tests Linux x64/ARM64, Windows x64/ARM64 y macOS verdes. Android AArch64 falló
+  porque el emulador no arrancó (`adb: device 'emulator-5554' not found`,
+  `Timeout waiting for emulator to boot`), no por el código; los builds de
+  release quedaron saltados por esa dependencia.
+- `WasmJobs`, contadores por packet-id y export JSON quedan para `002b`.
 
 ### Diseño sin locks
 
@@ -88,6 +109,7 @@ struct SectionMetrics {
 | `InhabitedTime` | `world/mod.rs:2089-2100` |
 | `PushEntities` | `entity/living.rs:1417-1459` |
 | `MovementBroadcast` | `net/java/play/player_position.rs:127-151`, `:285-318` |
+| `PluginEvents` | `plugin/mod.rs` (`PluginManager::fire`) |
 
 No se instrumenta cada jugador individual en 002; `Players` mide el bloque
 paralelo completo. Si hace falta, 021 añade un contador por jugador.
