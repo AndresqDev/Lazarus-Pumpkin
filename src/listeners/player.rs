@@ -664,11 +664,16 @@ impl EventHandler<PlayerDeathEvent> for DeathListener {
         tracing::info!("LOADTEST_DEATH after deathban uuid={uuid}");
 
         // Drop the claim wand (port of the death handling in SelectionManager).
+        tracing::info!("LOADTEST_DEATH before final state lock uuid={uuid}");
         {
             let mut guard = state().write().unwrap();
+            tracing::info!("LOADTEST_DEATH final state locked uuid={uuid}");
             guard.selection.cancel_local(&event.player);
+            tracing::info!("LOADTEST_DEATH final selection done uuid={uuid}");
             guard.glass.clear_type(&event.player, crate::glass::GlassType::ClaimSelection);
+            tracing::info!("LOADTEST_DEATH final glass done uuid={uuid}");
         }
+        tracing::info!("LOADTEST_DEATH done uuid={uuid}");
 
         event
     }
