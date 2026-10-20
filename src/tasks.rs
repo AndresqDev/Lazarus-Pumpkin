@@ -261,11 +261,11 @@ fn glass_tick(server: &Server) {
         let AppState { glass, factions, claims, config, timers, .. } = &mut *guard;
         glass::update_walls(glass, &player, claims, factions, timers);
         glass::update_map(glass, &player, claims, config);
-        // Safety net: re-send every active fake block so a broken/placed real block
-        // (or any desync) is corrected. Only positions that pass the conditions are
-        // in `entries`, so red walls stay correct.
-        glass.refresh_all(server);
     }
+    // El resync completo vive en su propia tarea cada 2 ticks. Hacerlo dentro
+    // del bucle anterior lo convertia en O(n^2): con 100 bots se reenviaban
+    // ~100 veces los renders de todos en cada pasada y el host terminaba
+    // ahogado en packets/memoria.
 }
 
 fn announce_expired(server: &Server, expired: &[(String, TimerType)]) {
