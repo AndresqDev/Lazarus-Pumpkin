@@ -115,6 +115,15 @@ function createBot(index, attempt = 0) {
   });
   bot.on('death', () => {
     stats.deaths++;
+    try {
+      const p = bot.entity && bot.entity.position;
+      const below = p ? bot.blockAt(p.offset(0, -1, 0)) : null;
+      const at = p ? bot.blockAt(p) : null;
+      log('died', username, p ? p.toString() : '?',
+        'health=' + (bot.health ?? '?'), 'food=' + (bot.food ?? '?'),
+        'below=' + (below && below.name), 'at=' + (at && at.name),
+        'dim=' + (bot.game && bot.game.dimension));
+    } catch (_) {}
     st.mode = 'dead';
     bot.clearControlStates();
     stopPath();

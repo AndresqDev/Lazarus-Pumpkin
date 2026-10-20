@@ -38,10 +38,14 @@ on:
           - velocity
           - viaproxy
       set_spawn:
-        description: 'Fijar setworldspawn 103 78 -317 (puede congelar el tick)'
+        description: 'Fijar setworldspawn (usar spawn en tierra firme)'
         required: true
         default: false
         type: boolean
+      spawn:
+        description: 'Coordenadas de setworldspawn: x y z'
+        required: false
+        default: '103 78 -317'
 
 concurrency:
   group: loadtest-server
@@ -52,6 +56,7 @@ env:
   MOTD: ${{ github.event.inputs.motd }}
   PROXY_KIND: ${{ github.event.inputs.proxy }}
   SET_SPAWN: ${{ github.event.inputs.set_spawn }}
+  SPAWN: ${{ github.event.inputs.spawn }}
   PUMPKIN_TAG: '0.2.0+26.3-26.51'
   PUMPKIN_SHA256: '68c4416ca9fbfb3f2aeb6a8ce1de0e3fb02c5a85a53c8ba59a27941d7e43d8cd'
   VIAPROXY_JAR: 'ViaProxy-3.4.14.jar'
@@ -151,10 +156,10 @@ jobs:
           echo "--- rcon ---"
           python3 ../loadtest/server/rcon.py list lazarus-test 127.0.0.1 25575 || true
           python3 ../loadtest/server/rcon.py tps lazarus-test 127.0.0.1 25575 || true
-          # Spawn del host seguro (opcional: se probo que puede congelar el tick
-          # al primer join; por defecto NO se usa, el join ya resuelve y=79).
+          # Spawn del host (opcional). El spawn por defecto cae sobre agua y
+          # los bots se ahogan; usar coordenadas en tierra firme (la arena).
           if [ "${SET_SPAWN:-false}" = "true" ]; then
-            python3 ../loadtest/server/rcon.py "setworldspawn 103 78 -317" \
+            python3 ../loadtest/server/rcon.py "setworldspawn ${SPAWN:-103 78 -317}" \
               lazarus-test 127.0.0.1 25575 || true
           fi
 
