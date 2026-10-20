@@ -46,6 +46,14 @@ on:
         description: 'Coordenadas de setworldspawn: x y z'
         required: false
         default: '103 78 -317'
+      deathban_minutes:
+        description: 'DEATHBAN.DEFAULT_BAN_TIME (0 = sin ban, ENABLED sigue true)'
+        required: false
+        default: '180'
+      packet_limit:
+        description: 'max_packet_rate del host por conexion (packets/s)'
+        required: false
+        default: '500'
 
 concurrency:
   group: loadtest-server
@@ -57,6 +65,8 @@ env:
   PROXY_KIND: ${{ github.event.inputs.proxy }}
   SET_SPAWN: ${{ github.event.inputs.set_spawn }}
   SPAWN: ${{ github.event.inputs.spawn }}
+  DEATHBAN_MINUTES: ${{ github.event.inputs.deathban_minutes }}
+  PACKET_LIMIT: ${{ github.event.inputs.packet_limit }}
   PUMPKIN_TAG: '0.2.0+26.3-26.51'
   PUMPKIN_SHA256: '68c4416ca9fbfb3f2aeb6a8ce1de0e3fb02c5a85a53c8ba59a27941d7e43d8cd'
   VIAPROXY_JAR: 'ViaProxy-3.4.14.jar'
@@ -115,6 +125,11 @@ jobs:
           fi
           echo '--- compression backend ---'
           sed -n '/^\[networking\.java\.compression\]/,/^$/p' server/pumpkin.toml
+          # El limiter del host es por conexion; detras de Velocity los 100 bots
+          # comparten IP y algunos superan 500/s por bursts de Mineflayer.
+          sed -i "s/^max_packet_rate = .*/max_packet_rate = ${PACKET_LIMIT:-500}/" server/pumpkin.toml
+          sed -i "s/^burst_capacity = .*/burst_capacity = ${PACKET_LIMIT:-500}/" server/pumpkin.toml
+          grep -nE 'max_packet_rate|burst_capacity' server/pumpkin.toml | head -4
           cp target/wasm32-wasip2/release/lazarus_pumpkin.wasm server/plugins/lazarus_pumpkin.wasm
           if [ -f loadtest/server/native_tab-x86_64.so ]; then
             cp loadtest/server/native_tab-x86_64.so server/plugins/native_tab.so
@@ -161,6 +176,21 @@ jobs:
           if [ "${SET_SPAWN:-false}" = "true" ]; then
             python3 ../loadtest/server/rcon.py "setworldspawn ${SPAWN:-103 78 -317}" \
               lazarus-test 127.0.0.1 25575 || true
+          fi
+
+          # Deathban con ban de 0 minutos: mantiene ENABLED=true (el disabled
+          # congela el tick) pero deja que los bots reaparezcan tras morir en
+          # PvP, para sostener 100 durante todo el test.
+          if [ -f server/plugins/data/lazarus/config.yml ]; then
+            echo "--- deathban config ---"
+            grep -nE '^DEATHBAN:|^  ENABLED:|^  DEFAULT_BAN_TIME:' \
+              server/plugins/data/lazarus/config.yml | head -6 || true
+            if [ "${DEATHBAN_MINUTES:-180}" != "180" ]; then
+              sed -i "s/^  DEFAULT_BAN_TIME: .*/  DEFAULT_BAN_TIME: ${DEATHBAN_MINUTES}/" \
+                server/plugins/data/lazarus/config.yml
+              python3 ../loadtest/server/rcon.py "lazarus reload" \
+                lazarus-test 127.0.0.1 25575 || true
+            fi
           fi
 
           PUMPKIN_PID=$PUMPKIN_PID \
@@ -316,7 +346,7 @@ jobs:
           echo '--- config final ---'
           grep -vE '^\s*#|^\s*$' velocity.toml | head -50
 
-          nohup java -Xms1g -Xmx1g -XX:+UseG1GC -XX:G1HeapRegionSize=4M \
+          nohup java -Xms1g -Xmx2g -XX:+UseG1GC -XX:G1HeapRegionSize=4M \
             -XX:+UnlockExperimentalVMOptions -XX:+ParallelRefProcEnabled \
             -XX:+AlwaysPreTouch -XX:MaxInlineLevel=15 \
             -jar velocity.jar > velocity.log 2>&1 &

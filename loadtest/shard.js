@@ -124,7 +124,7 @@ const tick = setInterval(() => {
     `t=${elapsed}s fase=${phase} vivos=${sum('alive')}/${cfg.count} ` +
       `muertes=${sum('deaths')} ataques=${sum('attacks')} err=${sum('errors')} ` +
       `kicks=${sum('kicks')} recon=${sum('reconnects')} desc=${sum('disconnects')} ` +
-      `sinruta=${sum('stuck')} arena=${sum('reached')}`
+      `pkts=${sum('packets')} sinruta=${sum('stuck')} arena=${sum('reached')}`
   );
 }, 10000);
 

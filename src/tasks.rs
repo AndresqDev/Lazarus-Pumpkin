@@ -25,10 +25,10 @@ const JOIN_TELEPORT_DELAY_TICKS: u32 = 20;
 /// Starts the repeating tasks (called from `on_load`).
 pub fn start(context: &Context) {
     context.schedule_repeating_task(20, 20, |server| tick(&server));
-    // Sidebar scoreboard: the original refreshes it from a 100 ms fixed-rate
-    // loop (`ScoreboardUpdaterImpl`); the render diffs rows, so untouched
-    // sidebars cost no packets.
-    context.schedule_repeating_task(2, 2, |server| {
+    // Sidebar scoreboard: 5 Hz (200 ms) en vez del 10 Hz original. El render
+    // diffea filas, asi que las lineas estaticas no mandan packets; bajar el
+    // ritmo solo reduce el costo de rebuild/diff con 100+ jugadores.
+    context.schedule_repeating_task(4, 4, |server| {
         for player in server.get_all_players() {
             scoreboard::update(&player, &server);
         }
@@ -40,15 +40,12 @@ pub fn start(context: &Context) {
         state().write().unwrap().glass.process_pending_regen(&server);
         process_join_teleports(&server);
     });
-    // Client-side glass walls refresh a bit faster, like the original 100ms loop.
+    // Client-side glass walls: 2 Hz. El resync completo va una sola vez por
+    // pasada (no por jugador) para no convertirse en O(n^2).
     context.schedule_repeating_task(10, 10, |server| glass_tick(&server));
     // Block gameplay handlers (`handlers.block`): one second passes of the
     // cobweb remover and the autosmel replacement queue.
     context.schedule_repeating_task(20, 20, |server| crate::handlers::block::tick_second(&server));
-    // Re-send all active fake blocks frequently (fast resync of the render).
-    context.schedule_repeating_task(2, 2, |server| {
-        state().write().unwrap().glass.refresh_all(&server);
-    });
     // Disable mob AI globally (sweep so already-spawned mobs are covered too).
     context.schedule_repeating_task(100, 100, |server| {
         for world in server.get_all_worlds() {
@@ -262,10 +259,10 @@ fn glass_tick(server: &Server) {
         glass::update_walls(glass, &player, claims, factions, timers);
         glass::update_map(glass, &player, claims, config);
     }
-    // El resync completo vive en su propia tarea cada 2 ticks. Hacerlo dentro
-    // del bucle anterior lo convertia en O(n^2): con 100 bots se reenviaban
-    // ~100 veces los renders de todos en cada pasada y el host terminaba
-    // ahogado en packets/memoria.
+    // Un solo resync por pasada. Hacerlo dentro del bucle anterior lo
+    // convertia en O(n^2): con 100 bots se reenviaban ~100 veces los renders
+    // de todos y el proxy terminaba sin heap.
+    state().read().unwrap().glass.refresh_all(server);
 }
 
 fn announce_expired(server: &Server, expired: &[(String, TimerType)]) {

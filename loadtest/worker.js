@@ -41,7 +41,21 @@ function createBot(index, attempt = 0) {
   });
   bot.loadPlugin(pathfinder);
 
-  const st = { mode: 'join', lastAttack: 0, lastJump: 0, lastGoal: 0, failures: 0, timer: null, scatter: false, scatterAt: 0, scatterGoal: false };
+  // Cuenta packets salientes para diagnosticar los kicks del packet_limiter
+  // del host (500/s). El top de nombres se imprime al recibir el kick.
+  const pktCounts = Object.create(null);
+  let pktTotal = 0;
+  let stRef = null;
+  const rawWrite = bot._client.write.bind(bot._client);
+  bot._client.write = (name, params) => {
+    pktTotal++;
+    pktCounts[name] = (pktCounts[name] || 0) + 1;
+    if (stRef) stRef.pktTotal = pktTotal;
+    return rawWrite(name, params);
+  };
+
+  const st = { mode: 'join', lastAttack: 0, lastJump: 0, lastGoal: 0, failures: 0, timer: null, scatter: false, scatterAt: 0, scatterGoal: false, pktTotal: 0 };
+  stRef = st;
   bot._perf = st;
 
   const recentChat = [];
@@ -204,7 +218,12 @@ function createBot(index, attempt = 0) {
   });
   bot.on('kicked', (reason) => {
     stats.kicks++;
-    log('kicked', username, JSON.stringify(reason).slice(0, 140));
+    const top = Object.entries(pktCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(',');
+    log('kicked', username, JSON.stringify(reason).slice(0, 140), 'pkts=' + pktTotal, 'top=' + top);
   });
   bot.on('end', (reason) => {
     clearInterval(st.timer);
@@ -362,6 +381,7 @@ setInterval(() => {
     disconnects: stats.disconnects,
     reached: stats.reached,
     stuck: stats.stuck,
+    packets: bots.reduce((s, b) => s + (b._perf?.pktTotal || 0), 0),
     stuckNames,
     positions,
     elapsed: Math.round((Date.now() - startedAt) / 1000),
