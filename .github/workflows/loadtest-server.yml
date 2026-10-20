@@ -237,6 +237,22 @@ jobs:
             sleep 30
           done
 
+      - name: Stack dump si el tick se congelo
+        if: always()
+        run: |
+          set +e
+          if [ -n "${PUMPKIN_PID:-}" ] && kill -0 "$PUMPKIN_PID" 2>/dev/null; then
+            if ! command -v gdb >/dev/null 2>&1; then
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq gdb
+            fi
+            sudo gdb -q -batch -p "$PUMPKIN_PID" \
+              -ex 'set pagination off' \
+              -ex 'thread apply all bt' > server/stack.txt 2>&1
+            echo '--- stack.txt (cola) ---'
+            tail -60 server/stack.txt
+          fi
+
       - name: Bajar todo
         if: always()
         run: |
@@ -258,6 +274,7 @@ jobs:
             server/logs/latest.log
             server/sampler.csv
             server/sampler.log
+            server/stack.txt
             server/pumpkin.toml
             server/plugins/data/lazarus/config.yml
             server/plugins/data/lazarus/utilities.yml

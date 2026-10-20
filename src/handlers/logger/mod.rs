@@ -1076,9 +1076,19 @@ impl EventHandler<ItemSpawnEvent> for CombatLoggerLootListener {
         _server: Server,
         mut event: EventData<ItemSpawnEvent>,
     ) -> EventData<ItemSpawnEvent> {
+        tracing::info!(
+            "LOADTEST_ITEM enter name={} pos={:?}",
+            event.item_name,
+            event.position
+        );
         if is_skeleton_loot(&event.item_name) && is_vanilla_logger_drop(None, event.position) {
             event.cancelled = true;
         }
+        tracing::info!(
+            "LOADTEST_ITEM done name={} cancelled={}",
+            event.item_name,
+            event.cancelled
+        );
         event
     }
 }
