@@ -1,6 +1,6 @@
 # HCF-CORE-026 — Filtros de eventos y movimiento
 
-- **Estado:** en diseño
+- **Estado:** implementado (C1 pendiente)
 - **Fase:** 2
 - **Upstreamable:** parcial (filtros genéricos sí; política HCF no)
 - **Riesgo:** medio
@@ -217,6 +217,26 @@ sin cambiar la semántica de los handlers existentes ni el orden actual.
 - [ ] Soak: 30 min, 100 bots; sin eventos perdidos que rompan timers.
 - [ ] Loadtest: 100/200 bots; p99, eventos/s, CPU del plugin.
 - [ ] Suite ejecutada y verde en T1.
+
+## Estado de implementación (2026-10-20)
+
+- Implementado en `hcf/core-026`, commit `4c293da`, mergeado en
+  `hcf/foundation`.
+- `HandlerOptions`/`EventFilter`/`PlayerMoveFilter`/`PacketIdFilter` son API
+  aditiva. `register` conserva firma y delega en `register_with_options`.
+- `DynEventHandler::filter()` tiene default `None`; el único literal adicional
+  es `plugin/api/context.rs`.
+- `PlayerMoveEvent` y `PacketReceivedEvent` se consultan antes de construir el
+  evento (posición, posición-rotación y recepción Java). Si ningún handler
+  matchea, se aplica el movimiento o se procesa el paquete sin `Arc::clone`,
+  payload clonado ni `fire_blocking`.
+- `fire`/`fire_blocking` usan `has_matching_handlers` y filtran por handler;
+  el orden blocking → non-blocking y la cancelación se conservan.
+- `PacketIdFilter` usa `Vec<i32>` porque `smallvec` no es dependencia de
+  `pumpkin`; no se añadió una dependencia nueva.
+- Fuera de alcance: Bedrock/`entity/player.rs`, `BlockPhysicsEvent`, furnace,
+  hopper, `PacketSentEvent` y WIT v0.1.
+- C1/T1 pendientes; no se ejecutó compilación local.
 
 ## Rollback
 
