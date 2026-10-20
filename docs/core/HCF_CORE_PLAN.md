@@ -181,6 +181,12 @@ packet_batch = true
 scheduler_budget_ms = 5
 inhabited_time_hz = 1
 
+# Colisiones
+# Se desactivan las colisiones de jugador entre sí y contra mobs.
+# Bloques, mobs contra bloques y proyectiles se mantienen.
+player_player_collisions = false
+player_mob_collisions = false
+
 # Actualización
 [hcf.updater]
 enabled = false
@@ -223,6 +229,8 @@ Bitflags/`EnumSet` con estos grupos iniciales:
 - `EntityTrackerFastPath`
 - `PacketBatch`
 - `SchedulerBudget`
+- `PlayerPlayerCollisions`
+- `PlayerMobCollisions`
 
 `HcfProfile` se carga una vez y se guarda como `Arc<HcfProfile>` inmutable. Los
 accesos son `#[inline]` y sin locks:
@@ -252,10 +260,18 @@ pub fn disabled(&self, feature: HcfFeature) -> bool {
 | Redstone / pistones / TNT | Quizá traps/cannon | Keep | No desactivar a ciegas |
 | Fluidos | Sí | Keep | Optimizar, no quitar |
 | Projectiles / pearls / potions | Sí | Keep | Fast path, no off |
+| Colisiones de jugador | No | Off | Jugador-jugador y jugador-mob; bloques y proyectiles se mantienen |
 | Block entities | Sí | Keep | Cofres, signs, etc. |
 | View distance | 8–10 | Config | Medir antes de bajar más |
 | Simulation distance | 4–6 | Config | Gran impacto en chunks activos |
 | Autosave | 5 min | Async | Sin `fsync` en tick |
+
+La desactivación de colisiones de jugador es una decisión de gameplay del perfil
+HCF: los jugadores pueden ocupar el mismo bloque y atravesar mobs, pero siguen
+colisionando con bloques y projectiles, y los ataques/raycasts no cambian. La
+ruta vanilla conserva todas las colisiones. `HCF-CORE-029` va **antes** que
+`HCF-CORE-023`; si elimina la mayoría de pares, el spatial hash de 023 se reduce
+o se descarta.
 
 ## 4. Fase 0 — Fundamentos y medición
 
@@ -470,14 +486,49 @@ Cambios:
   items y proyectiles.
 - Mantener `update_all` vanilla intacto; dispatch arriba.
 
-### HCF-CORE-023 — Colisiones entidad-jugador
+### HCF-CORE-029 — Colisiones de jugador desactivadas
+
+Decisión de gameplay HCF: en 1.8 los jugadores no colisionan entre sí ni contra
+mobs. Se implementa como feature de perfil, no como cambio vanilla.
+
+- `HcfFeature::PlayerPlayerCollisions` y `HcfFeature::PlayerMobCollisions`, off
+  en `hcf-1.8`.
+- En el resolver de colisiones de `World::tick`, saltar los pares:
+  - `Player` ↔ `Player`
+  - `Player` ↔ `Mob`
+- Saltar en ambos sentidos y no llamar a `on_player_collision` ni aplicar
+  push/impulso para esos pares.
+- No tocar:
+  - colisión jugador ↔ bloque;
+  - colisión mob ↔ bloque;
+  - proyectiles, pearls, items y vehículos;
+  - raycast/alcance de ataque;
+  - hitboxes.
+- No disparar eventos de colisión para los pares desactivados; documentar que
+  un plugin HCF no debe depender de ellos.
+- La IA de mobs sigue pudiendo targetear/atacar jugadores; solo se quita la
+  colisión física/push.
+- Test: dos jugadores ocupan el mismo bloque; jugador y mob se atraviesan; el
+  ataque sigue registrando; jugador sigue colisionando con bloque; projectile
+  sigue impactando.
+- Métrica: contar pares saltados y medir la sección de colisiones. Ganancia
+  **alta** con 100+ jugadores, **media/baja** con pocos mobs.
+- Aceptación: es una decisión de gameplay aprobada; se acepta por correctitud
+  (colisiones off, ataque/bloques on), no por superar el 3 % de mejora. Se
+  revierte solo si causa un bug o una regresión medible.
+
+### HCF-CORE-023 — Colisiones restantes con spatial hash
+
+> Se implementa **después** de `HCF-CORE-029`. Si 029 elimina la mayoría de
+> pares, este parche se reduce o se descarta.
 
 El bucle actual dentro de `World::tick` compara cada entidad con todos los
 jugadores (`players_cache`) y llama `on_player_collision`. Con 100 jugadores son
 ~10k comprobaciones/tick; con mobs, más.
 
 - Extraer `tick_entity_collisions`.
-- Ruta HCF: spatial hash de jugadores por celda; consultar solo celdas vecinas.
+- Ruta HCF: spatial hash solo para los pares que sigan activos (mob-mob,
+  proyectiles/items contra jugador si aplica).
 - Añadir `EntityBase::needs_player_collision()`; mobs con IA off no lo
   necesitan.
 - Test: colisión de item/pearl con jugador sigue funcionando.
@@ -666,9 +717,14 @@ paquetes/s, bytes/s, overruns de scheduler.
 
 ### 11.2 Tests
 
+La suite no se corre por parche. Se ejecuta en la fase **T1** (test-and-fix),
+después de la compilación única de la fase C1. En code-first solo se revisa
+estáticamente y se define qué test cubrirá cada patch.
+
 - Unitarios: perfil off == vanilla; flags; parser de config.
 - Integración/gametest: random tick, spawning, weather, raids, stats,
-  advancements, packet batch.
+  advancements, packet batch, colisiones jugador-jugador/jugador-mob off con
+  ataque/bloques on.
 - Compatibilidad: plugin v0.1 en host v0.2; plugin nativo viejo falla limpio.
 - Soak: 24 h con 100 bots; sin deadlocks, sin leaks, MSPT estable.
 - Updater: firma/hash/rollback/crash loop/read-only.
@@ -695,7 +751,7 @@ microoptimizar una sección que no es el cuello.
 | World tick: chunks, bloques, fluidos, random ticks | 4.0–4.5 ms | World |
 | Player tick: stats, warden, chunks, packets | 2.0–2.5 ms | Player |
 | Entity tracker: movimiento, rangos, spawn/despawn | 1.5 ms | Tracker |
-| Entity tick + colisiones | 1.5 ms | World |
+| Entity tick + colisiones restantes (029) | 1.0–1.5 ms | World |
 | Scheduler, eventos y host de plugins | 1.0 ms | Scheduler |
 | Reserva para picos/GC del allocator | 1.0–1.5 ms | Orquestador |
 | **Total** | **≤12 ms** | — |
@@ -729,31 +785,43 @@ benchmarks, merges y decisiones de gameplay. El detalle operativo está en
 
 Regla:
 
-> **Paralelizar código y análisis. Serializar benchmarks, merges y decisiones.**
+> **Paralelizar código y análisis. Serializar compilación final, tests,
+> benchmarks, merges y decisiones.**
 
 | Oleada | Duración | Qué se paraleliza | Gate |
 |---|---:|---|---|
 | 0. Recon | 60–90 min | 3 scouts + profiler + baseline | Top 10 símbolos y baseline p99 |
-| 1. Fundamentos | 90–120 min | Perfil, métricas, build ID, docs | Contratos mergeados; vanilla compila |
-| 2. Implementación | 3–4 h | World, Player, Tracker, Packet, Scheduler | Cada branch con tests |
-| 3. Integración | 60–90 min | Merge queue + reviewer | Build/tests verdes; sin APIs rotas |
-| 4. Benchmark | 2–3 h | Nada: un solo runner | p99 ≥3 % mejor; sin regresión |
-| 5. Cierre | 45–60 min | Docs + siguiente plan | Fichas y tracker actualizados |
+| 1. Fundamentos | 90–120 min | Perfil, métricas, build ID, docs | Contratos mergeados; `cargo check` único |
+| 2. Implementación code-first | 3–4 h | World, Player, Tracker, Packet, Scheduler | Cada branch con commit; **sin build/test** |
+| 3. Merge + compilación | 60–120 min | Merge queue; fixes por archivo | Workspace compila (C1) |
+| 4. Test-and-fix | 2–4 h | Tests por módulo; fixes | Suite y paridad verdes (T1) |
+| 5. Benchmark | 2–3 h | Nada: un solo runner | p99 ≥3 % mejor; sin regresión (B1) |
+| 6. Cierre | 45–60 min | Docs + siguiente plan | Fichas y tracker actualizados |
 
-Con 5–10 parches independientes, una jornada serial de 7–15 h se comprime a
-**5–8 h de reloj**. La aceleración realista es **2–3×**, no 10×: compilar Rust,
-correr tests y medir 100/200 bots tienen un suelo que no baja por lanzar más
-agentes.
+Gates de ejecución: **C1** = workspace compila; **T1** = tests/paridad verdes;
+**B1** = benchmark aceptado. `HCF-CORE-029` es una decisión de gameplay: B1 mide
+su impacto, pero se acepta por correctitud y solo se revierte por bug/regresión.
+
+El orden es deliberado: **primero se escribe todo el código, después se compila
+y se testea**. La implementación inicial de 7–15 h baja a **2–4 h**; el total
+con validación queda en **7–12 h**, no en 2 h. La aceleración realista es
+**2–3×**, no 10×: compilar Rust, correr tests y medir 100/200 bots tienen un
+suelo que no baja por lanzar más agentes.
 
 Condiciones para que funcione:
 
 - Los contratos (`HcfProfile`, `HcfMetrics`, firmas de helpers, API de paquetes)
   se mergean **antes** de la oleada paralela.
+- En la Oleada 2 los agentes **no** compilan, testean ni benchmarkean; solo
+  escriben y commitean. La única compilación temprana es el `cargo check` de
+  contratos.
 - Un solo dueño por archivo; `world/mod.rs` es el long pole y no se edita en
   paralelo.
 - Cada agente trabaja en un `git worktree` con `CARGO_TARGET_DIR` propio y
   `sccache` compartido.
-- Cada agente tiene timebox y devuelve branch, commit, tests y blockers.
+- Cada agente tiene timebox y devuelve branch, commit, archivos y blockers.
+- La primera compilación completa y la suite se hacen en serie; los fixes se
+  reparten por archivo.
 - El benchmark corre con lock exclusivo y sin builds grandes en paralelo.
 
 ## 13. Riesgos y mitigaciones
@@ -762,6 +830,7 @@ Condiciones para que funcione:
 |---|---|---|
 | Rebase roto por upstream | Alto | Parches pequeños, helpers, rebase semanal |
 | Regresión de gameplay | Alto | Perfil off = vanilla; tests; config |
+| Colisiones off rompen expectativas | Medio | Perfil opt-in; documentar; tests de ataque/bloque |
 | Deadlock por locks | Alto | No locks nuevos en tick; soak; `perf` |
 | Pérdida de rendimiento por duplicar lógica | Medio | Homólogo por composición, no copia |
 | Plugin roto por API | Alto | WIT v0.1 congelado; v0.2 aditivo; tests |
@@ -775,6 +844,7 @@ Condiciones para que funcione:
 - [ ] `HCF-CORE-001` perfil/build ID/capabilities.
 - [ ] `HCF-CORE-002` métricas y `/tps` p99.
 - [ ] `HCF-CORE-004` PGO y build HCF.
+- [ ] `HCF-CORE-029` colisiones de jugador off y tests de ataque/bloque.
 - [ ] Fase 1 completa y medida.
 - [ ] Fase 2 completa y medida.
 - [ ] WIT v0.2 y compatibilidad v0.1.

@@ -43,11 +43,14 @@ Descripción del cambio, sin código completo.
 
 ## Tests
 
+Casos definidos en code-first; se implementan/ejecutan en T1:
+
 - [ ] Unitario:
 - [ ] Integración/gametest:
 - [ ] Compatibilidad:
 - [ ] Soak:
 - [ ] Loadtest:
+- [ ] Suite ejecutada y verde en T1.
 
 ## Rollback
 

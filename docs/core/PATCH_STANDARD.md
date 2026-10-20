@@ -224,7 +224,10 @@ Al implementar un parche se crea
 
 ## 5. Definition of Done
 
-Un parche no está terminado hasta que:
+En modo **code-first**, un commit de implementación no es “Done”: es “código
+entregado, pendiente de C1/T1”. El agente deja en la ficha los casos de test que
+hay que cubrir, pero no está obligado a ejecutarlos en la oleada de
+implementación. Un parche no está terminado hasta que:
 
 - [ ] `cargo fmt --check` pasa.
 - [ ] `cargo clippy` no añade warnings nuevos.

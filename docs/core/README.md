@@ -16,6 +16,7 @@ intacta y una ruta HCF opt-in.
 | Baseline de carga | B21: 100 bots, backend ~0.82 core, MSPT ~19 ms |
 | Perfil HCF | `hcf-1.8` (propuesto, desactivado por defecto) |
 | Prioridad actual | Reducir MSPT/CPU del backend; gateway 1.8 diferido |
+| Modo de ejecución | Code-first; compilación/tests al final (C1/T1) |
 | Estado del plan | Propuesto; Fase 0 pendiente de ejecución |
 
 ## Documentos
@@ -35,7 +36,8 @@ Ningún cambio entra al core sin:
 
 1. Un ID `HCF-CORE-###`.
 2. Una ficha en `docs/core/patches/` (se crea al implementar).
-3. Tests que demuestren que la ruta vanilla no cambió.
+3. Tests que demuestren que la ruta vanilla no cambió (se ejecutan en T1; en
+   code-first se definen y se dejan en la ficha).
 4. Una medición A/B antes/después.
 5. Una nota de compatibilidad y rollback.
 

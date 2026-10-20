@@ -39,12 +39,16 @@ La asignación por oleadas, agentes y archivos permitidos está en
 | HCF-CORE-020 | Composición de `tick_chunks_hcf` | Homólogo por composición | `world/mod.rs` | Alta | Medio | Propuesto |
 | HCF-CORE-021 | `Player::tick` HCF | Homólogo + early-returns | `entity/player.rs` | Media/alta | Medio | Propuesto |
 | HCF-CORE-022 | Entity tracker HCF | Homólogo + caché/índice | `world/entity_tracker.rs` | Media/alta | Medio | Propuesto |
-| HCF-CORE-023 | Colisiones entidad-jugador con spatial hash | Homólogo | `world/mod.rs` | Media | Medio | Propuesto |
+| HCF-CORE-023 | Colisiones restantes con spatial hash (después de 029) | Homólogo | `world/mod.rs` | Media/baja | Medio | Propuesto |
 | HCF-CORE-024 | Batch de paquetes + serializer player info/multi-block | API aditiva | `plugin/.../generated_packets.rs`, `net/java/mod.rs`, WIT v0.2 | Alta en plugin | Medio | Propuesto |
 | HCF-CORE-025 | Scheduler con guarda y presupuesto | API aditiva interna | `server/scheduler.rs` | p99 / estabilidad | Bajo | Propuesto |
 | HCF-CORE-026 | Filtros de eventos y movimiento | API aditiva | `plugin/api/events`, `plugin/mod.rs` | Media | Medio | Propuesto |
 | HCF-CORE-027 | Política de tick por tipo de entidad | Config + early-return | `entity/mod.rs`, `world/mod.rs` | Media | Medio | Propuesto |
 | HCF-CORE-028 | Buffers reutilizados y menos allocs por tick | Interno | `world/mod.rs`, `entity_tracker.rs` | Media | Medio | Propuesto |
+| HCF-CORE-029 | Colisiones jugador-jugador y jugador-mob off | Early-return + config | `world/mod.rs`, `entity/mod.rs` | Alta con 100+ jugadores | Medio | Propuesto |
+
+`HCF-CORE-029` se implementa antes que `HCF-CORE-023`. Si desactivar colisiones
+de jugador elimina la mayoría de pares, 023 se reduce o se descarta.
 
 ## Fase 3 — APIs y compatibilidad
 

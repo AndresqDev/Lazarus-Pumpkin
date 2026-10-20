@@ -30,8 +30,8 @@ Este archivo se actualiza cada vez que se rebasa la pila de parches.
 3. No borrar código nuevo de upstream para “ganar” el conflicto.
 4. Si el conflicto es en una función que se iba a extraer, extraer de nuevo
    desde la versión upstream.
-5. Ejecutar `cargo fmt`, `cargo clippy`, `cargo test`, build vanilla y build
-   HCF.
+5. En la fase C1/T1 (no durante code-first), ejecutar `cargo fmt`,
+   `cargo clippy`, `cargo test`, build vanilla y build HCF.
 6. Smoke test de carga con 100 bots.
 7. Actualizar la tabla de base y las notas del parche.
 
