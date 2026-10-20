@@ -238,7 +238,13 @@ accesos son `#[inline]` y sin locks:
 ```rust
 #[inline]
 pub fn disabled(&self, feature: HcfFeature) -> bool {
-    !self.enabled || self.disabled_features.contains(feature)
+    // Con `enabled = false` no se apaga nada: manda la ruta vanilla.
+    self.enabled && self.disabled_features.contains(feature)
+}
+
+#[inline]
+pub fn fast_path(&self, feature: HcfFeature) -> bool {
+    self.enabled && self.enabled_features.contains(feature)
 }
 ```
 

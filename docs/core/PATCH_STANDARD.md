@@ -137,9 +137,20 @@ flags atómicos. Los accesos deben ser `#[inline]` y sin locks:
 ```rust
 #[inline]
 pub fn disabled(&self, feature: HcfFeature) -> bool {
-    !self.enabled || self.disabled_features.contains(feature)
+    // Solo desactiva si HCF está activo. Con `enabled = false` la ruta
+    // vanilla debe seguir exactamente igual.
+    self.enabled && self.disabled_features.contains(feature)
+}
+
+#[inline]
+pub fn fast_path(&self, feature: HcfFeature) -> bool {
+    self.enabled && self.enabled_features.contains(feature)
 }
 ```
+
+`disabled()` responde “HCF apaga esta fase”; `fast_path()` responde “HCF usa
+este homólogo”. Un early-return con `disabled()` nunca debe dispararse con
+`hcf.enabled = false`.
 
 No se llama a `server.advanced_config` ni se lockea un `Mutex` dentro de un
 bucle por jugador/entidad.
