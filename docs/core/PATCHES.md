@@ -24,8 +24,8 @@ La asignación por oleadas, agentes y archivos permitidos está en
 | ID | Título | Patrón | Archivos principales | Ganancia esperada | Riesgo | Estado |
 |---|---|---|---|---|---|---|
 | HCF-CORE-010 | Solo dimensiones necesarias | Config + early-return | `server/mod.rs` | Alta si no hay Nether/End | Bajo | Implementado (C1 en curso) |
-| HCF-CORE-011 | Clima desactivable | Early-return | `world/mod.rs` (`tick_environment`) | Baja/media | Bajo | Propuesto |
-| HCF-CORE-012 | Raids desactivables | Early-return | `world/mod.rs` (`tick`) | Media | Bajo | Propuesto |
+| HCF-CORE-011 | Clima desactivable | Early-return | `world/mod.rs` (`tick_environment`) | Baja/media | Bajo | Implementado (C1 pendiente) |
+| HCF-CORE-012 | Raids desactivables | Early-return | `world/mod.rs` (`tick`) | Media | Bajo | Implementado (C1 pendiente) |
 | HCF-CORE-013 | Spawning natural fuera | Early-return | `world/mod.rs` (`tick_chunks`) | Alta (a medir) | Bajo | Implementado (C1 pendiente) |
 | HCF-CORE-014 | Random ticks fuera + inhabited time 1 Hz | Early-return + time-slice | `world/mod.rs`, `pumpkin-world/src/level.rs` | Media/alta (a medir) | Medio | Implementado (C1 pendiente) |
 | HCF-CORE-015 | Política de IA de mobs | Clasificación + whitelist | `entity/mod.rs` | Alta | Medio | Propuesto |
