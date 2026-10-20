@@ -93,26 +93,31 @@ Repos:
 
 - Core: `/tmp/pumpkin-native` (clon de Pumpkin).
 - Plugin: `/home/andresq/IdeaProjects/Lazarus-Pumpkin`.
-- Worktrees de trabajo: `/tmp/pumpkin-hcf/<patch-id>`.
-- Artefactos de perf: `/tmp/pumpkin-hcf/perf/<run-id>`.
-- Lock de benchmark: `/tmp/pumpkin-hcf/bench.lock`.
+- Worktrees de trabajo: `/home/andresq/pumpkin-hcf/<patch-id>`.
+- Artefactos de perf: `/home/andresq/pumpkin-hcf/perf/<run-id>`.
+- Lock de benchmark: `/home/andresq/pumpkin-hcf/bench.lock`.
+
+> **Storage:** en esta máquina `/tmp` es tmpfs de ~8 GB y suele estar al 90 %.
+> Los worktrees y `target/` van en `/home/andresq/pumpkin-hcf`, no en `/tmp`.
+> Como el modo code-first no compila por agente, solo se necesitan dos target
+> dirs: uno para el `cargo check` de contratos y otro para C1/B1.
 
 Ejemplo:
 
 ```bash
 cd /tmp/pumpkin-native
 git fetch --all --tags
-git worktree add /tmp/pumpkin-hcf/core-001 -b hcf/core-001 204a94e
-git worktree add /tmp/pumpkin-hcf/core-020 -b hcf/core-020 204a94e
+git worktree add /home/andresq/pumpkin-hcf/core-001 -b hcf/core-001 204a94e
+git worktree add /home/andresq/pumpkin-hcf/core-020 -b hcf/core-020 204a94e
 ```
 
 Build aislado:
 
 ```bash
-export CARGO_TARGET_DIR=/tmp/pumpkin-hcf/target/core-020
+export CARGO_TARGET_DIR=/home/andresq/pumpkin-hcf/target/core-020
 export CARGO_BUILD_JOBS=2
 export RUSTC_WRAPPER=sccache
-export SCCACHE_DIR=/tmp/pumpkin-hcf/sccache
+export SCCACHE_DIR=/home/andresq/pumpkin-hcf/sccache
 ```
 
 Reglas:
@@ -359,7 +364,7 @@ smoke.
 ### Oleada 5 — Benchmark (2–3 h, exclusivo)
 
 - Solo después de T1. Un solo benchmark runner. Lock
-  `/tmp/pumpkin-hcf/bench.lock`.
+  `/home/andresq/pumpkin-hcf/bench.lock`.
 - No compilar durante el benchmark.
 - 3 repeticiones × 10 min, 100 bots; si T1 se cumple, 200 bots.
 - Comparar baseline vs candidato.
@@ -409,7 +414,7 @@ Reglas del ciclo:
 ```text
 Eres un agente de implementación del core HCF de Pumpkin.
 
-Repositorio: /tmp/pumpkin-hcf/core-020
+Repositorio: /home/andresq/pumpkin-hcf/core-020
 Commit base: 204a94e
 Branch: hcf/core-020
 Patch: HCF-CORE-020
@@ -556,13 +561,13 @@ Reglas:
 
 - Solo después de T1: no se mide un árbol que no compila o que tiene tests
   rojos.
-- Lock exclusivo: `/tmp/pumpkin-hcf/bench.lock`.
+- Lock exclusivo: `/home/andresq/pumpkin-hcf/bench.lock`.
 - Mismo mundo, mismos bots, mismo view-distance, mismo hardware.
 - 3 repeticiones × 10 min; descartar el primer minuto de calentamiento.
 - Métricas: MSPT p50/p95/p99, CPU backend, CPU proxy, RSS, TPS, timeouts,
   paquetes/s.
 - `perf record` antes/después; guardar flamegraph en
-  `/tmp/pumpkin-hcf/perf/<run-id>`.
+  `/home/andresq/pumpkin-hcf/perf/<run-id>`.
 - Criterio de aceptación: p99 ≥3 % mejor, CPU ≤1 % peor, sin errores nuevos.
 - Excepción: los cambios de gameplay aprobados (`HCF-CORE-029`, colisiones off)
   se aceptan por correctitud; el A/B mide la ganancia, pero no los revierte
@@ -606,7 +611,7 @@ perf record -F 999 -g -- ./target/release/pumpkin
 perf report --stdio --sort comm,dso,symbol | head -80
 
 # Flamegraph (si inferno/flamegraph está instalado)
-perf script | inferno-collapse-perf | inferno-flamegraph > /tmp/pumpkin-hcf/perf/run.svg
+perf script | inferno-collapse-perf | inferno-flamegraph > /home/andresq/pumpkin-hcf/perf/run.svg
 
 # Comparación de dos perfiles
 perf diff perf.data.before perf.data.after
