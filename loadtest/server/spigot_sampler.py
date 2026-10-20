@@ -176,13 +176,19 @@ def parse_online(list_out):
     if not list_out:
         return None
     text = clean(list_out)
-    m = re.search(r"There are (\d+) of a max", text)
+    # Paper 1.8.8: "There are 0/1000 players online:"
+    m = re.search(r"There are\s+(\d+)\s*/\s*\d+\s+players?\s+online", text, re.I)
     if m:
         return int(m.group(1))
-    m = re.search(r"(\d+)\s+players?\s+online", text, re.I)
+    # Spigot clasico: "There are 0 of a max 1000 players online:"
+    m = re.search(r"There are\s+(\d+)\s+of\s+a\s+max", text, re.I)
     if m:
         return int(m.group(1))
-    m = re.search(r":\s*(.+)$", text, re.S)
+    m = re.search(r"There are\s+(\d+)\s+players?\s+online", text, re.I)
+    if m:
+        return int(m.group(1))
+    # Ultimo recurso: contar los nicks listados despues de los dos puntos.
+    m = re.search(r"players?\s+online:\s*(.+)$", text, re.I | re.S)
     if m:
         names = [n.strip() for n in m.group(1).split(",") if n.strip()]
         return len(names)

@@ -181,12 +181,20 @@ jobs:
           TS_IP=$(tailscale ip -4 | awk 'NR == 1 {print; found=1}')
           echo "SERVER_IP=${TS_IP}"
 
+          # Sin stdin "vivo", JLine (consola de Paper 1.8.8) hace busy-loop
+          # leyendo EOF y quema un core aun con el servidor idle. El FIFO con
+          # `tail -f /dev/null` mantiene el extremo de escritura abierto.
+          rm -f console.stdin
+          mkfifo console.stdin
+          nohup tail -f /dev/null > console.stdin 2>/dev/null &
+          CONSOLE_PID=$!
           nohup java -Xms4G -Xmx4G -XX:+UseG1GC -XX:+ParallelRefProcEnabled \
             -XX:MaxGCPauseMillis=50 -Dfile.encoding=UTF-8 \
-            -jar paper.jar nogui > paper.log 2>&1 &
+            -jar paper.jar nogui < console.stdin > paper.log 2>&1 &
           PAPER_PID=$!
           echo "PAPER_PID=${PAPER_PID}" >> "$GITHUB_ENV"
-          echo "PAPER_PID=${PAPER_PID}"
+          echo "CONSOLE_PID=${CONSOLE_PID}" >> "$GITHUB_ENV"
+          echo "PAPER_PID=${PAPER_PID} CONSOLE_PID=${CONSOLE_PID}"
 
           ready=0
           for _ in $(seq 1 180); do
@@ -296,6 +304,8 @@ jobs:
             kill "${PAPER_PID}" 2>/dev/null || true
           fi
           [ -n "${SAMPLER_PID:-}" ] && kill "${SAMPLER_PID}" 2>/dev/null || true
+          [ -n "${CONSOLE_PID:-}" ] && kill "${CONSOLE_PID}" 2>/dev/null || true
+          rm -f server/console.stdin
           sleep 5
           echo '--- paper.log (cola) ---'; tail -60 server/paper.log 2>/dev/null
           echo '--- sampler.log (cola) ---'; tail -15 server/sampler.log 2>/dev/null
