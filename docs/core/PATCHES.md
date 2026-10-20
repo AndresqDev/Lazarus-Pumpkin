@@ -23,7 +23,7 @@ La asignación por oleadas, agentes y archivos permitidos está en
 
 | ID | Título | Patrón | Archivos principales | Ganancia esperada | Riesgo | Estado |
 |---|---|---|---|---|---|---|
-| HCF-CORE-010 | Solo dimensiones necesarias | Config + early-return | `server/mod.rs` | Alta si no hay Nether/End | Bajo | Propuesto |
+| HCF-CORE-010 | Solo dimensiones necesarias | Config + early-return | `server/mod.rs` | Alta si no hay Nether/End | Bajo | En diseño |
 | HCF-CORE-011 | Clima desactivable | Early-return | `world/mod.rs` (`tick_environment`) | Baja/media | Bajo | Propuesto |
 | HCF-CORE-012 | Raids desactivables | Early-return | `world/mod.rs` (`tick`) | Media | Bajo | Propuesto |
 | HCF-CORE-013 | Spawning natural fuera | Early-return | `world/mod.rs` (`tick_chunks`) | Alta | Bajo | Propuesto |
