@@ -9,7 +9,9 @@ WebAssembly component against the [Pumpkin plugin API](https://docs.pumpkinmc.or
 > a recompilation. See [`PORTING.md`](./PORTING.md) for the full mapping.
 >
 > The core performance and compatibility plan lives in
-> [`docs/core/HCF_CORE_PLAN.md`](./docs/core/HCF_CORE_PLAN.md).
+> [`docs/core/HCF_CORE_PLAN.md`](./docs/core/HCF_CORE_PLAN.md). Agent execution
+> (waves, worktrees, merge queue) is in
+> [`docs/core/AGENT_PLAYBOOK.md`](./docs/core/AGENT_PLAYBOOK.md).
 
 ## Features (ported)
 

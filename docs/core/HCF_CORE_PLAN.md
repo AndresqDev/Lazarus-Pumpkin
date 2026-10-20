@@ -11,6 +11,11 @@
 El objetivo es que el **backend** de Pumpkin sea más rápido que Paper 1.8 en el
 caso de uso HCF, sin convertir el proyecto en un fork imposible de actualizar.
 
+**Prioridad actual: MSPT.** El cuello medido está en el tick del backend, no en
+el proxy. `HCF-CORE-060` (gateway/backend 1.8 nativo) queda **explícitamente
+diferido** hasta que las fases 0–2 estén medidas; no se diseña ni se implementa
+ahora. Este plan se centra en bajar milisegundos por tick y CPU por jugador.
+
 La estrategia es:
 
 1. **Medir** antes de tocar.
@@ -359,6 +364,10 @@ medido.
 
 ### HCF-CORE-016 — Advancements, statistics, recipe book, chat signing
 
+> Partición de agente: `016a` (stats/advancements) en `entity/player.rs`;
+> `016b` (recipe book/chat signing) en `server/mod.rs` y config. Misma ficha,
+> dos commits.
+
 - Extraer `tick_statistics`; si `Statistics` off, no incrementar por tick. Si
   está on, batch cada 20 ticks.
 - Extraer `tick_advancements`; early-return si `Advancements` off.
@@ -369,6 +378,9 @@ medido.
 - Test: stats no cambian con off; con on, cambian cada 20 ticks como máximo.
 
 ### HCF-CORE-017 — View/sim distance, autosave, logging
+
+> Partición de agente: `017a` (config/autosave/logging) en Foundation;
+> `017b` (view/sim distance y nivel) en World. Misma ficha, dos commits.
 
 - El perfil fija defaults de `view_distance`/`simulation_distance`; el admin
   puede override.
@@ -530,6 +542,9 @@ Cambios:
 
 ### HCF-CORE-028 — Menos allocations por tick
 
+> Partición de agente: `028a` (buffers del mundo) en World; `028b` (buffers del
+> tracker) en Tracker. Misma ficha, dos commits.
+
 Solo después de `perf`:
 
 - `players_cache`, `tickable`, `block_entities`, `active_chunks_vec` con
@@ -595,7 +610,11 @@ Resumen:
 **Gate Fase 4:** actualización válida, firma inválida, hash inválido, rollback y
 crash loop probados en contenedor desechable.
 
-## 9. Fase 5 — Estructural (solo con datos)
+## 9. Fase 5 — Estructural (diferida, solo con datos)
+
+**No se empieza ahora.** El gateway/backend 1.8 (`HCF-CORE-060`) y el resto de
+esta fase quedan aparcados hasta que las fases 0–2 estén implementadas y
+medidas. Se documentan solo para no perder la decisión estratégica.
 
 No se empieza sin que las fases anteriores estén medidas.
 
@@ -664,6 +683,27 @@ paquetes/s, bytes/s, overruns de scheduler.
 - **G4:** updater con rollback probado.
 - **G5:** decisión sobre proxy/1.8 con números.
 
+### 11.4 Presupuesto MSPT por sección
+
+Presupuesto **orientativo** para Fase 2 a 100 bots (p99 ≤12 ms). No es un gate
+por sí solo: `HCF-CORE-002` debe medir cada sección y el presupuesto se ajusta
+con datos. Sirve para que los agentes sepan qué atacar primero y para evitar
+microoptimizar una sección que no es el cuello.
+
+| Sección | Presupuesto p99 | Dueño típico |
+|---|---:|---|
+| World tick: chunks, bloques, fluidos, random ticks | 4.0–4.5 ms | World |
+| Player tick: stats, warden, chunks, packets | 2.0–2.5 ms | Player |
+| Entity tracker: movimiento, rangos, spawn/despawn | 1.5 ms | Tracker |
+| Entity tick + colisiones | 1.5 ms | World |
+| Scheduler, eventos y host de plugins | 1.0 ms | Scheduler |
+| Reserva para picos/GC del allocator | 1.0–1.5 ms | Orquestador |
+| **Total** | **≤12 ms** | — |
+
+Si una sección consume más de su presupuesto, se prioriza esa sección en la
+siguiente oleada. Si todas están dentro y el p99 sigue alto, el problema es de
+picos/allocator/locks, no de suma de medias.
+
 ## 12. Roadmap y esfuerzo
 
 | Semana | Entregable |
@@ -676,8 +716,45 @@ paquetes/s, bytes/s, overruns de scheduler.
 | 8 | Fase 4: updater, manifiesto, launcher, rollback |
 | 9–10 | Soak, ajustes, documentación, decisión Fase 5 |
 
-Esfuerzo orientativo: **8–10 semanas** para el backend, con 20–30 % de
-mantenimiento continuo por rebase. El gateway 1.8 es aparte.
+Esfuerzo orientativo: **8–10 semanas** para el backend en modo serial, con
+20–30 % de mantenimiento continuo por rebase. El gateway 1.8 es aparte y queda
+diferido.
+
+### 12.1 Ejecución acelerada con agentes
+
+El plan anterior es la estimación serial. La implementación se acelera con
+agentes en paralelo, pero sin paralelizar lo que no se puede paralelizar:
+benchmarks, merges y decisiones de gameplay. El detalle operativo está en
+[`AGENT_PLAYBOOK.md`](AGENT_PLAYBOOK.md).
+
+Regla:
+
+> **Paralelizar código y análisis. Serializar benchmarks, merges y decisiones.**
+
+| Oleada | Duración | Qué se paraleliza | Gate |
+|---|---:|---|---|
+| 0. Recon | 60–90 min | 3 scouts + profiler + baseline | Top 10 símbolos y baseline p99 |
+| 1. Fundamentos | 90–120 min | Perfil, métricas, build ID, docs | Contratos mergeados; vanilla compila |
+| 2. Implementación | 3–4 h | World, Player, Tracker, Packet, Scheduler | Cada branch con tests |
+| 3. Integración | 60–90 min | Merge queue + reviewer | Build/tests verdes; sin APIs rotas |
+| 4. Benchmark | 2–3 h | Nada: un solo runner | p99 ≥3 % mejor; sin regresión |
+| 5. Cierre | 45–60 min | Docs + siguiente plan | Fichas y tracker actualizados |
+
+Con 5–10 parches independientes, una jornada serial de 7–15 h se comprime a
+**5–8 h de reloj**. La aceleración realista es **2–3×**, no 10×: compilar Rust,
+correr tests y medir 100/200 bots tienen un suelo que no baja por lanzar más
+agentes.
+
+Condiciones para que funcione:
+
+- Los contratos (`HcfProfile`, `HcfMetrics`, firmas de helpers, API de paquetes)
+  se mergean **antes** de la oleada paralela.
+- Un solo dueño por archivo; `world/mod.rs` es el long pole y no se edita en
+  paralelo.
+- Cada agente trabaja en un `git worktree` con `CARGO_TARGET_DIR` propio y
+  `sccache` compartido.
+- Cada agente tiene timebox y devuelve branch, commit, tests y blockers.
+- El benchmark corre con lock exclusivo y sin builds grandes en paralelo.
 
 ## 13. Riesgos y mitigaciones
 
@@ -712,4 +789,5 @@ mantenimiento continuo por rebase. El gateway 1.8 es aparte.
 - [Registro de parches](PATCHES.md)
 - [Actualizador de binario](UPDATER.md)
 - [Política de upstream y rebase](UPSTREAM.md)
+- [Playbook de agentes](AGENT_PLAYBOOK.md)
 - [Volver al índice](README.md)

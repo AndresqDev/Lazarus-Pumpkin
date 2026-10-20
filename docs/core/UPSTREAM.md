@@ -48,6 +48,14 @@ Estos archivos cambian con frecuencia y requieren revisión manual:
 - `crates/pumpkin-plugin-wit/v0.1/*.wit`
 - `Cargo.toml` (perfil de release)
 
+## Agentes
+
+- Todos los agentes parten del mismo commit base congelado.
+- Los agentes **no** rebasan ni mergean; solo commitean en su branch.
+- El integrador rebasa cada branch sobre la rama de integración.
+- Si hay conflicto, lo resuelve el dueño del archivo en su worktree.
+- Un agente no toca archivos fuera de su lista permitida.
+
 ## Reglas
 
 - No editar archivos generados a mano; regenerar con la herramienta.

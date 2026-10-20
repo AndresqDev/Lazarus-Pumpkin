@@ -5,6 +5,10 @@ Estados: `Propuesto` → `En diseño` → `Implementado` → `Upstream` / `Desca
 La ficha detallada de cada parche implementado vive en
 `docs/core/patches/HCF-CORE-###.md`.
 
+La asignación por oleadas, agentes y archivos permitidos está en
+[`AGENT_PLAYBOOK.md`](AGENT_PLAYBOOK.md). `HCF-CORE-060` y `HCF-CORE-061` quedan
+**diferidos**: primero se optimiza el MSPT del backend.
+
 ## Fase 0 — Fundamentos
 
 | ID | Título | Patrón | Archivos principales | Ganancia esperada | Riesgo | Estado |
@@ -24,7 +28,7 @@ La ficha detallada de cada parche implementado vive en
 | HCF-CORE-012 | Raids desactivables | Early-return | `world/mod.rs` (`tick`) | Media | Bajo | Propuesto |
 | HCF-CORE-013 | Spawning natural fuera | Early-return | `world/mod.rs` (`tick_chunks`) | Alta | Bajo | Propuesto |
 | HCF-CORE-014 | Random ticks fuera + inhabited time 1 Hz | Early-return + time-slice | `world/mod.rs`, `pumpkin-world/src/level.rs` | Media/alta | Medio | Propuesto |
-| HCF-CORE-015 | Política de IA de mobs | Early-return + whitelist | `entity/mob/*`, `entity/mod.rs` | Alta | Medio | Propuesto |
+| HCF-CORE-015 | Política de IA de mobs | Clasificación + whitelist | `entity/mod.rs` | Alta | Medio | Propuesto |
 | HCF-CORE-016 | Advancements/stats/recipe book/chat signing | Early-return + config | `entity/player.rs`, `server/mod.rs`, config | Media | Bajo/medio | Propuesto |
 | HCF-CORE-017 | View/sim distance, autosave y logging | Config + async save | `pumpkin.toml`, `world/mod.rs`, `pumpkin-world` | Alta | Bajo | Propuesto |
 

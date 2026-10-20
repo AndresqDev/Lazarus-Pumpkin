@@ -15,6 +15,7 @@ intacta y una ruta HCF opt-in.
 | Plugin base | Lazarus-Pumpkin `7ee9e40` |
 | Baseline de carga | B21: 100 bots, backend ~0.82 core, MSPT ~19 ms |
 | Perfil HCF | `hcf-1.8` (propuesto, desactivado por defecto) |
+| Prioridad actual | Reducir MSPT/CPU del backend; gateway 1.8 diferido |
 | Estado del plan | Propuesto; Fase 0 pendiente de ejecución |
 
 ## Documentos
@@ -26,6 +27,7 @@ intacta y una ruta HCF opt-in.
 | [PATCHES.md](PATCHES.md) | Registro vivo de parches y estado |
 | [UPDATER.md](UPDATER.md) | Reemplazo de binario, reinicio, firma, health check y rollback |
 | [UPSTREAM.md](UPSTREAM.md) | Base de Pumpkin, política de rebase y resolución de conflictos |
+| [AGENT_PLAYBOOK.md](AGENT_PLAYBOOK.md) | Oleadas, roles, worktrees, prompts y merge queue con agentes |
 
 ## Regla principal
 
