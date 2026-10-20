@@ -178,7 +178,7 @@ jobs:
         run: |
           set -uo pipefail
           cd server
-          TS_IP=$(tailscale ip -4 | head -1)
+          TS_IP=$(tailscale ip -4 | awk 'NR == 1 {print; found=1}')
           echo "SERVER_IP=${TS_IP}"
 
           nohup java -Xms4G -Xmx4G -XX:+UseG1GC -XX:+ParallelRefProcEnabled \
@@ -252,6 +252,22 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo "PAPER_READY tcp://${TS_IP}:${SERVER_PORT}"
 
+      - name: Diagnostico idle (jstack/jstat)
+        if: always()
+        run: |
+          set +e
+          sleep 20
+          cd server
+          if [ -n "${PAPER_PID:-}" ] && kill -0 "${PAPER_PID}" 2>/dev/null; then
+            jstack "${PAPER_PID}" > jstack-idle.txt 2>&1
+            jstat -gc "${PAPER_PID}" 1000 3 > jstat-idle.txt 2>&1
+            top -H -b -n 1 -p "${PAPER_PID}" > threads-idle.txt 2>&1
+            echo '--- jstat (idle) ---'; cat jstat-idle.txt
+            echo '--- top threads (idle) ---'; head -25 threads-idle.txt
+          else
+            echo 'Paper no estaba vivo para el diagnostico'
+          fi
+
       - name: Mantener Paper arriba
         run: |
           set -uo pipefail
@@ -294,6 +310,9 @@ jobs:
             server/logs/latest.log
             server/sampler.csv
             server/sampler.log
+            server/jstack-idle.txt
+            server/jstat-idle.txt
+            server/threads-idle.txt
             server/server.properties
             server/spigot.yml
             server/bukkit.yml
@@ -350,7 +369,8 @@ jobs:
           set -uo pipefail
           SERVER_IP=""
           for _ in $(seq 1 120); do
-            SERVER_IP=$(tailscale status | awk -v h="${SERVER_HOST}" '$2 == h {print $1; exit}')
+            # Sin `exit` en awk: con pipefail, tailscale recibe SIGPIPE (141).
+            SERVER_IP=$(tailscale status | awk -v h="${SERVER_HOST}" '$2 == h && !found {print $1; found=1}')
             if [ -n "$SERVER_IP" ] && timeout 2 bash -c "</dev/tcp/${SERVER_IP}/${SERVER_PORT}" 2>/dev/null; then
               break
             fi

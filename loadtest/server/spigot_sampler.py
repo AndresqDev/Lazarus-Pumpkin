@@ -24,6 +24,7 @@ CLK_TCK = os.sysconf("SC_CLK_TCK")
 START = time.time()
 PREV = {}
 RAW_TPS_LOGGED = False
+RAW_LIST_LOGGED = False
 
 
 # --------------------------------------------------------------------------
@@ -136,7 +137,14 @@ COLOR = re.compile(r"\x1b\[[0-9;]*m|§[0-9A-FK-ORa-fk-or]")
 def clean(text):
     if not text:
         return ""
-    return COLOR.sub("", text).replace("\x1b", "")
+    # Paper 1.8.8 dibuja la barra de /tps con '*' (no con colores):
+    # "TPS from last 1m, 5m, 15m: *20.0, *20.0, *20.0".
+    return (
+        COLOR.sub("", text)
+        .replace("\x1b", "")
+        .replace("*", "")
+        .replace("#", "")
+    )
 
 
 def parse_tps(raw):
@@ -217,7 +225,7 @@ def main():
     )
 
     while True:
-        global RAW_TPS_LOGGED
+        global RAW_TPS_LOGGED, RAW_LIST_LOGGED
         ts = int(time.time())
         elapsed = int(ts - START)
         raw_tps = rcon("tps", args.host, args.port, args.password)
@@ -225,7 +233,11 @@ def main():
         if raw_tps and tps is None and not RAW_TPS_LOGGED:
             print(f"WARN /tps no reconocido: {clean(raw_tps)!r}", flush=True)
             RAW_TPS_LOGGED = True
-        players = parse_online(rcon("list", args.host, args.port, args.password))
+        raw_list = rcon("list", args.host, args.port, args.password)
+        if raw_list and not RAW_LIST_LOGGED:
+            print(f"INFO /list raw: {clean(raw_list)!r}", flush=True)
+            RAW_LIST_LOGGED = True
+        players = parse_online(raw_list)
         p_cpu, p_rss = proc_sample(paper_pid)
         row = [
             ts, elapsed,
