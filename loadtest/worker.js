@@ -41,11 +41,47 @@ function createBot(index, attempt = 0) {
   });
   bot.loadPlugin(pathfinder);
 
-  const st = { mode: 'join', lastAttack: 0, lastJump: 0, lastGoal: 0, failures: 0, timer: null };
+  const st = { mode: 'join', lastAttack: 0, lastJump: 0, lastGoal: 0, failures: 0, timer: null, scatter: false, scatterAt: 0, scatterGoal: false };
   bot._perf = st;
+
+  const recentChat = [];
+  bot.on('message', (msg) => {
+    try {
+      const text = msg.toString();
+      if (text) {
+        recentChat.push(text);
+        if (recentChat.length > 6) recentChat.shift();
+      }
+    } catch (_) {}
+  });
 
   const stopPath = () => {
     try { bot.pathfinder.stop(); } catch (_) {}
+  };
+
+  // Los bots comparten el world spawn exacto: si se quedan quietos, el
+  // maxEntityCramming del host los mata a los ~20-30 s. En idle se les da un
+  // destino corto y distinto para que se repartan (sin irse al arena).
+  const scatterGoal = () => {
+    if (shuttingDown || !bot.entity) return;
+    const radius = 2 + (index % Math.max(2, cfg.scatterRadius || 12));
+    const angle = (index * 2.399963229728653) % (Math.PI * 2);
+    const x = Math.round(bot.entity.position.x + Math.cos(angle) * radius);
+    const z = Math.round(bot.entity.position.z + Math.sin(angle) * radius);
+    try {
+      const moves = new Movements(bot);
+      moves.canDig = false;
+      moves.allow1by1towers = false;
+      moves.allowSprinting = false;
+      moves.allowParkour = false;
+      moves.scafoldingBlocks = [];
+      bot.pathfinder.setMovements(moves);
+      bot.pathfinder.setGoal(new GoalXZ(x, z));
+      st.scatterGoal = true;
+    } catch (e) {
+      stats.errors++;
+      if (stats.errors < 10) log('scatter failed', username, e.message);
+    }
   };
 
   const setArenaGoal = (cx = cfg.arena.x, cz = cfg.arena.z, minR = 4, addR = 20) => {
@@ -63,6 +99,7 @@ function createBot(index, attempt = 0) {
       moves.scafoldingBlocks = [];
       bot.pathfinder.setMovements(moves);
       bot.pathfinder.setGoal(new GoalXZ(x, z));
+      st.scatterGoal = false;
       st.mode = 'travel';
       st.lastGoal = Date.now();
       bot.setControlState('sprint', true);
@@ -77,6 +114,9 @@ function createBot(index, attempt = 0) {
     st.mode = 'join';
     st.lastJump = 0;
     st.lastGoal = 0;
+    st.scatter = false;
+    st.scatterGoal = false;
+    st.scatterAt = Date.now() + 1000 + Math.random() * 3000;
     bot.clearControlStates();
     stopPath();
     // No caminar durante idle: antes el goal se fijaba igual y los bots se
@@ -122,13 +162,21 @@ function createBot(index, attempt = 0) {
       log('died', username, p ? p.toString() : '?',
         'health=' + (bot.health ?? '?'), 'food=' + (bot.food ?? '?'),
         'below=' + (below && below.name), 'at=' + (at && at.name),
-        'dim=' + (bot.game && bot.game.dimension));
+        'dim=' + (bot.game && bot.game.dimension),
+        'chat=' + JSON.stringify(recentChat.slice(-3)));
     } catch (_) {}
     st.mode = 'dead';
     bot.clearControlStates();
     stopPath();
   });
   bot.on('goal_reached', () => {
+    if (st.scatterGoal) {
+      st.scatterGoal = false;
+      st.mode = 'idle';
+      stopPath();
+      bot.clearControlStates();
+      return;
+    }
     st.mode = 'arena';
     stats.reached++;
     bot.setControlState('sprint', false);
@@ -136,6 +184,13 @@ function createBot(index, attempt = 0) {
   });
   bot.on('path_update', (r) => {
     if (r.status === 'noPath' || r.status === 'timeout') {
+      if (st.scatterGoal) {
+        // Un fallo al repartirse no debe convertirse en "stuck" ni en un
+        // reintento infinito durante idle: el bot se queda donde esta.
+        st.scatterGoal = false;
+        stopPath();
+        return;
+      }
       stats.stuck++;
       if (st.mode === 'travel') {
         st.failures++;
@@ -179,7 +234,13 @@ function createBot(index, attempt = 0) {
       st.lastGoal = 0;
       st.mode = ph && ph.mode === 'fight' ? 'arena' : 'travel';
     }
-    if (ph && ph.mode === 'idle') return;
+    if (ph && ph.mode === 'idle') {
+      if (!st.scatter && Date.now() >= st.scatterAt) {
+        st.scatter = true;
+        scatterGoal();
+      }
+      return;
+    }
     const arena = ph && ph.x !== undefined ? { x: ph.x, z: ph.z } : cfg.arena;
     if (ph && ph.mode === 'move') {
       if (Date.now() - st.lastGoal > 8000) setArenaGoal(arena.x, arena.z, 0, 3);
