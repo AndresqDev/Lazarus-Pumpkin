@@ -132,8 +132,9 @@ jugador y evita el resto del trabajo sin duplicar `Player::tick`.
   `get_player_by_uuid`, locks de `chunk_sender`/`stats`/`warden`, MSPT p99. El
   baseline B21 (18,99 ms) es global; no atribuye `Player::tick`.
 - **Después:** menos tiempo en `Players`, menos locks y una búsqueda UUID menos
-  por jugador que mina. `process_inbound_packets` conserva su búsqueda; no se
-  contabiliza como ganancia de 021.
+  por jugador que mina. `process_inbound_packets` conserva el lookup cuando hay
+  paquetes, pero evita `get_player_by_uuid` y el upgrade del servidor si la cola
+  está vacía (después del ACK de predicciones).
 - **Método:** A/B 3 × 10 min, 100 bots, perfil off/on; comparar con 016a ya
   aplicado para no atribuir a 021 el batching de stats. **Ganancia: a medir.**
 - Medir por separado un jugador idle, uno moviéndose y uno con pantalla abierta;
@@ -154,6 +155,8 @@ jugador y evita el resto del trabajo sin duplicar `Player::tick`.
       sin pantalla ⇒ no se lockea.
 - [ ] Unitario: mining sigue rompiendo el bloque y sumando stats sin
       `get_player_by_uuid`.
+- [ ] Unitario: cola inbound vacía ⇒ no se resuelve el jugador; con un paquete
+      ⇒ se resuelve y el ACK de predicciones sigue enviándose.
 - [ ] Integración: salud, hambre, respiración, pose, experiencia y timeout no
       cambian con el perfil on.
 - [ ] Integración: chunks pendientes siguen enviándose y `mark_delivered` se
@@ -174,9 +177,14 @@ jugador y evita el resto del trabajo sin duplicar `Player::tick`.
   cachea una vez por tick y los guards usan `disabled(...)`; `hcf.enabled=false`
   restaura el comportamiento vanilla.
 - `tick_screen_handler` evita el lock interno y `send_content_updates` cuando
-  el handler actual es el `player_screen_handler` base.
+  el handler actual es el `player_screen_handler` base y `inventory_changed`
+  está limpio. Si está dirty, sincroniza el handler base sin consumir el flag,
+  para que `check_inventory_advancements` lo siga viendo en el mismo tick.
 - `tick_mining` ya no resuelve el jugador por UUID; solo conserva el lookup en
   la ruptura Bedrock, que necesita `Arc<Player>`.
+- `process_inbound_packets` retorna después del ACK de predicciones si
+  `inbound_packets` está vacío. Con paquetes pendientes conserva el lookup y el
+  límite de 64/tick. Evita el coste O(P) en jugadores idle.
 - El bloque `chunk_send` se dejó inline. El único cambio es saltar
   `prepare_batch` cuando el fast path está activo y `pending_chunks` está vacío
   tras drenar el listener; `commit_batch`/`mark_delivered` no cambian.
