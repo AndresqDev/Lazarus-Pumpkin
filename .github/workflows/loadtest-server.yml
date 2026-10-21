@@ -59,10 +59,14 @@ on:
         required: false
         default: '3600'
       hcf:
-        description: 'Usar binario HCF + perfil hcf-1.8'
+        description: 'false=upstream; true=HCF on; hcf_off=binario HCF sin perfil'
         required: true
-        default: false
-        type: boolean
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+          - 'hcf_off'
       native_tab_url:
         description: 'URL opcional de native_tab.so construido contra HCF'
         required: false
@@ -123,8 +127,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p server/plugins
-          if [ "${HCF:-false}" = "true" ]; then
+          if [ "${HCF:-false}" = "true" ] || [ "${HCF:-false}" = "hcf_off" ]; then
             # Binario del A/B de B1, construido desde el mismo código HCF.
+            # También se usa para el feature-off: el binario es el mismo y solo
+            # cambia `[hcf] enabled`; así el plugin se prueba contra su ABI real.
             curl -fsSL -o server/pumpkin \
               "https://github.com/AndresqDev/pumpkin-hcf-b1/releases/download/b1-binary/pumpkin"
             echo "cc6a2f4e1d46f1a4da6b483694a1b3edd59d4ec09148b633e81b525f744c8fa1  server/pumpkin" | sha256sum -c -
@@ -140,6 +146,8 @@ jobs:
             # El plugin se encarga del spawn; la protección vanilla de 16
             # bloques emitiría el mensaje build.spawn_protection en cada join.
             sed -i 's/^spawn_protection = .*/spawn_protection = 0/' server/pumpkin.toml
+          elif [ "${HCF:-false}" = "hcf_off" ]; then
+            printf '\n[hcf]\nenabled = false\n' >> server/pumpkin.toml
           fi
           sed -i "s|^motd = .*|motd = \"${MOTD}\"|" server/pumpkin.toml
           # Dejar que el plugin cree su config default. Inyectar una config
