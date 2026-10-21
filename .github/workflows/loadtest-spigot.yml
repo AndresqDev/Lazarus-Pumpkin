@@ -295,9 +295,14 @@ jobs:
               tail -100 server/paper.log
               exit 1
             fi
+            # Misma proteccion que en B1: sin esto los bots se matan y la
+            # ventana de 100 jugadores no es comparable.
+            python3 ../loadtest/server/rcon.py \
+              "effect @a resistance 1000000 4 true" \
+              "${RCON_PASSWORD}" 127.0.0.1 "${RCON_PORT}" >/dev/null 2>&1 || true
             LAST=$(tail -1 server/sampler.log 2>/dev/null || true)
             echo "[$(date -u +%H:%M:%S)] ${LAST:-sin muestras}"
-            sleep 30
+            sleep 10
           done
 
       - name: Bajar Paper
