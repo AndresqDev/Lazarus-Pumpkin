@@ -306,6 +306,7 @@ jobs:
           node-version: '20'
 
       - name: Instalar dependencias de Mineflayer
+        working-directory: loadtest
         run: npm ci
 
       - name: Java 21
