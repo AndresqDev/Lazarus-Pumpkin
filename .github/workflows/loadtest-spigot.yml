@@ -154,7 +154,11 @@ jobs:
           difficulty=0
           gamemode=0
           force-gamemode=false
-          pvp=true
+          # Los bots atacan, pero el baseline no debe morir: en B1 la
+          # resistencia infinita cumple el mismo papel. Paper 1.8 no aplica
+          # de forma fiable resistance 4 con RCON cada 10 s, así que se
+          # desactiva el daño PvP en el servidor.
+          pvp=false
           allow-flight=true
           allow-nether=false
           enable-command-block=false
