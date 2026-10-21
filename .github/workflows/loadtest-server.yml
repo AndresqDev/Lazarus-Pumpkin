@@ -58,6 +58,15 @@ on:
         description: 'PVP_PROTECTION.DURATION (0 = sin proteccion, bots se matan)'
         required: false
         default: '3600'
+      hcf:
+        description: 'Usar binario HCF + perfil hcf-1.8'
+        required: true
+        default: false
+        type: boolean
+      native_tab_url:
+        description: 'URL opcional de native_tab.so construido contra HCF'
+        required: false
+        default: ''
 
 concurrency:
   group: loadtest-server
@@ -72,6 +81,8 @@ env:
   DEATHBAN_MINUTES: ${{ github.event.inputs.deathban_minutes }}
   PACKET_LIMIT: ${{ github.event.inputs.packet_limit }}
   PVP_PROTECTION_SECONDS: ${{ github.event.inputs.pvp_protection_seconds }}
+  HCF: ${{ github.event.inputs.hcf }}
+  NATIVE_TAB_URL: ${{ github.event.inputs.native_tab_url }}
   PUMPKIN_TAG: '0.2.0+26.3-26.51'
   PUMPKIN_SHA256: '68c4416ca9fbfb3f2aeb6a8ce1de0e3fb02c5a85a53c8ba59a27941d7e43d8cd'
   VIAPROXY_JAR: 'ViaProxy-3.4.14.jar'
@@ -112,11 +123,24 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p server/plugins
-          curl -fsSL -o server/pumpkin \
-            "https://github.com/Pumpkin-MC/Pumpkin/releases/download/${PUMPKIN_TAG//+/%2B}/pumpkin-X64-Linux"
-          echo "${PUMPKIN_SHA256}  server/pumpkin" | sha256sum -c -
+          if [ "${HCF:-false}" = "true" ]; then
+            # Binario del A/B de B1, construido desde el mismo código HCF.
+            curl -fsSL -o server/pumpkin \
+              "https://github.com/AndresqDev/pumpkin-hcf-b1/releases/download/b1-binary/pumpkin"
+            echo "cc6a2f4e1d46f1a4da6b483694a1b3edd59d4ec09148b633e81b525f744c8fa1  server/pumpkin" | sha256sum -c -
+          else
+            curl -fsSL -o server/pumpkin \
+              "https://github.com/Pumpkin-MC/Pumpkin/releases/download/${PUMPKIN_TAG//+/%2B}/pumpkin-X64-Linux"
+            echo "${PUMPKIN_SHA256}  server/pumpkin" | sha256sum -c -
+          fi
           chmod +x server/pumpkin
           cp loadtest/server/pumpkin.toml server/pumpkin.toml
+          if [ "${HCF:-false}" = "true" ]; then
+            printf '\n[hcf]\nenabled = true\nprofile = "hcf-1.8"\n' >> server/pumpkin.toml
+            # El plugin se encarga del spawn; la protección vanilla de 16
+            # bloques emitiría el mensaje build.spawn_protection en cada join.
+            sed -i 's/^spawn_protection = .*/spawn_protection = 0/' server/pumpkin.toml
+          fi
           sed -i "s|^motd = .*|motd = \"${MOTD}\"|" server/pumpkin.toml
           # Dejar que el plugin cree su config default. Inyectar una config
           # con DEATHBAN.ENABLED=false congela el tick en los joins (bug
@@ -136,7 +160,10 @@ jobs:
           sed -i "s/^burst_capacity = .*/burst_capacity = ${PACKET_LIMIT:-500}/" server/pumpkin.toml
           grep -nE 'max_packet_rate|burst_capacity' server/pumpkin.toml | head -4
           cp target/wasm32-wasip2/release/lazarus_pumpkin.wasm server/plugins/lazarus_pumpkin.wasm
-          if [ -f loadtest/server/native_tab-x86_64.so ]; then
+          if [ -n "${NATIVE_TAB_URL:-}" ]; then
+            curl -fsSL -o server/plugins/native_tab.so "${NATIVE_TAB_URL}"
+            ls -lh server/plugins/native_tab.so
+          elif [ -f loadtest/server/native_tab-x86_64.so ]; then
             cp loadtest/server/native_tab-x86_64.so server/plugins/native_tab.so
           fi
           ls -la server server/plugins
@@ -273,6 +300,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Node 20 para el smoke
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias de Mineflayer
+        run: npm ci
+
       - name: Java 21
         uses: actions/setup-java@v4
         with:
@@ -405,6 +440,12 @@ jobs:
             echo "| Ventana | ${MINUTES} min |"
           } >> "$GITHUB_STEP_SUMMARY"
           echo "JOIN_READY tcp://${TS_IP}:25565"
+
+      - name: Smoke tablist y scoreboard (1 bot 1.8.9)
+        run: |
+          set -euo pipefail
+          node loadtest/server/tab_smoke.js \
+            --host 127.0.0.1 --port 25565 --user SmokeTab --seconds 25
 
       - name: Mantener Velocity arriba
         run: |
