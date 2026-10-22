@@ -175,11 +175,17 @@ impl ClaimManager {
     pub fn add_claim(&mut self, faction_id: &str, claim: Claim) {
         self.claims.entry(faction_id.to_string()).or_default().push(claim);
         self.rebuild_index();
+        // The sidebar/tab territory line is derived from this store. Mark the
+        // event here so every caller (commands, wand purchase, admin paths)
+        // gets the same immediate refresh without duplicating hooks.
+        crate::ui::claim_changed();
     }
 
     pub fn remove_all(&mut self, faction_id: &str) {
-        self.claims.remove(faction_id);
-        self.rebuild_index();
+        if self.claims.remove(faction_id).is_some() {
+            self.rebuild_index();
+            crate::ui::claim_changed();
+        }
     }
 
     /// Removes the claim owned by `faction_id` that contains `(x, z)`.
@@ -195,6 +201,9 @@ impl ClaimManager {
             }
         }
         self.rebuild_index();
+        if removed {
+            crate::ui::claim_changed();
+        }
         removed
     }
 

@@ -46,7 +46,8 @@ pub fn setup(player: &Player, server: &Server) {
     rebuild(player, server);
 }
 
-/// Per-player dynamic updates (called every tick).
+/// Per-player dynamic rebuild (called once per second from `tasks::tick`, and
+/// immediately for the affected players by [`crate::ui`]).
 pub fn update(player: &Player, server: &Server) {
     rebuild(player, server);
 }

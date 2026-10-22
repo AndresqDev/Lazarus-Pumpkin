@@ -21,9 +21,11 @@
 //! ```
 //!
 //! The native plugin diffs the file against what it already sent and only sends
-//! the slots that changed (per-slot update, no full reload), broadcasting global
-//! slots and sending per-player overrides only to that player. New joiners get the
-//! full current state.
+//! the slots that changed (no full reload), broadcasting global slots and sending
+//! per-player overrides only to that player. Changed slots are grouped by action
+//! set, so one viewer normally receives one packet for the updates and a second
+//! one only when newly-added entries need the skin/`ADD_PLAYER` action. New
+//! joiners get the full current state in the same grouped form.
 //!
 //! A file-based API is used because Pumpkin's `#[plugin_method]` macro cannot
 //! implement `on_ipc_message` (borrowed `&str`/`&[u8]` lifetimes don't match the
@@ -154,7 +156,7 @@ pub struct NativeTab {
 
 fn run(server: Arc<Server>, state: Arc<Mutex<Rendered>>, log_ctx: Arc<Context>) {
     let mut known: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
-    let mut last_signature: Option<(u64, u64)> = None;
+    let mut last_signature: Option<(u128, u64)> = None;
     // Players that joined recently: re-send their full state once so the
     // packets survive the client's join/readiness window.
     let mut pending_full: std::collections::HashMap<Uuid, u8> = std::collections::HashMap::new();
@@ -186,7 +188,7 @@ fn run(server: Arc<Server>, state: Arc<Mutex<Rendered>>, log_ctx: Arc<Context>) 
         // Retry the full per-viewer send for recent joiners (the client may
         // drop the first packets while still finishing the join sequence).
         // Only the *first* add carries the skin property, so this cannot
-        // restart the 1.8 skin download (see `send_slot_to`).
+        // restart the 1.8 skin download (see `send_changes`).
         let retry: Vec<Uuid> = pending_full
             .iter()
             .filter(|(_, remaining)| **remaining > 0)
@@ -201,15 +203,21 @@ fn run(server: Arc<Server>, state: Arc<Mutex<Rendered>>, log_ctx: Arc<Context>) 
         }
 
         known = current;
-        std::thread::sleep(Duration::from_millis(500));
+        // The WASM side flushes event-driven tab changes immediately (claim
+        // changes, for example); polling at 100 ms keeps that latency below
+        // the next game tick instead of adding up to 500 ms.
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
-fn file_signature() -> Option<(u64, u64)> {
+fn file_signature() -> Option<(u128, u64)> {
     let meta = std::fs::metadata(STATE_FILE).ok()?;
+    // Use the full modified timestamp, not only whole seconds: a claim/timer
+    // update can rewrite the file with the same byte length twice within one
+    // second, and an `(as_secs(), len)` signature would miss the second write.
     let modified = meta.modified().ok()?;
     let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
-    Some((duration.as_secs(), meta.len()))
+    Some((duration.as_nanos(), meta.len()))
 }
 
 fn read_state() -> Option<FileState> {
@@ -223,88 +231,114 @@ fn apply_file(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>) {
         return;
     };
 
-    let mut rendered = state.lock().unwrap();
+    let mut global_changes: Vec<(u8, SlotSpec, bool)> = Vec::new();
+    let mut global_removals: Vec<u8> = Vec::new();
+    let mut viewer_changes: HashMap<Uuid, Vec<(u8, SlotSpec, bool)>> = HashMap::new();
+    let mut viewer_removals: HashMap<Uuid, Vec<u8>> = HashMap::new();
 
-    // Global diff.
-    let mut desired_global: HashMap<u8, SlotSpec> = HashMap::new();
-    for (slot_key, spec) in &file.global {
-        if let Ok(slot) = slot_key.parse::<u8>()
-            && slot < SLOTS as u8
-        {
-            desired_global.insert(slot, spec.clone());
-        }
-    }
+    {
+        let mut rendered = state.lock().unwrap();
 
-    for (slot, spec) in &desired_global {
-        if rendered.global.get(slot) != Some(spec) {
-            // Only the first add for a slot carries the skin property; later
-            // updates must not re-add the profile or 1.8 clients restart the
-            // skin download on every text change.
-            let first = !rendered.global.contains_key(slot);
-            send_slot_broadcast(server, *slot, spec, first);
-        }
-    }
-    for slot in rendered.global.keys() {
-        if !desired_global.contains_key(slot) {
-            send_remove_broadcast(server, &[*slot]);
-        }
-    }
-    rendered.global = desired_global;
-
-    // Per-viewer diff.
-    let mut desired_viewers: HashMap<Uuid, HashMap<u8, SlotSpec>> = HashMap::new();
-    for (uuid_key, slots) in &file.viewers {
-        let Ok(uuid) = Uuid::parse_str(uuid_key) else {
-            continue;
-        };
-        let mut map = HashMap::new();
-        for (slot_key, spec) in slots {
+        // Global diff.
+        let mut desired_global: HashMap<u8, SlotSpec> = HashMap::new();
+        for (slot_key, spec) in &file.global {
             if let Ok(slot) = slot_key.parse::<u8>()
                 && slot < SLOTS as u8
             {
-                map.insert(slot, spec.clone());
+                desired_global.insert(slot, spec.clone());
             }
         }
-        desired_viewers.insert(uuid, map);
-    }
 
-    // Removed viewer overrides.
-    for (uuid, slots) in &rendered.viewers {
-        let desired = desired_viewers.get(uuid);
-        for slot in slots.keys() {
-            if desired.map(|d| !d.contains_key(slot)).unwrap_or(true) {
-                send_remove_to(server, *uuid, &[*slot]);
+        for (slot, spec) in &desired_global {
+            if rendered.global.get(slot) != Some(spec) {
+                // Only the first add for a slot carries the skin property; later
+                // updates must not re-add the profile or 1.8 clients restart the
+                // skin download on every text change.
+                let first = !rendered.global.contains_key(slot);
+                global_changes.push((*slot, spec.clone(), first));
             }
         }
-    }
-
-    for (uuid, slots) in &desired_viewers {
-        let previous = rendered.viewers.get(uuid);
-        for (slot, spec) in slots {
-            if previous.and_then(|p| p.get(slot)) != Some(spec) {
-                let first = previous.map(|p| !p.contains_key(slot)).unwrap_or(true);
-                send_slot_to(server, Some(*uuid), *slot, spec, first);
+        for slot in rendered.global.keys() {
+            if !desired_global.contains_key(slot) {
+                global_removals.push(*slot);
             }
         }
+        rendered.global = desired_global;
+
+        // Per-viewer diff.
+        let mut desired_viewers: HashMap<Uuid, HashMap<u8, SlotSpec>> = HashMap::new();
+        for (uuid_key, slots) in &file.viewers {
+            let Ok(uuid) = Uuid::parse_str(uuid_key) else {
+                continue;
+            };
+            let mut map = HashMap::new();
+            for (slot_key, spec) in slots {
+                if let Ok(slot) = slot_key.parse::<u8>()
+                    && slot < SLOTS as u8
+                {
+                    map.insert(slot, spec.clone());
+                }
+            }
+            desired_viewers.insert(uuid, map);
+        }
+
+        // Removed viewer overrides.
+        for (uuid, slots) in &rendered.viewers {
+            let desired = desired_viewers.get(uuid);
+            for slot in slots.keys() {
+                if desired.map(|d| !d.contains_key(slot)).unwrap_or(true) {
+                    viewer_removals.entry(*uuid).or_default().push(*slot);
+                }
+            }
+        }
+
+        for (uuid, slots) in &desired_viewers {
+            let previous = rendered.viewers.get(uuid);
+            for (slot, spec) in slots {
+                if previous.and_then(|p| p.get(slot)) != Some(spec) {
+                    let first = previous.map(|p| !p.contains_key(slot)).unwrap_or(true);
+                    viewer_changes
+                        .entry(*uuid)
+                        .or_default()
+                        .push((*slot, spec.clone(), first));
+                }
+            }
+        }
+
+        rendered.viewers = desired_viewers;
     }
 
-    rendered.viewers = desired_viewers;
+    // Send outside the native render lock: a grouped packet can serialise
+    // several entries (and one skin), and another state update should not have
+    // to wait for the network writes.
+    if !global_removals.is_empty() {
+        send_remove_broadcast(server, &global_removals);
+    }
+    send_changes(server, None, &global_changes);
+
+    for (uuid, slots) in viewer_removals {
+        send_remove_to(server, uuid, &slots);
+    }
+    for (uuid, changes) in viewer_changes {
+        send_changes(server, Some(uuid), &changes);
+    }
 }
 
 /// Sends every slot of a single viewer's state to that player.
 /// Returns `false` when the WASM side has not published this viewer yet.
 fn send_full_viewer(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>, viewer: Uuid) -> bool {
-    let slots: Vec<(u8, SlotSpec)> = {
+    let changes: Vec<(u8, SlotSpec, bool)> = {
         let rendered = state.lock().unwrap();
         match rendered.viewers.get(&viewer) {
-            Some(map) => map.iter().map(|(slot, spec)| (*slot, spec.clone())).collect(),
+            Some(map) => map
+                .iter()
+                .map(|(slot, spec)| (*slot, spec.clone(), true))
+                .collect(),
             None => return false,
         }
     };
 
-    for (slot, spec) in slots {
-        send_slot_to(server, Some(viewer), slot, &spec, true);
-    }
+    send_changes(server, Some(viewer), &changes);
     true
 }
 
@@ -312,86 +346,106 @@ fn send_full_viewer(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>, viewer: 
 // Packets
 // ---------------------------------------------------------------------------
 
-fn send_slot_broadcast(server: &Arc<Server>, slot: u8, spec: &SlotSpec, full: bool) {
-    let name = spec.profile_name(slot);
-    let text = TextComponent::from_legacy_string_with_code(&spec.text, '&');
-    let properties = properties(spec);
-    let actions = if full {
-        vec![
-            PlayerAction::AddPlayer {
-                name: &name,
-                properties: &properties,
-            },
-            PlayerAction::UpdateListed(true),
-            PlayerAction::UpdateDisplayName(Some(&text)),
-            PlayerAction::UpdateListOrder(VarInt(spec.order(slot))),
-        ]
-    } else {
-        vec![
-            PlayerAction::UpdateDisplayName(Some(&text)),
-            PlayerAction::UpdateListOrder(VarInt(spec.order(slot))),
-        ]
-    };
-    let players = [Player {
-        uuid: entry_uuid(slot as usize),
-        actions: &actions,
-    }];
-    let flags = if full {
-        PlayerInfoFlags::ADD_PLAYER
-            | PlayerInfoFlags::UPDATE_LISTED
-            | PlayerInfoFlags::UPDATE_DISPLAY_NAME
-            | PlayerInfoFlags::UPDATE_LIST_PRIORITY
-    } else {
-        PlayerInfoFlags::UPDATE_DISPLAY_NAME | PlayerInfoFlags::UPDATE_LIST_PRIORITY
-    };
-    server.broadcast_packet_all(&CPlayerInfoUpdate::new(flags.bits(), &players));
-}
-
-fn send_slot_to(server: &Arc<Server>, viewer: Option<Uuid>, slot: u8, spec: &SlotSpec, full: bool) {
-    let Some(uuid) = viewer else {
-        send_slot_broadcast(server, slot, spec, full);
+/// Sends all changed slots in at most two packets: one for entries that need
+/// `ADD_PLAYER` (skin included) and one for display/order-only updates.
+///
+/// `viewer = None` broadcasts the global slots; `Some(uuid)` sends only to that
+/// player. The entries in a packet are independent profiles, so one viewer can
+/// receive the 80 changed slots without 80 separate `CPlayerInfoUpdate`s.
+fn send_changes(server: &Arc<Server>, viewer: Option<Uuid>, changes: &[(u8, SlotSpec, bool)]) {
+    if changes.is_empty() {
         return;
-    };
-    let Some(player) = server.get_player_by_uuid(uuid) else {
-        return;
+    }
+
+    let player = if let Some(uuid) = viewer {
+        let Some(player) = server.get_player_by_uuid(uuid) else {
+            return;
+        };
+        Some(player)
+    } else {
+        None
     };
 
-    let name = spec.profile_name(slot);
-    let text = TextComponent::from_legacy_string_with_code(&spec.text, '&');
-    let properties = properties(spec);
-    let actions = if full {
-        vec![
-            PlayerAction::AddPlayer {
-                name: &name,
-                properties: &properties,
-            },
-            PlayerAction::UpdateListed(true),
-            PlayerAction::UpdateDisplayName(Some(&text)),
-            PlayerAction::UpdateListOrder(VarInt(spec.order(slot))),
-        ]
-    } else {
-        vec![
-            PlayerAction::UpdateDisplayName(Some(&text)),
-            PlayerAction::UpdateListOrder(VarInt(spec.order(slot))),
-        ]
-    };
-    let players = [Player {
-        uuid: entry_uuid(slot as usize),
-        actions: &actions,
-    }];
-    let flags = if full {
-        PlayerInfoFlags::ADD_PLAYER
-            | PlayerInfoFlags::UPDATE_LISTED
-            | PlayerInfoFlags::UPDATE_DISPLAY_NAME
-            | PlayerInfoFlags::UPDATE_LIST_PRIORITY
-    } else {
-        PlayerInfoFlags::UPDATE_DISPLAY_NAME | PlayerInfoFlags::UPDATE_LIST_PRIORITY
-    };
-    let packet = CPlayerInfoUpdate::new(flags.bits(), &players);
+    // Group by action set: ADD_PLAYER cannot be mixed with display-only
+    // entries because every profile in a packet must carry the same fields in
+    // the same order.
+    for full in [true, false] {
+        let selected: Vec<(u8, SlotSpec, bool)> = changes
+            .iter()
+            .filter(|(_, _, is_full)| *is_full == full)
+            .cloned()
+            .collect();
+        if selected.is_empty() {
+            continue;
+        }
 
-    let _ = crate::GLOBAL_RUNTIME.block_on(async move {
-        player.send_client_packet(&packet).await;
-    });
+        let names: Vec<String> = selected
+            .iter()
+            .map(|(slot, spec, _)| spec.profile_name(*slot))
+            .collect();
+        let texts: Vec<TextComponent> = selected
+            .iter()
+            .map(|(_, spec, _)| TextComponent::from_legacy_string_with_code(&spec.text, '&'))
+            .collect();
+        let properties: Vec<Vec<Property>> = selected
+            .iter()
+            .map(|(_, spec, _)| properties(spec))
+            .collect();
+        let orders: Vec<i32> = selected
+            .iter()
+            .map(|(slot, spec, _)| spec.order(*slot))
+            .collect();
+        let uuids: Vec<Uuid> = selected
+            .iter()
+            .map(|(slot, _, _)| entry_uuid(*slot as usize))
+            .collect();
+
+        let actions: Vec<Vec<PlayerAction>> = (0..selected.len())
+            .map(|i| {
+                if full {
+                    vec![
+                        PlayerAction::AddPlayer {
+                            name: &names[i],
+                            properties: &properties[i],
+                        },
+                        PlayerAction::UpdateListed(true),
+                        PlayerAction::UpdateDisplayName(Some(&texts[i])),
+                        PlayerAction::UpdateListOrder(VarInt(orders[i])),
+                    ]
+                } else {
+                    vec![
+                        PlayerAction::UpdateDisplayName(Some(&texts[i])),
+                        PlayerAction::UpdateListOrder(VarInt(orders[i])),
+                    ]
+                }
+            })
+            .collect();
+
+        let players: Vec<Player> = (0..selected.len())
+            .map(|i| Player {
+                uuid: uuids[i],
+                actions: &actions[i],
+            })
+            .collect();
+        let flags = if full {
+            PlayerInfoFlags::ADD_PLAYER
+                | PlayerInfoFlags::UPDATE_LISTED
+                | PlayerInfoFlags::UPDATE_DISPLAY_NAME
+                | PlayerInfoFlags::UPDATE_LIST_PRIORITY
+        } else {
+            PlayerInfoFlags::UPDATE_DISPLAY_NAME | PlayerInfoFlags::UPDATE_LIST_PRIORITY
+        };
+        let packet = CPlayerInfoUpdate::new(flags.bits(), &players);
+
+        if let Some(player) = &player {
+            let player = Arc::clone(player);
+            let _ = crate::GLOBAL_RUNTIME.block_on(async move {
+                player.send_client_packet(&packet).await;
+            });
+        } else {
+            server.broadcast_packet_all(&packet);
+        }
+    }
 }
 
 fn send_remove_broadcast(server: &Arc<Server>, slots: &[u8]) {

@@ -135,10 +135,11 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   territory-entry check keeps the last *block position* per player (the original
   reads `event.getFrom()`), so a claim that is not chunk-aligned announces once
   per crossing instead of re-announcing on every move inside its edge chunks.
-* **The sidebar refreshes at the original's 100 ms cadence**
-  (`ScoreboardUpdaterImpl`'s fixed-rate loop, ported as a 2-tick task) and every
-  row is diffed against the last one sent (`PlayerScoreboard_1_8#update`'s entry
-  cache), so unchanged rows cost no packets.
+* **The sidebar refreshes at 5 Hz (200 ms), a deliberate downshift from the
+  original's 100 ms loop** (`ScoreboardUpdaterImpl`'s fixed-rate loop; the port
+  uses a 4-tick task) and every row is diffed against the last one sent
+  (`PlayerScoreboard_1_8#update`'s entry cache), so unchanged rows cost no
+  packets.
 * **Sidebar lines are split for 1.8 clients.** A 1.8 client renders only 16
   characters of a team prefix and 16 of its suffix, so every line is cut into a
   ≤16-char prefix plus a ≤16-char suffix on a stable invisible entry, carrying

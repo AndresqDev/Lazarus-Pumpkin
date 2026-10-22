@@ -2,9 +2,9 @@
 //! sidebar and tab list.
 //!
 //! Consolidates the various Lazarus `Tasks` / `Timer` / `GlassUpdater` /
-//! `TabUpdater` scheduler loops into a single 1-second tick (glass walls are
-//! refreshed twice per second and the sidebar at the original's 100 ms cadence
-//! via separate tasks) scheduled through Pumpkin.
+//! `TabUpdater` scheduler loops into a single 1-second tick. Glass walls and
+//! the sidebar use their own faster tasks (2 Hz and 5 Hz respectively); tab
+//! updates run once per second, with event-driven refreshes from [`crate::ui`].
 
 use pumpkin_plugin_api::scheduler::SchedulerExt;
 use pumpkin_plugin_api::{Context, Player, Server};
@@ -39,6 +39,10 @@ pub fn start(context: &Context) {
     context.schedule_repeating_task(1, 1, |server| {
         state().write().unwrap().glass.process_pending_regen(&server);
         process_join_teleports(&server);
+        // Claim/timer mutations only enqueue players; render them here,
+        // outside the global state lock and before the next game tick's
+        // 5 Hz sidebar / 1 Hz tab passes.
+        crate::ui::tick(&server);
     });
     // Client-side glass walls: 2 Hz. El resync completo va una sola vez por
     // pasada (no por jugador) para no convertirse en O(n^2).

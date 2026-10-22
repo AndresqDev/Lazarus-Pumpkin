@@ -142,6 +142,7 @@ impl TimerManager {
     pub fn activate(&mut self, uuid: &str, timer_type: TimerType, seconds: u64) {
         let expiry = crate::utils::now_millis() + (seconds as i64 * 1000);
         self.players.entry(uuid.to_string()).or_default().insert(timer_type, expiry);
+        crate::ui::scoreboard_player(uuid);
     }
 
     pub fn cancel(&mut self, uuid: &str, timer_type: TimerType) {
@@ -155,6 +156,7 @@ impl TimerManager {
         {
             self.pending.remove(uuid);
         }
+        crate::ui::scoreboard_player(uuid);
     }
 
     pub fn set_pending(&mut self, uuid: &str, action: PendingAction) {
@@ -163,6 +165,7 @@ impl TimerManager {
             .or_default()
             .insert(action.timer_type, action.expiry);
         self.pending.insert(uuid.to_string(), action);
+        crate::ui::scoreboard_player(uuid);
     }
 
     pub fn pending(&self, uuid: &str) -> Option<&PendingAction> {
@@ -174,6 +177,7 @@ impl TimerManager {
             if let Some(timers) = self.players.get_mut(uuid) {
                 timers.remove(&pending.timer_type);
             }
+            crate::ui::scoreboard_player(uuid);
         }
     }
 
@@ -181,10 +185,13 @@ impl TimerManager {
     pub fn freeze_faction(&mut self, faction_id: &str, seconds: u64) {
         let expiry = crate::utils::now_millis() + (seconds as i64 * 1000);
         self.faction_freeze.insert(faction_id.to_string(), expiry);
+        crate::ui::tab_all();
     }
 
     pub fn unfreeze_faction(&mut self, faction_id: &str) {
-        self.faction_freeze.remove(faction_id);
+        if self.faction_freeze.remove(faction_id).is_some() {
+            crate::ui::tab_all();
+        }
     }
 
     pub fn is_frozen(&self, faction_id: &str) -> bool {
@@ -212,19 +219,26 @@ impl TimerManager {
             placeholder: format!("{placeholder} "),
             expiry,
         });
+        crate::ui::scoreboard_all();
     }
 
     /// `CustomTimer#removeByName(name, true)`: removes the first timer matching
     /// `name` (case-insensitively); `None` when it is not running.
     pub fn cancel_custom(&mut self, name: &str) -> Option<CustomTimer> {
         let index = self.custom.iter().position(|timer| timer.name.eq_ignore_ascii_case(name))?;
-        Some(self.custom.remove(index))
+        let removed = self.custom.remove(index);
+        crate::ui::scoreboard_all();
+        Some(removed)
     }
 
     /// `CustomTimer#scheduleExpiry`: drops every timer whose delay ran out.
     pub fn purge_expired_custom(&mut self) {
         let now = crate::utils::now_millis();
+        let before = self.custom.len();
         self.custom.retain(|timer| timer.expiry > now);
+        if self.custom.len() != before {
+            crate::ui::scoreboard_all();
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -239,6 +253,7 @@ impl TimerManager {
         }
         if banked {
             self.pvp_banked.insert(uuid.to_string(), seconds as i64 * 1000);
+            crate::ui::scoreboard_player(uuid);
         } else {
             self.activate(uuid, TimerType::PvpProtection, seconds);
         }
@@ -271,12 +286,14 @@ impl TimerManager {
             .entry(uuid.to_string())
             .or_default()
             .insert(TimerType::PvpProtection, crate::utils::now_millis() + remaining);
+        crate::ui::scoreboard_player(uuid);
     }
 
     /// `PvpProtTimer#cancel`: removes running **and** banked protection.
     pub fn cancel_pvp(&mut self, uuid: &str) {
         self.pvp_banked.remove(uuid);
         self.cancel(uuid, TimerType::PvpProtection);
+        crate::ui::scoreboard_player(uuid);
     }
 
     /// `PvpProtTimer#clearPvpProtections`: drops every banked entry and cancels
@@ -286,6 +303,7 @@ impl TimerManager {
         for timers in self.players.values_mut() {
             timers.remove(&TimerType::PvpProtection);
         }
+        crate::ui::scoreboard_all();
     }
 
     /// `PvpProtTimer#isActive`.
@@ -300,11 +318,13 @@ impl TimerManager {
     /// `SystemTimer#activate`: starts (or restarts) the global SOTW timer.
     pub fn activate_sotw(&mut self, seconds: u64) {
         self.sotw_until = Some(crate::utils::now_millis() + seconds as i64 * 1000);
+        crate::ui::scoreboard_all();
     }
 
     /// `SystemTimer#cancel`.
     pub fn cancel_sotw(&mut self) {
         self.sotw_until = None;
+        crate::ui::scoreboard_all();
     }
 
     /// `SotwTimer#isActive`.
@@ -345,7 +365,14 @@ impl TimerManager {
             let _ = before;
         }
 
+        for (uuid, _) in &expired {
+            crate::ui::scoreboard_player(uuid);
+        }
+        let freeze_before = self.faction_freeze.len();
         self.faction_freeze.retain(|_, expiry| *expiry > now);
+        if self.faction_freeze.len() != freeze_before {
+            crate::ui::tab_all();
+        }
         expired
     }
 }

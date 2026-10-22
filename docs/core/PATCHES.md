@@ -9,6 +9,12 @@ La asignación por oleadas, agentes y archivos permitidos está en
 [`AGENT_PLAYBOOK.md`](AGENT_PLAYBOOK.md). `HCF-CORE-060` y `HCF-CORE-061` quedan
 **diferidos**: primero se optimiza el MSPT del backend.
 
+> **Nota de contexto (2026-10-22):** C1 está verde en `4bb3c75` (run
+> `39699544519`). Las filas que dicen “C1 pendiente” conservan el estado
+> histórico del merge; no son el estado actual. El A/B vigente y sus límites
+> están en `pumpkin-hcf/wave2/B1.md`; la auditoría de tablist/scoreboard en
+> `pumpkin-hcf/wave0/DOC_AUDIT.md`.
+
 ## Fase 0 — Fundamentos
 
 | ID | Título | Patrón | Archivos principales | Ganancia esperada | Riesgo | Estado |

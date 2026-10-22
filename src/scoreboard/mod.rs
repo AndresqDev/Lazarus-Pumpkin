@@ -53,10 +53,11 @@ pub fn setup(player: &Player) {
     }
 }
 
-/// Rebuilds and renders the sidebar for a player. Runs every 2 ticks — the
-/// original `ScoreboardUpdaterImpl` loops at a 100 ms fixed rate — and sends
-/// only the rows that changed, like `PlayerScoreboard_1_8#update`'s entry
-/// cache.
+/// Rebuilds and renders the sidebar for a player. Runs every 4 ticks (5 Hz),
+/// a deliberate downshift from the original `ScoreboardUpdaterImpl`'s 100 ms
+/// loop; sends only the rows that changed, like
+/// `PlayerScoreboard_1_8#update`'s entry cache. Immediate claim/timer changes
+/// are queued by [`crate::ui`] and rendered on the next tick.
 pub fn update(player: &Player, server: &Server) {
     // The sidebar is a Java-only surface.
     if player.as_java().is_none() {

@@ -35,6 +35,7 @@ mod staffmode;
 mod state;
 mod tab;
 mod tasks;
+mod ui;
 mod timer;
 mod userdata;
 mod utils;
