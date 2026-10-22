@@ -143,7 +143,7 @@ pub fn enable_for_player(player: &Player) {
 
     let already = {
         let mut guard = state().write().unwrap();
-        !guard.sotw.enabled_players.insert(uuid)
+        !guard.sotw.enabled_players.insert(uuid.clone())
     };
     if !already {
         // The SOTW line switches from the dynamic timer placeholder to the

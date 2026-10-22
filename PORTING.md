@@ -162,6 +162,16 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   the player-info entry — and restarts the skin download — on every add, which
   is what made heads load slowly. One full resend per joining player covers the
   join/readiness window instead of the previous 8×500 ms loop.
+* **Changed slots are grouped by action set.** A viewer normally receives one
+  `CPlayerInfoUpdate` with every changed display/order entry, plus a second one
+  only when new profiles are added with the skin. The native companion polls
+  `tab_state.json` every 100 ms and uses the nanosecond modification time, so a
+  same-length write within the same second is not missed.
+* **Claim and timer changes bypass the cadence.** `src/ui.rs` records affected
+  players from `ClaimManager`/`TimerManager`; the 1-tick task re-renders the
+  sidebar and tab outside the global state lock. A timer starts/cancels or a
+  claim is added/removed on the next tick instead of waiting up to 1 s (tab) or
+  200 ms (sidebar); the native tab detects the flushed file within 100 ms.
 * **Single-chunk claiming** is replaced by the original **selection wand**: `/f claim`
   gives a golden-hoe wand; left/right click set positions, sneak + left-click buys.
   Selection pillars and claim maps are rendered entirely client-side (`glass.rs`).
