@@ -414,9 +414,11 @@ fn send_changes(server: &Arc<Server>, viewer: Option<Uuid>, changes: &[(u8, Slot
                     ]
                 } else {
                     // The tab order of an artificial slot never changes after
-                    // the first ADD_PLAYER. Keeping `UpdateListOrder` in this
-                    // packet made ViaVersion drop the whole display-name update
-                    // for 1.8 clients (1.8 has no list-order field).
+                    // the first ADD_PLAYER, and 1.8 has no list-order field, so
+                    // omit `UpdateListOrder` from display-only updates. A race
+                    // in an earlier smoke made this look like ViaVersion was
+                    // dropping the whole packet; the corrected control with the
+                    // previous native also applied tab changes.
                     vec![PlayerAction::UpdateDisplayName(Some(&texts[i]))]
                 }
             })
