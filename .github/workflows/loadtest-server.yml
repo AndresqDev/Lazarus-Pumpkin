@@ -374,6 +374,9 @@ jobs:
             echo "ERROR: no encontre Pumpkin en el tailnet"; tailscale status; exit 1
           fi
           echo "backend=${SRV_IP}:25566"
+          # Los smokes de claims/timers usan RCON desde este runner para no
+          # depender de permisos de operador en los bots.
+          echo "SRV_IP=${SRV_IP}" >> "$GITHUB_ENV"
 
           MOTD_ESC="${MOTD//\"/}"
           sed -i 's|^online-mode = .*|online-mode = false|' velocity.toml
@@ -465,6 +468,12 @@ jobs:
           set -euo pipefail
           node loadtest/server/plugin_smoke.js \
             --host 127.0.0.1 --port 25565 --seconds 45
+
+      - name: Smoke de refresco inmediato (claim y timer)
+        run: |
+          set -euo pipefail
+          node loadtest/server/ui_smoke.js \
+            --host 127.0.0.1 --port 25565 --rcon-host "${SRV_IP}" --seconds 75
 
       - name: Mantener Velocity arriba
         run: |

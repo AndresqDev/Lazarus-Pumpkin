@@ -29,6 +29,8 @@ let objective = null;
 let sidebar = null;
 let scorePackets = 0;
 let teamPackets = 0;
+let playerInfoPackets = 0;
+let playerInfoEntries = 0;
 let finished = false;
 
 const bot = mineflayer.createBot({
@@ -60,6 +62,8 @@ function finish(reason) {
     tab_sample_lz: lz.slice(0, 8),
     scoreboard_objective: objective,
     sidebar,
+    player_info_packets: playerInfoPackets,
+    player_info_entries: playerInfoEntries,
     score_packets: scorePackets,
     team_packets: teamPackets,
   }, null, 2));
@@ -69,8 +73,10 @@ function finish(reason) {
 }
 
 bot._client.on('player_info', (packet) => {
+  playerInfoPackets += 1;
   const action = packet.action;
   const entries = packet.data || [];
+  playerInfoEntries += entries.length;
   for (const entry of entries) {
     if (!entry || !entry.name) continue;
     if (action === 'add_player') {
