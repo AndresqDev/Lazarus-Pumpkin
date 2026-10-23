@@ -87,6 +87,13 @@ function tabSignature() {
     .join('\n');
 }
 
+function tabNameForUuid(uuid) {
+  for (const [name, id] of tab.entries()) {
+    if (id === uuid) return name;
+  }
+  return null;
+}
+
 function teamMode(mode) {
   if (typeof mode === 'number') {
     return ['add', 'remove', 'change', 'join', 'leave'][mode] || 'change';
@@ -177,15 +184,19 @@ function createBot(username) {
     packets.player_info += 1;
     noteWatch();
     for (const entry of packet.data || []) {
-      if (!entry || !entry.name) continue;
-      if (packet.action === 'add_player') tab.set(entry.name, entry.uuid);
+      if (!entry) continue;
+      // En 1.8, `update_display_name` solo trae UUID + displayName, sin el
+      // nombre; resolvemos el nombre contra el mapa construido al hacer join.
+      const name = entry.name || tabNameForUuid(entry.uuid);
+      if (!name) continue;
+      if (packet.action === 'add_player') tab.set(name, entry.uuid);
       if (packet.action === 'remove_player') {
-        tab.delete(entry.name);
-        tabText.delete(entry.name);
+        tab.delete(name);
+        tabText.delete(name);
         continue;
       }
       if (entry.displayName !== undefined) {
-        tabText.set(entry.name, stripColors(entry.displayName));
+        tabText.set(name, stripColors(entry.displayName));
       }
     }
   });
