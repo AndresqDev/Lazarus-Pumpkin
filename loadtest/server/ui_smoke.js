@@ -40,6 +40,7 @@ const scores = new Map();
 let objective = null;
 let sidebar = null;
 let finished = false;
+const problems = [];
 
 const packets = {
   player_info: 0,
@@ -371,20 +372,17 @@ function finish(ok, reason, extra) {
     const claimTabPackets = claimWatch.after.player_info;
     const claimScorePackets = claimWatch.after.scoreboard_team + claimWatch.after.scoreboard_score;
     const claimOk = claimTabPackets > 0 && claimScorePackets > 0 && claimWatch.firstPacketMs !== null;
-
-    if (!claimOk) {
-      return finish(false, 'el claim no refrescó tab y sidebar en la ventana', {
-        join_player_info_packets: joinPackets.player_info,
-        claim: {
-          ...claimWatch,
-          reply: claimReply,
-          tab_changed: claimBeforeTab !== claimAfterTab,
-          sidebar_changed: JSON.stringify(claimBeforeLines) !== JSON.stringify(claimAfterLines),
-          before_lines: claimBeforeLines,
-          after_lines: claimAfterLines,
-        },
-      });
-    }
+    const claimResult = {
+      ...claimWatch,
+      reply: claimReply,
+      tab_packets: claimTabPackets,
+      score_packets: claimScorePackets,
+      tab_changed: claimBeforeTab !== claimAfterTab,
+      sidebar_changed: JSON.stringify(claimBeforeLines) !== JSON.stringify(claimAfterLines),
+      before_lines: claimBeforeLines,
+      after_lines: claimAfterLines,
+    };
+    if (!claimOk) problems.push('el claim no refrescó tab y sidebar en la ventana');
 
     const unclaimBeforeLines = sidebarLines(botA);
     const unclaimBeforeTab = tabSignature();
@@ -396,28 +394,17 @@ function finish(ok, reason, extra) {
     const unclaimTabPackets = unclaimWatch.after.player_info;
     const unclaimScorePackets = unclaimWatch.after.scoreboard_team + unclaimWatch.after.scoreboard_score;
     const unclaimOk = unclaimTabPackets > 0 && unclaimScorePackets > 0 && unclaimWatch.firstPacketMs !== null;
-
-    if (!unclaimOk) {
-      return finish(false, 'el unclaim no refrescó tab y sidebar en la ventana', {
-        join_player_info_packets: joinPackets.player_info,
-        claim: {
-          ...claimWatch,
-          reply: claimReply,
-          tab_changed: claimBeforeTab !== claimAfterTab,
-          sidebar_changed: JSON.stringify(claimBeforeLines) !== JSON.stringify(claimAfterLines),
-          before_lines: claimBeforeLines,
-          after_lines: claimAfterLines,
-        },
-        unclaim: {
-          ...unclaimWatch,
-          reply: unclaimReply,
-          tab_changed: unclaimBeforeTab !== unclaimAfterTab,
-          sidebar_changed: JSON.stringify(unclaimBeforeLines) !== JSON.stringify(unclaimAfterLines),
-          before_lines: unclaimBeforeLines,
-          after_lines: unclaimAfterLines,
-        },
-      });
-    }
+    const unclaimResult = {
+      ...unclaimWatch,
+      reply: unclaimReply,
+      tab_packets: unclaimTabPackets,
+      score_packets: unclaimScorePackets,
+      tab_changed: unclaimBeforeTab !== unclaimAfterTab,
+      sidebar_changed: JSON.stringify(unclaimBeforeLines) !== JSON.stringify(unclaimAfterLines),
+      before_lines: unclaimBeforeLines,
+      after_lines: unclaimAfterLines,
+    };
+    if (!unclaimOk) problems.push('el unclaim no refrescó tab y sidebar en la ventana');
 
     // SOTW es global y usa la invalidación inmediata de sidebar. La expiración
     // la procesa el tick de 1 s; la UI debe reaccionar en el tick siguiente.
@@ -442,29 +429,14 @@ function finish(ok, reason, extra) {
       && sotwStarted
       && sotwEnded;
 
-    const ok = claimOk && unclaimOk && sotwStartOk && sotwEndOk;
-    return finish(ok, ok ? 'ok' : 'SOTW no refrescó como se esperaba', {
+    if (!sotwStartOk) problems.push('SOTW no apareció en el sidebar');
+    if (!sotwEndOk) problems.push('SOTW no desapareció del sidebar');
+    const ok = problems.length === 0;
+    return finish(ok, ok ? 'ok' : problems.join('; '), {
       join_player_info_packets: joinPackets.player_info,
-      claim: {
-        ...claimWatch,
-        reply: claimReply,
-        tab_packets: claimTabPackets,
-        score_packets: claimScorePackets,
-        tab_changed: claimBeforeTab !== claimAfterTab,
-        sidebar_changed: JSON.stringify(claimBeforeLines) !== JSON.stringify(claimAfterLines),
-        before_lines: claimBeforeLines,
-        after_lines: claimAfterLines,
-      },
-      unclaim: {
-        ...unclaimWatch,
-        reply: unclaimReply,
-        tab_packets: unclaimTabPackets,
-        score_packets: unclaimScorePackets,
-        tab_changed: unclaimBeforeTab !== unclaimAfterTab,
-        sidebar_changed: JSON.stringify(unclaimBeforeLines) !== JSON.stringify(unclaimAfterLines),
-        before_lines: unclaimBeforeLines,
-        after_lines: unclaimAfterLines,
-      },
+      problems,
+      claim: claimResult,
+      unclaim: unclaimResult,
       sotw: {
         start: sotwStartWatch,
         start_line_seen: sotwStarted,
