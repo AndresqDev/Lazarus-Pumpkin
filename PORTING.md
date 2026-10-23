@@ -180,8 +180,9 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   `d5c561b985b2c697bc1071282e3c9aa0b8cfca60b1c08f6d33470796e7aeb08f`)
   finished `ok=true`. Claim produced 2 `player_info` + 6 scoreboard packets
   with both tab and sidebar changed in 131 ms; unclaim produced 2 + 12 in
-  111 ms. The SOTW start line and message arrived 3 ms after the RCON response,
-  and expiry cleared the line and sent the end message. Join grouping was 10
+  111 ms. The first sidebar packet after the RCON response arrived 3 ms later;
+  the start line/message were captured and expiry cleared the line and sent the
+  end message. RCON process startup accounted for 1038 ms. Join grouping was 10
   `player_info` packets for 2 bots. A control with the previous native and the
   corrected test also passed (`39893047212`): claim 2/6 in 252 ms and unclaim
   2/12 in 503 ms, with `tab_changed=true`; those are separate runs, not an A/B.
