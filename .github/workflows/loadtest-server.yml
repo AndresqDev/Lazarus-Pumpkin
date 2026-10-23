@@ -308,6 +308,7 @@ jobs:
             server/pumpkin.toml
             server/plugins/data/lazarus/config.yml
             server/plugins/data/lazarus/utilities.yml
+            server/plugins/data/lazarus/tab_state.json
           if-no-files-found: warn
           retention-days: 7
 

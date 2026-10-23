@@ -34,6 +34,7 @@ const userB = 'SmokeUiB';
 
 const bots = [];
 const tab = new Map();
+const tabText = new Map();
 const teams = new Map();
 const scores = new Map();
 let objective = null;
@@ -75,6 +76,13 @@ function plainText(value) {
 
 function stripColors(value) {
   return plainText(value).replace(/§[0-9a-fk-or]/gi, '');
+}
+
+function tabSignature() {
+  return [...tabText.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, text]) => `${name}=${text}`)
+    .join('\n');
 }
 
 function teamMode(mode) {
@@ -169,7 +177,14 @@ function createBot(username) {
     for (const entry of packet.data || []) {
       if (!entry || !entry.name) continue;
       if (packet.action === 'add_player') tab.set(entry.name, entry.uuid);
-      if (packet.action === 'remove_player') tab.delete(entry.name);
+      if (packet.action === 'remove_player') {
+        tab.delete(entry.name);
+        tabText.delete(entry.name);
+        continue;
+      }
+      if (entry.displayName !== undefined) {
+        tabText.set(entry.name, stripColors(entry.displayName));
+      }
     }
   });
   bot._client.on('scoreboard_objective', (packet) => {
@@ -346,9 +361,13 @@ function finish(ok, reason, extra) {
     rcon(`f setbalance ${faction} 1000`);
     await sleep(300);
 
+    const claimBeforeLines = sidebarLines(botA);
+    const claimBeforeTab = tabSignature();
     const claimWatch = beginWatch('claim');
     const claimReply = await commandSoft(botA, '/f claimchunk', /claimed|reclam/i);
     await waitForFirstPacket(claimWatch, 2000);
+    const claimAfterLines = sidebarLines(botA);
+    const claimAfterTab = tabSignature();
     const claimTabPackets = claimWatch.after.player_info;
     const claimScorePackets = claimWatch.after.scoreboard_team + claimWatch.after.scoreboard_score;
     const claimOk = claimTabPackets > 0 && claimScorePackets > 0 && claimWatch.firstPacketMs !== null;
@@ -356,13 +375,24 @@ function finish(ok, reason, extra) {
     if (!claimOk) {
       return finish(false, 'el claim no refrescó tab y sidebar en la ventana', {
         join_player_info_packets: joinPackets.player_info,
-        claim: { ...claimWatch, reply: claimReply },
+        claim: {
+          ...claimWatch,
+          reply: claimReply,
+          tab_changed: claimBeforeTab !== claimAfterTab,
+          sidebar_changed: JSON.stringify(claimBeforeLines) !== JSON.stringify(claimAfterLines),
+          before_lines: claimBeforeLines,
+          after_lines: claimAfterLines,
+        },
       });
     }
 
+    const unclaimBeforeLines = sidebarLines(botA);
+    const unclaimBeforeTab = tabSignature();
     const unclaimWatch = beginWatch('unclaim');
     const unclaimReply = await commandSoft(botA, '/f unclaim', /unclaim|removed|removid/i);
     await waitForFirstPacket(unclaimWatch, 2000);
+    const unclaimAfterLines = sidebarLines(botA);
+    const unclaimAfterTab = tabSignature();
     const unclaimTabPackets = unclaimWatch.after.player_info;
     const unclaimScorePackets = unclaimWatch.after.scoreboard_team + unclaimWatch.after.scoreboard_score;
     const unclaimOk = unclaimTabPackets > 0 && unclaimScorePackets > 0 && unclaimWatch.firstPacketMs !== null;
@@ -370,8 +400,22 @@ function finish(ok, reason, extra) {
     if (!unclaimOk) {
       return finish(false, 'el unclaim no refrescó tab y sidebar en la ventana', {
         join_player_info_packets: joinPackets.player_info,
-        claim: { ...claimWatch, reply: claimReply },
-        unclaim: { ...unclaimWatch, reply: unclaimReply },
+        claim: {
+          ...claimWatch,
+          reply: claimReply,
+          tab_changed: claimBeforeTab !== claimAfterTab,
+          sidebar_changed: JSON.stringify(claimBeforeLines) !== JSON.stringify(claimAfterLines),
+          before_lines: claimBeforeLines,
+          after_lines: claimAfterLines,
+        },
+        unclaim: {
+          ...unclaimWatch,
+          reply: unclaimReply,
+          tab_changed: unclaimBeforeTab !== unclaimAfterTab,
+          sidebar_changed: JSON.stringify(unclaimBeforeLines) !== JSON.stringify(unclaimAfterLines),
+          before_lines: unclaimBeforeLines,
+          after_lines: unclaimAfterLines,
+        },
       });
     }
 
@@ -406,12 +450,20 @@ function finish(ok, reason, extra) {
         reply: claimReply,
         tab_packets: claimTabPackets,
         score_packets: claimScorePackets,
+        tab_changed: claimBeforeTab !== claimAfterTab,
+        sidebar_changed: JSON.stringify(claimBeforeLines) !== JSON.stringify(claimAfterLines),
+        before_lines: claimBeforeLines,
+        after_lines: claimAfterLines,
       },
       unclaim: {
         ...unclaimWatch,
         reply: unclaimReply,
         tab_packets: unclaimTabPackets,
         score_packets: unclaimScorePackets,
+        tab_changed: unclaimBeforeTab !== unclaimAfterTab,
+        sidebar_changed: JSON.stringify(unclaimBeforeLines) !== JSON.stringify(unclaimAfterLines),
+        before_lines: unclaimBeforeLines,
+        after_lines: unclaimAfterLines,
       },
       sotw: {
         start: sotwStartWatch,
