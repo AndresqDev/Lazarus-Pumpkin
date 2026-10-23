@@ -160,10 +160,11 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   the skin textures) only the first time a slot appears; later text changes
   send `UPDATE_DISPLAY_NAME` only, without `UPDATE_LIST_ORDER`. 1.8 rebuilds
   the player-info entry — and restarts the skin download — on every add, which
-  is what made heads load slowly. ViaVersion discards display-only updates that
-  carry the list-order action for 1.8 clients; removing it made claim updates
-  visible in the smoke. One full resend per joining player covers the
-  join/readiness window instead of the previous 8×500 ms loop.
+  is what made heads load slowly. The `f826aaf` build also drops the list-order
+  action because 1.8 has no equivalent; the earlier zero-packet observation
+  was a test race, not proof that ViaVersion drops display-only updates. One
+  full resend per joining player covers the join/readiness window instead of
+  the previous 8×500 ms loop.
 * **Changed slots are grouped by action set.** A viewer normally receives one
   `CPlayerInfoUpdate` with every changed display-name entry, plus a second one
   only when new profiles are added with the skin. The native companion polls
@@ -181,9 +182,12 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   with both tab and sidebar changed in 131 ms; unclaim produced 2 + 12 in
   111 ms. The SOTW start line and message arrived 3 ms after the RCON response,
   and expiry cleared the line and sent the end message. Join grouping was 10
-  `player_info` packets for 2 bots. This does **not** validate 32–100 real
-  players: `tab_lz=80` is an artificial layout, not 80 players, and there is no
-  scale measurement of fan-out or JSON writes.
+  `player_info` packets for 2 bots. A control with the previous native and the
+  corrected test also passed (`39893047212`): claim 2/6 in 252 ms and unclaim
+  2/12 in 503 ms, with `tab_changed=true`; those are separate runs, not an A/B.
+  This does **not** validate 32–100 real players: `tab_lz=80` is an artificial
+  layout, not 80 players, and there is no scale measurement of fan-out or JSON
+  writes.
 * **Single-chunk claiming** is replaced by the original **selection wand**: `/f claim`
   gives a golden-hoe wand; left/right click set positions, sneak + left-click buys.
   Selection pillars and claim maps are rendered entirely client-side (`glass.rs`).
