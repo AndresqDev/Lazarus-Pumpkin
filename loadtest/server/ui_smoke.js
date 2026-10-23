@@ -50,6 +50,7 @@ const packets = {
   scoreboard_team: 0,
 };
 let watch = null;
+let lastRconMs = 0;
 
 function resetPackets() {
   for (const key of Object.keys(packets)) packets[key] = 0;
@@ -289,11 +290,16 @@ async function commandSoft(bot, line, pattern, timeoutMs = 1500) {
 
 function rcon(commandLine) {
   if (!rconHost) throw new Error('falta --rcon-host para los comandos administrativos');
-  return execFileSync(
-    'python3',
-    ['loadtest/server/rcon.py', commandLine, rconPassword, rconHost, rconPort],
-    { encoding: 'utf8', timeout: 10000 },
-  ).trim();
+  const started = Date.now();
+  try {
+    return execFileSync(
+      'python3',
+      ['loadtest/server/rcon.py', commandLine, rconPassword, rconHost, rconPort],
+      { encoding: 'utf8', timeout: 10000 },
+    ).trim();
+  } finally {
+    lastRconMs = Date.now() - started;
+  }
 }
 
 function waitForUi(timeoutMs) {
@@ -410,12 +416,15 @@ function finish(ok, reason, extra) {
     // la procesa el tick de 1 s; la UI debe reaccionar en el tick siguiente.
     const sotwStartWatch = beginWatch('sotw_start');
     rcon('sotw start 6');
+    const sotwStartRconMs = lastRconMs;
     await waitForFirstPacket(sotwStartWatch, 2000, () => sidebarHas(botA, 'SOTW'));
     const sotwStarted = sidebarHas(botA, 'SOTW');
     const sotwStartLines = sidebarLines(botA);
+    const sotwStartMessage = botA.messages.find((line) => /SOTW has been started/i.test(line)) || null;
     const sotwStartOk = sotwStartWatch.firstPacketMs !== null
       && sotwStartWatch.after.scoreboard_team + sotwStartWatch.after.scoreboard_score > 0
-      && sotwStarted;
+      && sotwStarted
+      && Boolean(sotwStartMessage);
 
     // Empezar a observar antes de que venza el timer (6 s), para no perder
     // los paquetes de la expiración.
@@ -424,10 +433,15 @@ function finish(ok, reason, extra) {
     await waitForFirstPacket(sotwEndWatch, 4000, () => !sidebarHas(botA, 'SOTW'));
     const sotwEnded = !sidebarHas(botA, 'SOTW');
     const sotwEndLines = sidebarLines(botA);
+    // La línea la quita el pase de 5 Hz; el mensaje de fin lo emite el tick
+    // de 1 s, así que damos margen antes de cerrar el proceso.
+    await sleep(1200);
+    const sotwEndMessage = botA.messages.find((line) => /SOTW has ended/i.test(line)) || null;
     const sotwEndOk = sotwEndWatch.firstPacketMs !== null
       && sotwEndWatch.after.scoreboard_team + sotwEndWatch.after.scoreboard_score > 0
       && sotwStarted
-      && sotwEnded;
+      && sotwEnded
+      && Boolean(sotwEndMessage);
 
     if (!sotwStartOk) problems.push('SOTW no apareció en el sidebar');
     if (!sotwEndOk) problems.push('SOTW no desapareció del sidebar');
@@ -439,11 +453,14 @@ function finish(ok, reason, extra) {
       unclaim: unclaimResult,
       sotw: {
         start: sotwStartWatch,
+        rcon_ms: sotwStartRconMs,
         start_line_seen: sotwStarted,
         start_lines: sotwStartLines,
+        start_message: sotwStartMessage,
         end: sotwEndWatch,
         end_line_cleared: sotwEnded,
         end_lines: sotwEndLines,
+        end_message: sotwEndMessage,
       },
     });
   } catch (error) {
