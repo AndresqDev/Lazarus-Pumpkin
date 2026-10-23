@@ -3700,18 +3700,14 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
         let location = core::location(player);
 
         let Some(id) = guard.factions.by_member(uuid).map(|f| f.id.clone()) else {
-            let msg = guard.raw.language.string("FACTIONS.NOT_IN_FACTION_SELF");
+            let msg = guard.lang.faction_not_in.clone();
             drop(guard);
             return reply(sender, format!("{prefix}{msg}"));
         };
 
         let role = guard.factions.get(&id).and_then(|f| f.member(uuid)).map(|m| m.role);
         if role.map(|r| r.is_at_least(Role::CoLeader)) != Some(true) {
-            let msg = utils::replace(
-                &guard.raw.language.string("FACTIONS.NO_PERMISSION"),
-                "<role>",
-                Role::CoLeader.name(),
-            );
+            let msg = utils::replace(&guard.lang.faction_no_permission, "<role>", Role::CoLeader.name());
             drop(guard);
             return reply(sender, format!("{prefix}{msg}"));
         }
@@ -3722,13 +3718,13 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
         let member_count = guard.factions.get(&id).map(|f| f.members.len()).unwrap_or(1);
 
         if claim_count >= max_claims || claim_count >= member_count * per_player {
-            let msg = guard.raw.language.string("FACTIONS.CLAIM_MAX_CLAIMS_EXCEEDED");
+            let msg = guard.lang.faction_claim_limit.clone();
             drop(guard);
             return reply(sender, format!("{prefix}{msg}"));
         }
 
         if core::dimension_of(&location.world) != core::Dimension::Overworld {
-            let msg = guard.raw.language.string("FACTIONS.CLAIM_CAN_CLAIM_ONLY_IN_OVERWORLD");
+            let msg = guard.lang.faction_claim_only_overworld.clone();
             drop(guard);
             return reply(sender, format!("{prefix}{msg}"));
         }
@@ -3739,13 +3735,13 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
         let claim = Claim::new(location.world.clone(), x1, x1 + 15, z1, z1 + 15);
 
         if !crate::listeners::interact::is_selection_connected(&guard.claims, &id, &claim, guard.raw.config.bool("FACTION_CLAIM.MUST_BE_CONNECTED")) {
-            let msg = guard.raw.language.string("FACTIONS.CLAIM_CLAIM_NOT_CONNECTED");
+            let msg = guard.lang.faction_claim_not_connected.clone();
             drop(guard);
             return reply(sender, format!("{prefix}{msg}"));
         }
 
         if guard.claims.overlaps(&claim) {
-            let msg = guard.raw.language.string("FACTIONS.CLAIM_CLAIM_OVERLAPPING");
+            let msg = guard.lang.faction_claim_overlap.clone();
             drop(guard);
             return reply(sender, format!("{prefix}{msg}"));
         }
@@ -3754,11 +3750,7 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
         let ignore_roads = guard.raw.config.bool("FACTION_CLAIM.CLAIM_BUFFER_IGNORE_ROADS");
         let ignore = if ignore_roads { guard.factions.road_ids() } else { Vec::new() };
         if guard.claims.within_buffer(&claim, buffer, &id, &ignore) {
-            let msg = utils::replace(
-                &guard.raw.language.string("FACTIONS.CLAIM_CLAIM_BUFFER"),
-                "<buffer>",
-                &buffer.to_string(),
-            );
+            let msg = utils::replace(&guard.lang.faction_claim_buffer, "<buffer>", &buffer.to_string());
             drop(guard);
             return reply(sender, format!("{prefix}{msg}"));
         }
@@ -3767,7 +3759,7 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
         let price = (size as f64 * guard.raw.config.double("FACTION_CLAIM.CLAIM_PRICE_PER_BLOCK")) as i64;
         let balance = guard.factions.get(&id).map(|f| f.balance).unwrap_or(0);
         if balance < price {
-            let msg = guard.raw.language.string("FACTIONS.CLAIM_NOT_ENOUGH_MONEY");
+            let msg = guard.lang.faction_claim_not_enough_money.clone();
             drop(guard);
             return reply(sender, format!("{prefix}{msg}"));
         }
@@ -3778,7 +3770,7 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
 
         let player_name = core::name_of(player);
         let msg = utils::replace_all(
-            &guard.raw.language.string("FACTIONS.CLAIM_CLAIMED"),
+            &guard.lang.faction_claim_claimed,
             &[
                 ("<player>", &player_name),
                 ("<location1>", &format!("{}, {}", claim.min_x, claim.min_z)),

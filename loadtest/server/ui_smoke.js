@@ -77,13 +77,36 @@ function stripColors(value) {
   return plainText(value).replace(/§[0-9a-fk-or]/gi, '');
 }
 
-function sidebarHas(text) {
-  const needle = text.toLowerCase();
-  for (const team of teams.values()) {
-    const line = `${stripColors(team.prefix)}${stripColors(team.suffix)}`.toLowerCase();
-    if (line.includes(needle)) return true;
+function teamMode(mode) {
+  if (typeof mode === 'number') {
+    return ['add', 'remove', 'change', 'join', 'leave'][mode] || 'change';
   }
-  return false;
+  return String(mode);
+}
+
+/**
+ * Devuelve las líneas visibles del sidebar de Mineflayer. `bot.scoreboard.sidebar`
+ * ya resuelve el equipo de cada entrada; no dependemos del orden ni de que el
+ * texto quepa en prefix (las líneas largas se parten en prefix+suffix).
+ */
+function sidebarLines(bot) {
+  const board = bot && bot.scoreboard && bot.scoreboard.sidebar;
+  if (!board) return [];
+  return board.items.map((item) => {
+    try {
+      const component = item.displayName || item.name;
+      return stripColors(component && typeof component.toString === 'function'
+        ? component.toString()
+        : component);
+    } catch (_) {
+      return '';
+    }
+  });
+}
+
+function sidebarHas(bot, text) {
+  const needle = text.toLowerCase();
+  return sidebarLines(bot).some((line) => line.toLowerCase().includes(needle));
 }
 
 function noteWatch() {
@@ -169,9 +192,10 @@ function createBot(username) {
     noteWatch();
     const name = packet.team;
     if (!name) return;
-    if (packet.mode === 1) {
+    const mode = teamMode(packet.mode);
+    if (mode === 'remove') {
       teams.delete(name);
-    } else {
+    } else if (mode === 'add' || mode === 'change') {
       teams.set(name, {
         prefix: packet.prefix || '',
         suffix: packet.suffix || '',
@@ -355,8 +379,9 @@ function finish(ok, reason, extra) {
     // la procesa el tick de 1 s; la UI debe reaccionar en el tick siguiente.
     const sotwStartWatch = beginWatch('sotw_start');
     rcon('sotw start 6');
-    await waitForFirstPacket(sotwStartWatch, 2000, () => sidebarHas('SOTW'));
-    const sotwStarted = sidebarHas('SOTW');
+    await waitForFirstPacket(sotwStartWatch, 2000, () => sidebarHas(botA, 'SOTW'));
+    const sotwStarted = sidebarHas(botA, 'SOTW');
+    const sotwStartLines = sidebarLines(botA);
     const sotwStartOk = sotwStartWatch.firstPacketMs !== null
       && sotwStartWatch.after.scoreboard_team + sotwStartWatch.after.scoreboard_score > 0
       && sotwStarted;
@@ -365,10 +390,12 @@ function finish(ok, reason, extra) {
     // los paquetes de la expiración.
     await sleep(3500);
     const sotwEndWatch = beginWatch('sotw_end');
-    await waitForFirstPacket(sotwEndWatch, 4000, () => !sidebarHas('SOTW'));
-    const sotwEnded = !sidebarHas('SOTW');
+    await waitForFirstPacket(sotwEndWatch, 4000, () => !sidebarHas(botA, 'SOTW'));
+    const sotwEnded = !sidebarHas(botA, 'SOTW');
+    const sotwEndLines = sidebarLines(botA);
     const sotwEndOk = sotwEndWatch.firstPacketMs !== null
       && sotwEndWatch.after.scoreboard_team + sotwEndWatch.after.scoreboard_score > 0
+      && sotwStarted
       && sotwEnded;
 
     const ok = claimOk && unclaimOk && sotwStartOk && sotwEndOk;
@@ -389,8 +416,10 @@ function finish(ok, reason, extra) {
       sotw: {
         start: sotwStartWatch,
         start_line_seen: sotwStarted,
+        start_lines: sotwStartLines,
         end: sotwEndWatch,
         end_line_cleared: sotwEnded,
+        end_lines: sotwEndLines,
       },
     });
   } catch (error) {
