@@ -157,13 +157,15 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   original `PlayerTab_1_8` only removed real players below 1.7, so this is a
   deliberate 1.8-only deviation.
 * **Tab slots are added once.** The native companion sends `ADD_PLAYER` (with
-  the skin textures) only the first time a slot appears; later text/order
-  changes send `UPDATE_DISPLAY_NAME`/`UPDATE_LIST_PRIORITY` only. 1.8 rebuilds
+  the skin textures) only the first time a slot appears; later text changes
+  send `UPDATE_DISPLAY_NAME` only, without `UPDATE_LIST_ORDER`. 1.8 rebuilds
   the player-info entry — and restarts the skin download — on every add, which
-  is what made heads load slowly. One full resend per joining player covers the
+  is what made heads load slowly. ViaVersion discards display-only updates that
+  carry the list-order action for 1.8 clients; removing it made claim updates
+  visible in the smoke. One full resend per joining player covers the
   join/readiness window instead of the previous 8×500 ms loop.
 * **Changed slots are grouped by action set.** A viewer normally receives one
-  `CPlayerInfoUpdate` with every changed display/order entry, plus a second one
+  `CPlayerInfoUpdate` with every changed display-name entry, plus a second one
   only when new profiles are added with the skin. The native companion polls
   `tab_state.json` every 100 ms and uses the nanosecond modification time, so a
   same-length write within the same second is not missed.
@@ -172,6 +174,16 @@ Legend: ✅ ported · 🟡 partial/simplified · ⬜ roadmap (not ported yet)
   sidebar and tab outside the global state lock. A timer starts/cancels or a
   claim is added/removed on the next tick instead of waiting up to 1 s (tab) or
   200 ms (sidebar); the native tab detects the flushed file within 100 ms.
+* **Immediate-refresh smoke (2 clients, 1.8.9).** Run `39891877360` with
+  `native-tab-hcf-f826aaf` (SHA-256
+  `d5c561b985b2c697bc1071282e3c9aa0b8cfca60b1c08f6d33470796e7aeb08f`)
+  finished `ok=true`. Claim produced 2 `player_info` + 6 scoreboard packets
+  with both tab and sidebar changed in 131 ms; unclaim produced 2 + 12 in
+  111 ms. The SOTW start line and message arrived 3 ms after the RCON response,
+  and expiry cleared the line and sent the end message. Join grouping was 10
+  `player_info` packets for 2 bots. This does **not** validate 32–100 real
+  players: `tab_lz=80` is an artificial layout, not 80 players, and there is no
+  scale measurement of fan-out or JSON writes.
 * **Single-chunk claiming** is replaced by the original **selection wand**: `/f claim`
   gives a golden-hoe wand; left/right click set positions, sneak + left-click buys.
   Selection pillars and claim maps are rendered entirely client-side (`glass.rs`).
