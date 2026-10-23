@@ -258,6 +258,27 @@ jobs:
             nohup python3 ../loadtest/server/sampler.py --out sampler.csv --interval 5 > sampler.log 2>&1 &
           echo "SAMPLER_PID=$!" >> "$GITHUB_ENV"
 
+          # Snapshot del estado del tab para diagnosticar diffs del plugin
+          # nativo. Solo copia cuando cambia (mtime+tamaño), no por cada 100 ms.
+          mkdir -p tab_snapshots
+          (
+            i=0
+            last=""
+            while true; do
+              if [ -f plugins/data/lazarus/tab_state.json ]; then
+                sig=$(stat -c '%y:%s' plugins/data/lazarus/tab_state.json 2>/dev/null || true)
+                if [ -n "$sig" ] && [ "$sig" != "$last" ]; then
+                  cp plugins/data/lazarus/tab_state.json "tab_snapshots/$(printf '%05d' "$i").json" 2>/dev/null || true
+                  i=$((i + 1))
+                  last="$sig"
+                  if [ "$i" -ge 2000 ]; then i=0; fi
+                fi
+              fi
+              sleep 0.1
+            done
+          ) >/dev/null 2>&1 &
+          echo "SNAPSHOT_PID=$!" >> "$GITHUB_ENV"
+
           {
             echo "## Pumpkin listo (split)"
             echo ""
@@ -288,7 +309,7 @@ jobs:
         if: always()
         run: |
           set +e
-          for p in "${SAMPLER_PID:-}" "${PUMPKIN_PID:-}"; do
+          for p in "${SNAPSHOT_PID:-}" "${SAMPLER_PID:-}" "${PUMPKIN_PID:-}"; do
             [ -n "$p" ] && kill "$p" 2>/dev/null
           done
           sleep 8
@@ -309,6 +330,7 @@ jobs:
             server/plugins/data/lazarus/config.yml
             server/plugins/data/lazarus/utilities.yml
             server/plugins/data/lazarus/tab_state.json
+            server/tab_snapshots/*.json
           if-no-files-found: warn
           retention-days: 7
 
