@@ -58,6 +58,10 @@ on:
         description: 'PVP_PROTECTION.DURATION (0 = sin proteccion, bots se matan)'
         required: false
         default: '3600'
+      warzone_radius:
+        description: 'WARZONE_RADIUS.OVERWORLD para el smoke (vacio = default)'
+        required: false
+        default: ''
       hcf:
         description: 'false=upstream; true=HCF on; hcf_off=binario HCF sin perfil'
         required: true
@@ -85,6 +89,7 @@ env:
   DEATHBAN_MINUTES: ${{ github.event.inputs.deathban_minutes }}
   PACKET_LIMIT: ${{ github.event.inputs.packet_limit }}
   PVP_PROTECTION_SECONDS: ${{ github.event.inputs.pvp_protection_seconds }}
+  WARZONE_RADIUS: ${{ github.event.inputs.warzone_radius }}
   HCF: ${{ github.event.inputs.hcf }}
   NATIVE_TAB_URL: ${{ github.event.inputs.native_tab_url }}
   PUMPKIN_TAG: '0.2.0+26.3-26.51'
@@ -233,6 +238,13 @@ jobs:
             fi
             if [ "${PVP_PROTECTION_SECONDS:-3600}" != "3600" ]; then
               sed -i "/^PVP_PROTECTION:/,/^[A-Z]/ s/^  DURATION: .*/  DURATION: ${PVP_PROTECTION_SECONDS}/" \
+                plugins/data/lazarus/config.yml
+              changed=true
+            fi
+            # El smoke de claim necesita reclamar fuera de la warzone: el tab
+            # muestra <faction> y dentro de la warzone sigue diciendo Warzone.
+            if [ -n "${WARZONE_RADIUS:-}" ]; then
+              sed -i "/^WARZONE_RADIUS:/,/^[A-Z]/ s/^  OVERWORLD: .*/  OVERWORLD: ${WARZONE_RADIUS}/" \
                 plugins/data/lazarus/config.yml
               changed=true
             fi
