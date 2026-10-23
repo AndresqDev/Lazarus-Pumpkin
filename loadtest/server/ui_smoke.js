@@ -232,6 +232,21 @@ async function command(bot, line, pattern, label, timeoutMs = 6000) {
   return null;
 }
 
+/**
+ * Igual que `command`, pero no falla si el comando no envía mensaje. El smoke
+ * de UI decide por los paquetes de tab/sidebar; el texto se conserva como
+ * diagnóstico. Sirve también para detectar mensajes de éxito vacíos.
+ */
+async function commandSoft(bot, line, pattern, timeoutMs = 1500) {
+  const fromIndex = bot.messages.length;
+  bot.chat(line);
+  try {
+    return await waitFor(bot, pattern, timeoutMs, line, fromIndex);
+  } catch (_) {
+    return null;
+  }
+}
+
 function rcon(commandLine) {
   if (!rconHost) throw new Error('falta --rcon-host para los comandos administrativos');
   return execFileSync(
@@ -308,7 +323,7 @@ function finish(ok, reason, extra) {
     await sleep(300);
 
     const claimWatch = beginWatch('claim');
-    await command(botA, '/f claimchunk', /claimed|reclam/i, 'f claimchunk');
+    const claimReply = await commandSoft(botA, '/f claimchunk', /claimed|reclam/i);
     await waitForFirstPacket(claimWatch, 2000);
     const claimTabPackets = claimWatch.after.player_info;
     const claimScorePackets = claimWatch.after.scoreboard_team + claimWatch.after.scoreboard_score;
@@ -317,12 +332,12 @@ function finish(ok, reason, extra) {
     if (!claimOk) {
       return finish(false, 'el claim no refrescó tab y sidebar en la ventana', {
         join_player_info_packets: joinPackets.player_info,
-        claim: claimWatch,
+        claim: { ...claimWatch, reply: claimReply },
       });
     }
 
     const unclaimWatch = beginWatch('unclaim');
-    await command(botA, '/f unclaim', /unclaim|removed|removid/i, 'f unclaim');
+    const unclaimReply = await commandSoft(botA, '/f unclaim', /unclaim|removed|removid/i);
     await waitForFirstPacket(unclaimWatch, 2000);
     const unclaimTabPackets = unclaimWatch.after.player_info;
     const unclaimScorePackets = unclaimWatch.after.scoreboard_team + unclaimWatch.after.scoreboard_score;
@@ -331,8 +346,8 @@ function finish(ok, reason, extra) {
     if (!unclaimOk) {
       return finish(false, 'el unclaim no refrescó tab y sidebar en la ventana', {
         join_player_info_packets: joinPackets.player_info,
-        claim: claimWatch,
-        unclaim: unclaimWatch,
+        claim: { ...claimWatch, reply: claimReply },
+        unclaim: { ...unclaimWatch, reply: unclaimReply },
       });
     }
 
@@ -361,11 +376,13 @@ function finish(ok, reason, extra) {
       join_player_info_packets: joinPackets.player_info,
       claim: {
         ...claimWatch,
+        reply: claimReply,
         tab_packets: claimTabPackets,
         score_packets: claimScorePackets,
       },
       unclaim: {
         ...unclaimWatch,
+        reply: unclaimReply,
         tab_packets: unclaimTabPackets,
         score_packets: unclaimScorePackets,
       },

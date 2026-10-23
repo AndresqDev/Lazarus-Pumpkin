@@ -3778,7 +3778,7 @@ fn claim_chunk(sender: &CommandSender, server: &Server, player: &Player, uuid: &
 
         let player_name = core::name_of(player);
         let msg = utils::replace_all(
-            &guard.raw.language.string("FACTIONS.CLAIM_CLAIM_CLAIMED"),
+            &guard.raw.language.string("FACTIONS.CLAIM_CLAIMED"),
             &[
                 ("<player>", &player_name),
                 ("<location1>", &format!("{}, {}", claim.min_x, claim.min_z)),
