@@ -372,7 +372,13 @@ function finish(ok, reason, extra) {
     const claimBeforeTab = tabSignature();
     const claimWatch = beginWatch('claim');
     const claimReply = await commandSoft(botA, '/f claimchunk', /claimed|reclam/i);
-    await waitForFirstPacket(claimWatch, 2000);
+    // `waitForFirstPacket` corta con el primer paquete de cualquier tipo. El
+    // sidebar llega en el tick (~50 ms) y el tab por el polling nativo
+    // (~100 ms), así que hay que esperar a que existan ambos deltas.
+    await waitForFirstPacket(claimWatch, 2000, () =>
+      packets.player_info > claimWatch.before.player_info
+      && packets.scoreboard_team + packets.scoreboard_score >
+        claimWatch.before.scoreboard_team + claimWatch.before.scoreboard_score);
     const claimAfterLines = sidebarLines(botA);
     const claimAfterTab = tabSignature();
     const claimTabPackets = claimWatch.after.player_info;
@@ -394,7 +400,10 @@ function finish(ok, reason, extra) {
     const unclaimBeforeTab = tabSignature();
     const unclaimWatch = beginWatch('unclaim');
     const unclaimReply = await commandSoft(botA, '/f unclaim', /unclaim|removed|removid/i);
-    await waitForFirstPacket(unclaimWatch, 2000);
+    await waitForFirstPacket(unclaimWatch, 2000, () =>
+      packets.player_info > unclaimWatch.before.player_info
+      && packets.scoreboard_team + packets.scoreboard_score >
+        unclaimWatch.before.scoreboard_team + unclaimWatch.before.scoreboard_score);
     const unclaimAfterLines = sidebarLines(botA);
     const unclaimAfterTab = tabSignature();
     const unclaimTabPackets = unclaimWatch.after.player_info;
