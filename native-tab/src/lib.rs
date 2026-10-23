@@ -347,7 +347,7 @@ fn send_full_viewer(server: &Arc<Server>, state: &Arc<Mutex<Rendered>>, viewer: 
 // ---------------------------------------------------------------------------
 
 /// Sends all changed slots in at most two packets: one for entries that need
-/// `ADD_PLAYER` (skin included) and one for display/order-only updates.
+/// `ADD_PLAYER` (skin included) and one for display-only updates.
 ///
 /// `viewer = None` broadcasts the global slots; `Some(uuid)` sends only to that
 /// player. The entries in a packet are independent profiles, so one viewer can
@@ -413,10 +413,11 @@ fn send_changes(server: &Arc<Server>, viewer: Option<Uuid>, changes: &[(u8, Slot
                         PlayerAction::UpdateListOrder(VarInt(orders[i])),
                     ]
                 } else {
-                    vec![
-                        PlayerAction::UpdateDisplayName(Some(&texts[i])),
-                        PlayerAction::UpdateListOrder(VarInt(orders[i])),
-                    ]
+                    // The tab order of an artificial slot never changes after
+                    // the first ADD_PLAYER. Keeping `UpdateListOrder` in this
+                    // packet made ViaVersion drop the whole display-name update
+                    // for 1.8 clients (1.8 has no list-order field).
+                    vec![PlayerAction::UpdateDisplayName(Some(&texts[i]))]
                 }
             })
             .collect();
@@ -433,7 +434,7 @@ fn send_changes(server: &Arc<Server>, viewer: Option<Uuid>, changes: &[(u8, Slot
                 | PlayerInfoFlags::UPDATE_DISPLAY_NAME
                 | PlayerInfoFlags::UPDATE_LIST_PRIORITY
         } else {
-            PlayerInfoFlags::UPDATE_DISPLAY_NAME | PlayerInfoFlags::UPDATE_LIST_PRIORITY
+            PlayerInfoFlags::UPDATE_DISPLAY_NAME
         };
         let packet = CPlayerInfoUpdate::new(flags.bits(), &players);
 
