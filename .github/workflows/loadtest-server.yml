@@ -510,6 +510,12 @@ jobs:
           node loadtest/server/ui_smoke.js \
             --host 127.0.0.1 --port 25565 --rcon-host "${SRV_IP}" --seconds 75
 
+      - name: Smoke de energía de clase (Bard)
+        run: |
+          set -euo pipefail
+          node loadtest/server/class_smoke.js \
+            --host 127.0.0.1 --port 25565 --rcon-host "${SRV_IP}" --seconds 45
+
       - name: Mantener Velocity arriba
         run: |
           set -uo pipefail

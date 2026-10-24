@@ -104,14 +104,15 @@ pub fn tick(server: &Server) {
     }
 
     if needs_tab {
+        let online = players.len();
         if tab_all {
             for player in &players {
-                tab::update(player, server);
+                tab::update_with_online_count(player, server, online);
             }
         } else {
             for player in &players {
                 if tab_players.contains(&core::uuid_of(player)) {
-                    tab::update(player, server);
+                    tab::update_with_online_count(player, server, online);
                 }
             }
         }

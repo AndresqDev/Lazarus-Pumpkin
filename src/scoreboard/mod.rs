@@ -66,7 +66,10 @@ pub fn update(player: &Player, server: &Server) {
 
     let uuid = crate::utils::core::uuid_of(player);
 
-    let lines = {
+    // Build the desired lines and read the previous cache under one read lock:
+    // the 5 Hz pass already touches both, and this avoids a second lock/unlock
+    // per player.
+    let (lines, previous) = {
         let guard = state().read().unwrap();
         if !guard.sidebar.enabled {
             return;
@@ -79,12 +82,10 @@ pub fn update(player: &Player, server: &Server) {
             return;
         }
 
-        build_lines(&guard, player, server, &uuid)
-    };
-
-    let previous = {
-        let guard = state().read().unwrap();
-        guard.scoreboard_cache.get(&uuid).cloned()
+        (
+            build_lines(&guard, player, server, &uuid),
+            guard.scoreboard_cache.get(&uuid).cloned(),
+        )
     };
     if previous.as_deref() == Some(lines.as_slice()) {
         return;
@@ -117,19 +118,28 @@ fn render(player: &Player, previous: Option<&[String]>, lines: &[String]) {
         let team = team_name(slot);
         let entry = entry_name(slot);
 
-        match new {
-            Some(line) => {
+        match (old, new) {
+            (None, Some(line)) => {
+                // First time this slot is populated: join the team and assign
+                // its score. Later content changes only need `update_team`.
                 let (prefix, suffix) = split_line(line);
                 board.update_team(&team, team_settings(&prefix, &suffix));
                 board.add_player_to_team(&team, &entry);
                 board.update_score(&entry, OBJECTIVE, (SLOTS - slot) as i32, None);
             }
-            None => {
+            (Some(_), Some(line)) => {
+                // The entry and its score are already on the client. 1.8
+                // renders the row from the team prefix/suffix, so resending
+                // the membership and score here only adds packets.
+                let (prefix, suffix) = split_line(line);
+                board.update_team(&team, team_settings(&prefix, &suffix));
+            }
+            (Some(_), None) => {
                 // Remove the row entirely so no blank line is reserved.
                 board.remove_score(&entry, OBJECTIVE);
                 board.remove_player_from_team(&team, &entry);
-                board.update_team(&team, team_settings("", ""));
             }
+            (None, None) => {}
         }
     }
 }

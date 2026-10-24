@@ -474,6 +474,10 @@ impl PvpClassManager {
             .unwrap_or(120.0);
         let energy = self.bard_energy.entry(uuid.clone()).or_insert(0.0);
         *energy = (*energy + POWER_GAIN).min(max);
+        // Energy changes once per second in this tick; queue the sidebar so the
+        // next 50 ms UI pass renders it instead of waiting up to 200 ms for the
+        // generic 5 Hz pass.
+        crate::ui::scoreboard_player(&uuid);
 
         // `canBard` for holdables: not under pvp protection, not under SOTW
         // protection, not in the safezone. NOTE: combat tag is intentionally
@@ -689,6 +693,9 @@ impl PvpClassManager {
                 } else {
                     self.warmups
                         .insert(uuid.clone(), (kind, now + pvp_class.warmup as i64 * 1000));
+                    // Show the warmup line on the next UI tick, not on the next
+                    // 5 Hz sidebar pass.
+                    crate::ui::scoreboard_player(&uuid);
                     core::send(
                         player,
                         &utils::replace(
@@ -705,6 +712,7 @@ impl PvpClassManager {
             if let Some((warming, _)) = self.warmups.get(&uuid).copied() {
                 if warming == kind {
                     self.warmups.remove(&uuid);
+                    crate::ui::scoreboard_player(&uuid);
                     core::send(
                         player,
                         &utils::replace(
@@ -752,6 +760,9 @@ impl PvpClassManager {
             let Some((kind, _)) = self.warmups.remove(&uuid) else {
                 continue;
             };
+            // Replace the warmup line with the active class line (or remove it
+            // if activation is denied by the faction limit).
+            crate::ui::scoreboard_player(&uuid);
             if let Some(player) = pumpkin_plugin_api::uuid::parse(&uuid)
                 .and_then(|id| server.get_player_by_uuid(id))
             {
@@ -839,7 +850,8 @@ impl PvpClassManager {
         if kind == ClassKind::Mage {
             self.mage_energy.insert(uuid.clone(), 0.0);
         }
-        self.active.insert(uuid, kind);
+        self.active.insert(uuid.clone(), kind);
+        crate::ui::scoreboard_player(&uuid);
         core::send(
             player,
             &utils::replace(&language.string("PVP_CLASSES.ACTIVATED"), "<name>", kind.name()),
@@ -871,6 +883,7 @@ impl PvpClassManager {
             self.mage_energy.remove(&uuid);
         }
         self.active.remove(&uuid);
+        crate::ui::scoreboard_player(&uuid);
 
         // Restore the effects the player had before the class activated.
         if let Some(snapshot) = self.effect_cache.remove(&uuid) {
@@ -1228,6 +1241,9 @@ pub fn bard_click(server: &Server, player: &Player) {
             .timers
             .activate(&uuid, crate::timer::TimerType::CombatTag, seconds);
     }
+    drop(guard);
+    // The energy cost and cooldown are now visible; render on the next UI tick.
+    crate::ui::scoreboard_player(&uuid);
 }
 
 fn language_prefix() -> String {
@@ -1546,6 +1562,9 @@ pub fn mage_click(server: &Server, player: &Player) {
         .classes
         .mage_cooldowns
         .insert((uuid.clone(), clickable.material.clone()), now + clickable.cooldown_ms);
+    drop(guard);
+    // The energy cost and cooldown are now visible; render on the next UI tick.
+    crate::ui::scoreboard_player(&uuid);
 }
 
 /// Handles the Bomber TNT gun (right-click): spawns a primed TNT.

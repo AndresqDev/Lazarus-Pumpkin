@@ -43,16 +43,23 @@ pub fn setup(player: &Player, server: &Server) {
         }
     }
 
-    rebuild(player, server);
+    rebuild(player, server, None);
 }
 
 /// Per-player dynamic rebuild (called once per second from `tasks::tick`, and
 /// immediately for the affected players by [`crate::ui`]).
 pub fn update(player: &Player, server: &Server) {
-    rebuild(player, server);
+    rebuild(player, server, None);
 }
 
-fn rebuild(player: &Player, server: &Server) {
+/// Same as [`update`], but with the online count already measured by the
+/// caller. The per-second rebuild runs for every player, so resolving
+/// `<online>` here avoids one `get_all_players()` allocation per player.
+pub fn update_with_online_count(player: &Player, server: &Server, online: usize) {
+    rebuild(player, server, Some(online));
+}
+
+fn rebuild(player: &Player, server: &Server, online: Option<usize>) {
     let uuid = crate::utils::core::uuid_of(player);
 
     let lines = {
@@ -61,7 +68,7 @@ fn rebuild(player: &Player, server: &Server) {
             return;
         }
 
-        let mut lines = compute_lines(&guard, player, server);
+        let mut lines = compute_lines(&guard, player, server, online);
         apply_modules(&guard, player, server, &mut lines);
         lines
     };
@@ -132,13 +139,17 @@ struct ResolveCtx {
     loc_z: i32,
     yaw: f32,
     territory: String,
-    online: usize,
-    max_players: String,
+    online: String,
     name: String,
 }
 
 /// Builds the 80 configured lines (4 columns of 20), resolving placeholders.
-fn compute_lines(guard: &AppState, player: &Player, server: &Server) -> Vec<String> {
+fn compute_lines(
+    guard: &AppState,
+    player: &Player,
+    server: &Server,
+    online: Option<usize>,
+) -> Vec<String> {
     let tab = &guard.raw.tab;
 
     let mut flat: Vec<String> = Vec::with_capacity(SLOTS);
@@ -148,13 +159,18 @@ fn compute_lines(guard: &AppState, player: &Player, server: &Server) -> Vec<Stri
         flat.extend(lines);
     }
 
-    let ctx = resolve_ctx(guard, player, server);
+    let ctx = resolve_ctx(guard, player, server, online);
     let mut out: Vec<String> = flat.iter().map(|line| resolve(line, &ctx)).collect();
     out.resize(SLOTS, String::new());
     out
 }
 
-fn resolve_ctx(guard: &AppState, player: &Player, server: &Server) -> ResolveCtx {
+fn resolve_ctx(
+    guard: &AppState,
+    player: &Player,
+    server: &Server,
+    online: Option<usize>,
+) -> ResolveCtx {
     let uuid = crate::utils::core::uuid_of(player);
 
     let (kills, deaths, lives, balance) = guard
@@ -182,8 +198,8 @@ fn resolve_ctx(guard: &AppState, player: &Player, server: &Server) -> ResolveCtx
         crate::utils::core::territory_display_guard(guard, &territory, viewer.as_deref())
     };
 
-    let online = server.get_all_players().len();
-    let max_players = server.get_max_players().to_string();
+    let online = online.unwrap_or_else(|| server.get_all_players().len());
+    let online = format!("{}/{}", online, server.get_max_players());
     let name = crate::utils::core::name_of(player);
 
     ResolveCtx {
@@ -196,7 +212,6 @@ fn resolve_ctx(guard: &AppState, player: &Player, server: &Server) -> ResolveCtx
         yaw: location.yaw,
         territory,
         online,
-        max_players,
         name,
     }
 }
@@ -220,7 +235,7 @@ fn resolve(line: &str, ctx: &ResolveCtx) -> String {
         .replace("<lives>", &ctx.lives)
         .replace("<balance>", &ctx.balance)
         .replace("<faction>", &ctx.territory)
-        .replace("<online>", &format!("{}/{}", ctx.online, ctx.max_players));
+        .replace("<online>", &ctx.online);
     out = out.replace("<player>", &ctx.name);
     out
 }

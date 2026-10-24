@@ -168,14 +168,15 @@ fn tick(server: &Server) {
     // world (spawn cancellation is unavailable, see the limiter module docs).
     crate::handlers::limiter::enforce_disabled_entities(server);
 
-    for player in server.get_all_players() {
-        tab::update(&player, server);
+    let players = server.get_all_players();
+    let online = players.len();
+    for player in &players {
+        tab::update_with_online_count(player, server, online);
     }
 
     // PvP classes: per-tick armour check + Bard holdables/clickable energy.
     {
         let mut guard = state().write().unwrap();
-        let players = server.get_all_players();
 
         // Precompute the per-player flags (avoids borrowing fields twice).
         let flags: Vec<(bool, bool, bool)> = players
@@ -224,6 +225,9 @@ fn tick(server: &Server) {
                     .unwrap_or(120.0);
                 let energy = classes.mage_energy.entry(uuid.clone()).or_insert(max);
                 *energy = (*energy + crate::classes::POWER_GAIN).min(max);
+                // The value changed this second; let the next 50 ms UI pass
+                // render it without waiting for the 5 Hz sidebar sweep.
+                crate::ui::scoreboard_player(&uuid);
             }
         }
         classes.tick_warmups(&server, &raw.language, &raw.config, factions);
