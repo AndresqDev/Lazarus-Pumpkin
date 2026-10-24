@@ -29,11 +29,15 @@ const rconPort = arg('rcon-port', '25575');
 const seconds = Number(arg('seconds', '45'));
 const username = 'SmokeClass';
 
+// `/item replace entity` writes the armour slot directly and sends the
+// equipment update. Unlike Mineflayer's `bot.equip`, it does not depend on a
+// window-click transaction, which the proxy/server combination does not
+// confirm reliably for this bot.
 const armor = [
-  { item: 'golden_helmet', destination: 'head' },
-  { item: 'golden_chestplate', destination: 'torso' },
-  { item: 'golden_leggings', destination: 'legs' },
-  { item: 'golden_boots', destination: 'feet' },
+  { item: 'golden_helmet', slot: 'armor.head' },
+  { item: 'golden_chestplate', slot: 'armor.chest' },
+  { item: 'golden_leggings', slot: 'armor.legs' },
+  { item: 'golden_boots', slot: 'armor.feet' },
 ];
 
 let bot = null;
@@ -187,22 +191,13 @@ function finish(ok, reason, extra) {
     await waitSpawn(bot, 60000);
     await sleep(3000);
 
-    for (const { item } of armor) {
-      rcon(`give ${username} minecraft:${item} 1`);
-    }
-    await sleep(1000);
-
     const equipped = [];
-    for (const { item, destination } of armor) {
-      const stack = bot.inventory.items().find((entry) => {
-        const name = entry.name.replace(/^minecraft:/, '');
-        return name === item;
-      });
-      if (!stack) throw new Error(`no llegó ${item} al inventario`);
-      await bot.equip(stack, destination);
-      equipped.push(destination);
-      await sleep(100);
+    for (const { item, slot } of armor) {
+      rcon(`item replace entity ${username} ${slot} with minecraft:${item}`);
+      equipped.push(slot);
+      await sleep(150);
     }
+    await sleep(500);
 
     const warmup = await waitFor(
       () => sidebarHas(bot, 'Class Warmup') && sidebarHas(bot, 'Bard'),
@@ -232,10 +227,9 @@ function finish(ok, reason, extra) {
       problems.push('la recarga de energía no envió paquetes de sidebar');
     }
 
-    for (const destination of equipped) {
-      await bot.unequip(destination);
-      await sleep(100);
-    }
+    // `/clear` also empties `entity_equipment`, so the server's armour check
+    // deactivates the class without another window transaction.
+    rcon(`clear ${username}`);
     const deactivated = await waitFor(
       () => !sidebarHas(bot, 'Class: Bard') && !sidebarHas(bot, 'Class Warmup'),
       5000,
